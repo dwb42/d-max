@@ -594,6 +594,7 @@ MVP automated tests:
 MVP manual/smoke tests:
 - OpenClaw Gateway startup
 - MCP registration with OpenClaw
+- local stdio MCP smoke test via `npm run smoke:mcp`
 - Telegram message roundtrip
 - Telegram voice note transcription
 - Gemini TTS voice reply

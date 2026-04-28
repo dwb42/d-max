@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "tsx src/main.ts",
     "mcp": "tsx src/mcp/server.ts",
+    "smoke:mcp": "tsx scripts/mcp-smoke.ts",
     "start:container": "sh scripts/start-container.sh",
     "setup": "tsx scripts/setup-db.ts",
     "test": "vitest run",

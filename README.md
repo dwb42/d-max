@@ -45,6 +45,14 @@ Start the MCP scaffold:
 npm run mcp
 ```
 
+Run a local MCP smoke test:
+
+```bash
+npm run smoke:mcp
+```
+
+The smoke test starts the stdio MCP server, lists tools, and creates a category, project, task, and Inbox task in the configured SQLite database.
+
 ## Secrets
 
 Do not commit `.env`, Telegram bot tokens, provider API keys, local SQLite files, or OpenClaw local runtime state.
