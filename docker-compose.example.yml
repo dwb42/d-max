@@ -1,0 +1,12 @@
+services:
+  d-max:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /app/data/dmax.sqlite
+    volumes:
+      - dmax-data:/app/data
+
+volumes:
+  dmax-data:

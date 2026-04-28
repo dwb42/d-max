@@ -1,7 +1,8 @@
-node_modules/
+node_modules
+dist
+coverage
+.git
 .env
-.env.local
-.env.production
 .env.*
 !.env.example
 data/*.sqlite
@@ -10,12 +11,9 @@ data/*.sqlite-wal
 data/*.db
 data/*.db-shm
 data/*.db-wal
-dist/
-coverage/
-logs/
+logs
 *.log
-.DS_Store
 openclaw/config.local.json
 openclaw/**/*.local.json
-openclaw/**/tokens/
-openclaw/**/state/
+openclaw/**/tokens
+openclaw/**/state

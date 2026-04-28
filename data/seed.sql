@@ -1,0 +1,2 @@
+-- MVP intentionally does not seed life categories.
+-- d-max learns Dietrich's categories through onboarding.

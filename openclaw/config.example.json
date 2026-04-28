@@ -1,0 +1,42 @@
+{
+  "gateway": {
+    "mode": "local"
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/app/openclaw/workspace"
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "botToken": "${TELEGRAM_BOT_TOKEN}",
+      "dmPolicy": "pairing",
+      "groups": {
+        "*": {
+          "requireMention": true
+        }
+      }
+    }
+  },
+  "messages": {
+    "tts": {
+      "auto": "inbound",
+      "provider": "gemini",
+      "providers": {
+        "gemini": {
+          "apiKey": "${GEMINI_API_KEY}",
+          "model": "gemini-3.1-flash-tts-preview"
+        }
+      }
+    }
+  },
+  "mcp": {
+    "servers": {
+      "d-max": {
+        "command": "npm",
+        "args": ["run", "mcp"]
+      }
+    }
+  }
+}
