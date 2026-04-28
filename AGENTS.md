@@ -19,10 +19,11 @@ Use these terms consistently:
 - Project hierarchy: use `projects.parent_id`, not a separate subprojects table.
 - Category: dynamic life/business area such as Business, Family & Friends, Health & Fitness, Soul, Learning, Explorations.
 - Task: deterministic actionable unit connected to a project.
+- Brainstorm: post-MVP thinking/scoping session used to reflect, organize, and refine long-form thoughts before extracting projects or tasks.
 
 ## Data Model
 
-MVP tables:
+Completed MVP tables:
 - categories
 - projects
 - tasks
@@ -30,6 +31,10 @@ MVP tables:
 Do not add project_events in the MVP.
 
 The `projects` table must include a field called `markdown`.
+
+Post-MVP Brainstorm Mode may add:
+- brainstorms
+- brainstorm_links
 
 ## Architecture
 

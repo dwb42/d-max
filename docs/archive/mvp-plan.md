@@ -1,5 +1,15 @@
 # d-max MVP Plan
 
+Status: Completed / Archived
+
+Archived on: 2026-04-28
+
+Outcome:
+- Telegram text -> OpenClaw -> d-max MCP -> SQLite verified.
+- Telegram voice -> OpenClaw STT -> d-max MCP -> SQLite verified.
+- Telegram voice input -> OpenClaw response -> Gemini TTS -> Telegram voice reply verified.
+- The remaining Docker/VPS work is deployment hardening, not core product MVP completion.
+
 Date: 2026-04-28
 
 ## Goal

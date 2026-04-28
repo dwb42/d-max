@@ -10,7 +10,9 @@ Agentic project and task memory system.
 
 ## MVP Direction
 
-See [docs/mvp-plan.md](docs/mvp-plan.md) for the current product and architecture plan.
+The original MVP plan is archived at [docs/archive/mvp-plan.md](docs/archive/mvp-plan.md).
+
+The current next module is [Brainstorm Mode](docs/brainstorm-mode-plan.md).
 
 The MVP runs OpenClaw and the local stdio d-max MCP server in one Docker container. d-max keeps deterministic state in SQLite and exposes category, project, and task tools to OpenClaw.
 
