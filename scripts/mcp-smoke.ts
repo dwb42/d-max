@@ -50,7 +50,20 @@ try {
 
   console.log(`Tools: ${toolNames.join(", ")}`);
 
-  for (const requiredTool of ["createCategory", "createProject", "createTask", "listTasks"]) {
+  for (const requiredTool of [
+    "createCategory",
+    "createProject",
+    "createTask",
+    "listTasks",
+    "createThinkingSpace",
+    "getThinkingContext",
+    "createThinkingSession",
+    "captureThoughts",
+    "createTension",
+    "renderOpenLoops",
+    "renderProjectGate",
+    "renderTaskGate"
+  ]) {
     if (!toolNames.includes(requiredTool)) {
       throw new Error(`Missing required tool: ${requiredTool}`);
     }
@@ -87,6 +100,102 @@ try {
 
   const tasks = await callTool(client, "listTasks", {});
   console.log(`listTasks: ${JSON.stringify(tasks)}`);
+
+  const thinkingSpace = await callTool(client, "createThinkingSpace", {
+    title: `Smoke Thinking ${Date.now()}`,
+    summary: "MCP smoke test thinking space"
+  });
+  console.log(`createThinkingSpace: ${JSON.stringify(thinkingSpace)}`);
+
+  const spaceId = (thinkingSpace as { ok: true; data: { id: number } }).data.id;
+  const thinkingSession = await callTool(client, "createThinkingSession", {
+    spaceId,
+    source: "mcp_smoke",
+    rawInput: "I want stronger thinking memory, but I need the deterministic core to stay controllable.",
+    summary: "Testing whether exploratory thinking can be captured without creating projects or tasks."
+  });
+  console.log(`createThinkingSession: ${JSON.stringify(thinkingSession)}`);
+
+  const sessionId = (thinkingSession as { ok: true; data: { id: number } }).data.id;
+  const capturedThoughts = await callTool(client, "captureThoughts", {
+    thoughts: [
+      {
+        spaceId,
+        sessionId,
+        type: "desire",
+        content: "Dietrich wants a stronger thinking memory.",
+        maturity: "named",
+        confidence: 0.86,
+        heat: 0.78
+      },
+      {
+        spaceId,
+        sessionId,
+        type: "constraint",
+        content: "The deterministic core must stay controllable.",
+        maturity: "named",
+        confidence: 0.9,
+        heat: 0.82
+      },
+      {
+        spaceId,
+        sessionId,
+        type: "possible_project",
+        content: "Build the Thinking System as the post-MVP Brainstorm Mode foundation.",
+        maturity: "connected",
+        confidence: 0.8,
+        heat: 0.75
+      },
+      {
+        spaceId,
+        sessionId,
+        type: "possible_task",
+        content: "Test the Thinking System manual flow.",
+        maturity: "committed",
+        confidence: 0.9,
+        heat: 0.7
+      }
+    ]
+  });
+  console.log(`captureThoughts: ${JSON.stringify(capturedThoughts)}`);
+
+  const captured = (capturedThoughts as { ok: true; data: Array<{ id: number; type: string }> }).data;
+  const projectCandidateId = captured.find((thought) => thought.type === "possible_project")?.id;
+  const taskCandidateId = captured.find((thought) => thought.type === "possible_task")?.id;
+
+  if (!projectCandidateId || !taskCandidateId) {
+    throw new Error("Expected project and task candidates in smoke thoughts");
+  }
+
+  const tension = await callTool(client, "createTension", {
+    spaceId,
+    sessionId,
+    want: "A powerful thinking partner",
+    but: "A deterministic core that remains inspectable and controlled",
+    pressure: "high"
+  });
+  console.log(`createTension: ${JSON.stringify(tension)}`);
+
+  const openLoops = await callTool(client, "renderOpenLoops", {
+    spaceId
+  });
+  console.log(`renderOpenLoops: ${JSON.stringify(openLoops)}`);
+
+  const thinkingContext = await callTool(client, "getThinkingContext", {
+    spaceId
+  });
+  console.log(`getThinkingContext: ${JSON.stringify(thinkingContext)}`);
+
+  const projectGate = await callTool(client, "renderProjectGate", {
+    thoughtId: projectCandidateId
+  });
+  console.log(`renderProjectGate: ${JSON.stringify(projectGate)}`);
+
+  const taskGate = await callTool(client, "renderTaskGate", {
+    thoughtId: taskCandidateId,
+    allowInbox: true
+  });
+  console.log(`renderTaskGate: ${JSON.stringify(taskGate)}`);
 } finally {
   await transport.close();
 }

@@ -2,7 +2,14 @@
 
 Date: 2026-04-28
 
-Status: Draft / Next Module
+Status: Superseded / Archived Draft
+
+Superseded by: `docs/thinking-system-plan.md`
+
+Note: This plan captured the first post-MVP Brainstorm Mode concept. It has
+been intentionally superseded by the broader Thinking System design, where
+"brainstorm" remains a user-facing mode but the durable domain model is based
+on thinking spaces, thoughts, links, and tensions.
 
 ## Context
 

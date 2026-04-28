@@ -15,7 +15,23 @@ export type ToolName =
   | "createTask"
   | "updateTask"
   | "completeTask"
-  | "deleteTask";
+  | "deleteTask"
+  | "listThinkingSpaces"
+  | "getThinkingSpace"
+  | "getThinkingContext"
+  | "createThinkingSpace"
+  | "updateThinkingSpace"
+  | "createThinkingSession"
+  | "captureThoughts"
+  | "listThoughts"
+  | "updateThought"
+  | "linkThought"
+  | "listThoughtLinks"
+  | "createTension"
+  | "updateTension"
+  | "renderOpenLoops"
+  | "renderProjectGate"
+  | "renderTaskGate";
 
 export type ToolContext = {
   db?: Database.Database;
