@@ -140,6 +140,9 @@ Local verification:
 - The repo template `openclaw/config.example.json` validates with OpenClaw `2026.4.26`.
 - `OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.example.json" openclaw config validate --json` returns valid.
 - `OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.example.json" openclaw mcp show --json` shows the configured `d-max` stdio MCP server.
+- Local Telegram text path has been verified: Telegram -> OpenClaw -> d-max MCP -> SQLite.
+- Local Telegram voice/STT path has been verified: Telegram voice -> OpenClaw STT -> d-max MCP -> SQLite.
+- Local Telegram TTS path has been verified: Telegram voice input -> OpenClaw response -> Gemini TTS -> Telegram voice reply.
 
 Config policy:
 - Commit repo templates under `openclaw/`.
@@ -600,16 +603,15 @@ MVP manual/smoke tests:
 - OpenClaw Gateway startup
 - MCP registration with OpenClaw
 - local stdio MCP smoke test via `npm run smoke:mcp`
-- Telegram message roundtrip
-- Telegram voice note transcription
-- Gemini TTS voice reply
+- Telegram message roundtrip (locally verified)
+- Telegram voice note transcription (locally verified)
+- Gemini TTS voice reply (locally verified)
 
 Do not build full end-to-end automated tests for OpenClaw, Telegram, STT, or TTS in the MVP unless a concrete blocker makes them necessary.
 
 ## Open Questions
 
 MVP technical verification:
-- exact Gemini TTS model name and OpenClaw provider support
 - full one-container runtime smoke with OpenClaw Gateway plus Telegram credentials
 
 Later/non-MVP:

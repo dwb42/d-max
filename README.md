@@ -76,6 +76,14 @@ OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.example.json" openclaw mcp show --jso
 
 The current template was checked against OpenClaw `2026.4.26`.
 
+## Verified Local Path
+
+The following local path has been verified:
+
+- Telegram text message -> OpenClaw -> d-max MCP tools -> SQLite
+- Telegram voice message -> OpenClaw STT -> d-max MCP tools -> SQLite
+- Telegram voice message -> OpenClaw response -> Gemini TTS -> Telegram voice reply
+
 ## Secrets
 
 Do not commit `.env`, Telegram bot tokens, provider API keys, local SQLite files, or OpenClaw local runtime state.

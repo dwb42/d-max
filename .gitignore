@@ -16,6 +16,13 @@ logs/
 *.log
 .DS_Store
 openclaw/config.local.json
+openclaw/config.local.json.bak
+openclaw/config.local.json.last-good
 openclaw/**/*.local.json
 openclaw/**/tokens/
 openclaw/**/state/
+openclaw/media/
+openclaw/workspace/.openclaw/
+openclaw/workspace/HEARTBEAT.md
+openclaw/workspace/IDENTITY.md
+openclaw/workspace/USER.md
