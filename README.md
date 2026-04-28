@@ -20,6 +20,7 @@ Prerequisites:
 
 - Node 22.14+; Node 24 preferred
 - npm
+- OpenClaw CLI
 
 Install dependencies:
 
@@ -52,6 +53,28 @@ npm run smoke:mcp
 ```
 
 The smoke test starts the stdio MCP server, lists tools, and creates a category, project, task, and Inbox task in the configured SQLite database.
+
+## OpenClaw Checks
+
+Install OpenClaw if needed:
+
+```bash
+npm install -g openclaw@latest
+```
+
+Validate the repo OpenClaw config template:
+
+```bash
+OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.example.json" openclaw config validate --json
+```
+
+Inspect the configured d-max MCP server:
+
+```bash
+OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.example.json" openclaw mcp show --json
+```
+
+The current template was checked against OpenClaw `2026.4.26`.
 
 ## Secrets
 

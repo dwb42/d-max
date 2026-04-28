@@ -136,6 +136,11 @@ or:
 openclaw onboard --install-daemon
 ```
 
+Local verification:
+- The repo template `openclaw/config.example.json` validates with OpenClaw `2026.4.26`.
+- `OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.example.json" openclaw config validate --json` returns valid.
+- `OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.example.json" openclaw mcp show --json` shows the configured `d-max` stdio MCP server.
+
 Config policy:
 - Commit repo templates under `openclaw/`.
 - Keep real local/production config and secrets outside git.
@@ -604,9 +609,8 @@ Do not build full end-to-end automated tests for OpenClaw, Telegram, STT, or TTS
 ## Open Questions
 
 MVP technical verification:
-- exact MCP SDK package and OpenClaw MCP registration shape
 - exact Gemini TTS model name and OpenClaw provider support
-- exact one-container startup shape for running OpenClaw plus d-max MCP
+- full one-container runtime smoke with OpenClaw Gateway plus Telegram credentials
 
 Later/non-MVP:
 - realtime voice access path: phone/SIP, WebRTC/LiveKit, OpenClaw Talk Mode, OpenClaw Voice Call plugin, or custom lightweight client
