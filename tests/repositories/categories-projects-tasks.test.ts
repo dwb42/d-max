@@ -50,4 +50,26 @@ describe("repositories", () => {
     expect(completed.status).toBe("done");
     expect(completed.completedAt).toBe("2026-04-28T10:00:00.000Z");
   });
+
+  it("persists manual ordering for categories, projects, and tasks", () => {
+    const categories = new CategoryRepository(db);
+    const projects = new ProjectRepository(db);
+    const tasks = new TaskRepository(db);
+
+    const firstCategory = categories.create({ name: "Business" });
+    const secondCategory = categories.create({ name: "Reisen" });
+    categories.reorder([secondCategory.id, firstCategory.id]);
+
+    const firstProject = projects.create({ categoryId: secondCategory.id, name: "A" });
+    const secondProject = projects.create({ categoryId: secondCategory.id, name: "B" });
+    projects.reorderWithinCategory(secondCategory.id, [secondProject.id, firstProject.id]);
+
+    const firstTask = tasks.create({ projectId: secondProject.id, title: "First" });
+    const secondTask = tasks.create({ projectId: secondProject.id, title: "Second" });
+    tasks.reorderWithinProject(secondProject.id, [secondTask.id, firstTask.id]);
+
+    expect(categories.list().map((category) => category.id)).toEqual([secondCategory.id, firstCategory.id]);
+    expect(projects.list({ categoryId: secondCategory.id }).map((project) => project.id)).toEqual([secondProject.id, firstProject.id]);
+    expect(tasks.list({ projectId: secondProject.id }).map((task) => task.id)).toEqual([secondTask.id, firstTask.id]);
+  });
 });

@@ -1,0 +1,50 @@
+{
+  "gateway": {
+    "mode": "local",
+    "auth": {
+      "mode": "none"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/Users/dw/Projects/d-max/openclaw/workspace",
+      "model": {
+        "primary": "openai-codex/gpt-5.5"
+      },
+      "models": {
+        "openai-codex/gpt-5.5": {}
+      }
+    }
+  },
+  "mcp": {
+    "servers": {
+      "d-max": {
+        "command": "npm",
+        "args": ["run", "mcp"]
+      }
+    }
+  },
+  "auth": {
+    "profiles": {
+      "openai-codex:default": {
+        "provider": "openai-codex",
+        "mode": "oauth"
+      }
+    },
+    "order": {
+      "openai-codex": ["openai-codex:default"]
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": false
+    }
+  },
+  "plugins": {
+    "entries": {
+      "openai": {
+        "enabled": true
+      }
+    }
+  }
+}

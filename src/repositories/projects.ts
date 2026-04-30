@@ -11,6 +11,7 @@ export type Project = {
   status: ProjectStatus;
   summary: string | null;
   markdown: string;
+  sortOrder: number;
   isSystem: boolean;
   createdAt: string;
   updatedAt: string;
@@ -24,6 +25,7 @@ type ProjectRow = {
   status: ProjectStatus;
   summary: string | null;
   markdown: string;
+  sort_order: number;
   is_system: number;
   created_at: string;
   updated_at: string;
@@ -56,6 +58,7 @@ function toProject(row: ProjectRow): Project {
     status: row.status,
     summary: row.summary,
     markdown: row.markdown,
+    sortOrder: row.sort_order,
     isSystem: row.is_system === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -81,7 +84,7 @@ export class ProjectRepository {
 
     const where = conditions.length > 0 ? `where ${conditions.join(" and ")}` : "";
     const rows = this.db
-      .prepare(`select * from projects ${where} order by is_system desc, lower(name) asc`)
+      .prepare(`select * from projects ${where} order by category_id asc, sort_order asc, is_system desc, lower(name) asc, id asc`)
       .all(...params) as ProjectRow[];
 
     return rows.map(toProject);
@@ -95,7 +98,7 @@ export class ProjectRepository {
   create(input: CreateProjectInput, now = nowIso()): Project {
     const result = this.db
       .prepare(
-        "insert into projects (category_id, parent_id, name, status, summary, markdown, is_system, created_at, updated_at) values (?, ?, ?, 'active', ?, ?, ?, ?, ?)"
+        "insert into projects (category_id, parent_id, name, status, summary, markdown, sort_order, is_system, created_at, updated_at) values (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)"
       )
       .run(
         input.categoryId,
@@ -103,6 +106,7 @@ export class ProjectRepository {
         input.name,
         input.summary ?? null,
         input.markdown ?? "",
+        this.nextSortOrder(input.categoryId),
         input.isSystem ? 1 : 0,
         now,
         now
@@ -148,5 +152,28 @@ export class ProjectRepository {
 
   archive(id: number, now = nowIso()): Project {
     return this.update({ id, status: "archived" }, now);
+  }
+
+  reorderWithinCategory(categoryId: number, projectIds: number[], now = nowIso()): Project[] {
+    const uniqueIds = [...new Set(projectIds)];
+    const existing = this.list({ categoryId });
+    const existingIds = new Set(existing.map((project) => project.id));
+    if (uniqueIds.some((id) => !existingIds.has(id))) {
+      throw new Error("Project reorder can only include projects from the same category");
+    }
+
+    const update = this.db.prepare("update projects set sort_order = ?, updated_at = ? where id = ? and category_id = ?");
+    const transaction = this.db.transaction(() => {
+      uniqueIds.forEach((id, index) => update.run((index + 1) * 1000, now, id, categoryId));
+    });
+    transaction();
+    return this.list({ categoryId });
+  }
+
+  private nextSortOrder(categoryId: number): number {
+    const row = this.db
+      .prepare("select coalesce(max(sort_order), 0) + 1000 as next from projects where category_id = ?")
+      .get(categoryId) as { next: number };
+    return row.next;
   }
 }

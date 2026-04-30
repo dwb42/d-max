@@ -12,6 +12,7 @@ export type Task = {
   priority: TaskPriority;
   notes: string | null;
   dueAt: string | null;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
@@ -25,6 +26,7 @@ type TaskRow = {
   priority: TaskPriority;
   notes: string | null;
   due_at: string | null;
+  sort_order: number;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
@@ -57,6 +59,7 @@ function toTask(row: TaskRow): Task {
     priority: row.priority,
     notes: row.notes,
     dueAt: row.due_at,
+    sortOrder: row.sort_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at
@@ -87,7 +90,7 @@ export class TaskRepository {
 
     const where = conditions.length > 0 ? `where ${conditions.join(" and ")}` : "";
     const rows = this.db
-      .prepare(`select * from tasks ${where} order by due_at is null, due_at asc, updated_at desc`)
+      .prepare(`select * from tasks ${where} order by project_id asc, sort_order asc, due_at is null, due_at asc, updated_at desc, id asc`)
       .all(...params) as TaskRow[];
 
     return rows.map(toTask);
@@ -101,9 +104,9 @@ export class TaskRepository {
   create(input: CreateTaskInput, now = nowIso()): Task {
     const result = this.db
       .prepare(
-        "insert into tasks (project_id, title, status, priority, notes, due_at, created_at, updated_at) values (?, ?, 'open', ?, ?, ?, ?, ?)"
+        "insert into tasks (project_id, title, status, priority, notes, due_at, sort_order, created_at, updated_at) values (?, ?, 'open', ?, ?, ?, ?, ?, ?)"
       )
-      .run(input.projectId, input.title, input.priority ?? "normal", input.notes ?? null, input.dueAt ?? null, now, now);
+      .run(input.projectId, input.title, input.priority ?? "normal", input.notes ?? null, input.dueAt ?? null, this.nextSortOrder(input.projectId), now, now);
 
     return this.findById(Number(result.lastInsertRowid))!;
   }
@@ -143,5 +146,28 @@ export class TaskRepository {
 
   delete(id: number): void {
     this.db.prepare("delete from tasks where id = ?").run(id);
+  }
+
+  reorderWithinProject(projectId: number, taskIds: number[], now = nowIso()): Task[] {
+    const uniqueIds = [...new Set(taskIds)];
+    const existing = this.list({ projectId });
+    const existingIds = new Set(existing.map((task) => task.id));
+    if (uniqueIds.some((id) => !existingIds.has(id))) {
+      throw new Error("Task reorder can only include tasks from the same project");
+    }
+
+    const update = this.db.prepare("update tasks set sort_order = ?, updated_at = ? where id = ? and project_id = ?");
+    const transaction = this.db.transaction(() => {
+      uniqueIds.forEach((id, index) => update.run((index + 1) * 1000, now, id, projectId));
+    });
+    transaction();
+    return this.list({ projectId });
+  }
+
+  private nextSortOrder(projectId: number): number {
+    const row = this.db
+      .prepare("select coalesce(max(sort_order), 0) + 1000 as next from tasks where project_id = ?")
+      .get(projectId) as { next: number };
+    return row.next;
   }
 }

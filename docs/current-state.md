@@ -13,7 +13,7 @@ d-max is Dietrich's agentic project, task, and thinking memory system.
 Active interfaces:
 
 - Telegram bot for daily text and voice use.
-- Browser app for `/chat`, `/drive`, `/brainstorms`, `/projects`,
+- Browser app for `/drive`, `/brainstorms`, `/projects`,
   `/projects/:categoryName`, `/projects/:id`, `/tasks`, `/tasks/:id`, and
   `/review`.
 - Browser/WebRTC realtime voice prototype using LiveKit, xAI realtime voice,
@@ -30,7 +30,7 @@ SQLite tables:
 ```text
 categories, projects, tasks,
 thinking_spaces, thinking_sessions, thoughts, thought_links, tensions,
-app_chat_messages
+app_chat_messages, app_conversations, app_prompt_logs, app_state_events
 ```
 
 `projects.markdown` is project memory. There is no `brainstorms` table.
@@ -61,12 +61,14 @@ Starts API, Vite web app, and `voice:agent -- --watch`.
 Implemented behavior:
 
 - Vite/React shell with route-level views.
-- Header logo links to `/chat`.
-- `/chat`: persisted `app_chat_messages`; text and recorded voice messages
-  route through OpenClaw so behavior matches Telegram.
+- Header logo links to `/projects`.
+- There is no standalone global chat page; d-max chat UI is the contextual
+  drawer used from overview/category/project/task contexts.
 - Chat voice message UX: record full message, show sound bar, then send.
 - App refreshes data after mutations and via polling; normal navigation should
   not require manual reload.
+- Agent/tool state writes emit `app_state_events`; the browser subscribes via
+  SSE and refetches visible state without a manual page reload.
 - `/projects`: grouped by category; clicking a category opens
   `/projects/<category_name>` for that category; category taglines and top
   counters are removed.
@@ -99,6 +101,7 @@ PATCH /api/thinking/thoughts/:id
 PATCH /api/thinking/tensions/:id
 GET  /api/chat/messages
 POST /api/chat/message
+GET  /api/state/events
 POST /api/voice/session
 ```
 

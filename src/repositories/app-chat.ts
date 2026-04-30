@@ -6,6 +6,7 @@ export type AppChatSource = "app_text" | "app_voice_message" | "system";
 
 export type AppChatMessage = {
   id: number;
+  conversationId: number | null;
   role: AppChatRole;
   content: string;
   source: AppChatSource;
@@ -15,6 +16,7 @@ export type AppChatMessage = {
 
 type AppChatMessageRow = {
   id: number;
+  conversation_id: number | null;
   role: AppChatRole;
   content: string;
   source: AppChatSource;
@@ -23,6 +25,7 @@ type AppChatMessageRow = {
 };
 
 export type CreateAppChatMessageInput = {
+  conversationId?: number | null;
   role: AppChatRole;
   content: string;
   source?: AppChatSource;
@@ -30,9 +33,10 @@ export type CreateAppChatMessageInput = {
 };
 
 function toMessage(row: AppChatMessageRow): AppChatMessage {
-  return {
-    id: row.id,
-    role: row.role,
+    return {
+      id: row.id,
+      conversationId: row.conversation_id,
+      role: row.role,
     content: row.content,
     source: row.source,
     thinkingSpaceId: row.thinking_space_id,
@@ -43,18 +47,22 @@ function toMessage(row: AppChatMessageRow): AppChatMessage {
 export class AppChatRepository {
   constructor(private readonly db: Database.Database) {}
 
-  list(limit = 80): AppChatMessage[] {
+  list(limit = 80, filters: { conversationId?: number | null } = {}): AppChatMessage[] {
+    const where = filters.conversationId === undefined ? "" : "where conversation_id is ?";
+    const params = filters.conversationId === undefined ? [limit] : [filters.conversationId, limit];
     const rows = this.db
-      .prepare("select * from app_chat_messages order by created_at desc, id desc limit ?")
-      .all(limit) as AppChatMessageRow[];
+      .prepare(`select * from app_chat_messages ${where} order by created_at desc, id desc limit ?`)
+      .all(...params) as AppChatMessageRow[];
 
     return rows.reverse().map(toMessage);
   }
 
   create(input: CreateAppChatMessageInput, now = nowIso()): AppChatMessage {
     const result = this.db
-      .prepare("insert into app_chat_messages (role, content, source, thinking_space_id, created_at) values (?, ?, ?, ?, ?)")
-      .run(input.role, input.content, input.source ?? "app_text", input.thinkingSpaceId ?? null, now);
+      .prepare(
+        "insert into app_chat_messages (conversation_id, role, content, source, thinking_space_id, created_at) values (?, ?, ?, ?, ?, ?)"
+      )
+      .run(input.conversationId ?? null, input.role, input.content, input.source ?? "app_text", input.thinkingSpaceId ?? null, now);
 
     return this.findById(Number(result.lastInsertRowid))!;
   }

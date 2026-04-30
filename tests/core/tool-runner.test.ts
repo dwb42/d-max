@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { ToolRunner } from "../../src/core/tool-runner.js";
+import { StateEventRepository } from "../../src/repositories/state-events.js";
+import { createTestDatabase } from "../helpers/test-db.js";
 
 describe("ToolRunner", () => {
   it("runs a registered tool with validated input", async () => {
@@ -69,5 +71,37 @@ describe("ToolRunner", () => {
       requiresConfirmation: true,
       confirmationKind: "deleteTask"
     });
+  });
+
+  it("emits a state event after a successful mutating tool", async () => {
+    const db = createTestDatabase();
+    const runner = new ToolRunner();
+
+    runner.register({
+      name: "updateProjectMarkdown",
+      description: "Update project markdown",
+      inputSchema: z.object({
+        id: z.number().int().positive(),
+        markdown: z.string(),
+        confirmed: z.boolean().optional()
+      }),
+      run: (input) => ({
+        ok: true,
+        data: { id: input.id, categoryId: 2 }
+      })
+    });
+
+    await runner.run("updateProjectMarkdown", { id: 5, markdown: "# New", confirmed: true }, { db });
+
+    expect(new StateEventRepository(db).listAfter(0)).toMatchObject([
+      {
+        source: "tool",
+        operation: "updateProjectMarkdown",
+        entityType: "project",
+        entityId: 5,
+        projectId: 5,
+        categoryId: 2
+      }
+    ]);
   });
 });

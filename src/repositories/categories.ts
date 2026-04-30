@@ -5,6 +5,7 @@ export type Category = {
   id: number;
   name: string;
   description: string | null;
+  sortOrder: number;
   isSystem: boolean;
   createdAt: string;
   updatedAt: string;
@@ -14,6 +15,7 @@ type CategoryRow = {
   id: number;
   name: string;
   description: string | null;
+  sort_order: number;
   is_system: number;
   created_at: string;
   updated_at: string;
@@ -36,6 +38,7 @@ function toCategory(row: CategoryRow): Category {
     id: row.id,
     name: row.name,
     description: row.description,
+    sortOrder: row.sort_order,
     isSystem: row.is_system === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -47,7 +50,7 @@ export class CategoryRepository {
 
   list(): Category[] {
     const rows = this.db
-      .prepare("select * from categories order by is_system desc, lower(name) asc")
+      .prepare("select * from categories order by sort_order asc, is_system desc, lower(name) asc, id asc")
       .all() as CategoryRow[];
 
     return rows.map(toCategory);
@@ -66,9 +69,9 @@ export class CategoryRepository {
   create(input: CreateCategoryInput, now = nowIso()): Category {
     const result = this.db
       .prepare(
-        "insert into categories (name, description, is_system, created_at, updated_at) values (?, ?, ?, ?, ?)"
+        "insert into categories (name, description, sort_order, is_system, created_at, updated_at) values (?, ?, ?, ?, ?, ?)"
       )
-      .run(input.name, input.description ?? null, input.isSystem ? 1 : 0, now, now);
+      .run(input.name, input.description ?? null, this.nextSortOrder(), input.isSystem ? 1 : 0, now, now);
 
     return this.findById(Number(result.lastInsertRowid))!;
   }
@@ -90,5 +93,20 @@ export class CategoryRepository {
   ensureSystemCategory(name: string, now = nowIso()): Category {
     const existing = this.findByName(name);
     return existing ?? this.create({ name, isSystem: true }, now);
+  }
+
+  reorder(categoryIds: number[], now = nowIso()): Category[] {
+    const uniqueIds = [...new Set(categoryIds)];
+    const update = this.db.prepare("update categories set sort_order = ?, updated_at = ? where id = ?");
+    const transaction = this.db.transaction(() => {
+      uniqueIds.forEach((id, index) => update.run((index + 1) * 1000, now, id));
+    });
+    transaction();
+    return this.list();
+  }
+
+  private nextSortOrder(): number {
+    const row = this.db.prepare("select coalesce(max(sort_order), 0) + 1000 as next from categories").get() as { next: number };
+    return row.next;
   }
 }

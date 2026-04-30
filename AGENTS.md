@@ -63,6 +63,14 @@ Rules:
 - Do not add `project_events` for the MVP.
 - Do not add `brainstorms`/`brainstorm_links` unless product direction changes;
   Brainstorm is language, Thinking Memory is the implemented model.
+- Context resolver synchronization is mandatory: whenever data structure,
+  attributes, relationships, or new domain classes/tables change, inspect
+  `src/chat/conversation-context.ts` and verify that OpenClaw still receives
+  complete and correct context. Update resolver logic and tests when needed.
+- `tests/chat/context-schema-sync.test.ts` intentionally guards this. If its
+  schema signature fails after a model change, do not simply update the
+  signature; first review the context resolver and prompt sections, then update
+  the expected signature as an explicit acknowledgement.
 
 ## Engineering Rules
 
