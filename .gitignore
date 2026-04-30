@@ -10,13 +10,17 @@ data/*.sqlite-wal
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/backups/
+data/openclaw-web-state/
 dist/
+dist-web/
 coverage/
 logs/
 *.log
 .DS_Store
 openclaw/config.local.json
 openclaw/config.local.json.bak
+openclaw/config.local.json.bak.*
 openclaw/config.local.json.last-good
 openclaw/**/*.local.json
 openclaw/**/tokens/

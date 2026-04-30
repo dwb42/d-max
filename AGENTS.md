@@ -1,63 +1,78 @@
 # d-max Agent Instructions
 
-## Project Goal
+## Freshness
 
-d-max is an agentic project and task memory system for Dietrich.
+Before advising on architecture/features or saying a capability is missing,
+inspect the current repo. Start with:
 
-The system combines:
-- OpenClaw as the agentic runtime
-- Telegram as the user interface
-- SQLite as deterministic data layer
-- structured tools for categories, projects, and tasks
-- project-level markdown memory stored in the database
+```text
+docs/current-state.md
+README.md
+data/schema.sql
+src/core/tool-definitions.ts
+src/tools/*
+src/api/server.ts
+src/chat/*
+src/voice/*
+web/src/App.tsx
+openclaw/workspace/AGENTS.md
+openclaw/workspace/TOOLS.md
+tests/
+```
 
-## Core Concepts
+Archived/superseded plans are context, not current state.
 
-Use these terms consistently:
+## Product
 
-- Project: any major initiative, goal, exploration, or workstream.
-- Project hierarchy: use `projects.parent_id`, not a separate subprojects table.
-- Category: dynamic life/business area such as Business, Family & Friends, Health & Fitness, Soul, Learning, Explorations.
+d-max is Dietrich's agentic project, task, and thinking memory system:
+
+```text
+Telegram d-max-dev -> local OpenClaw -> d-max tools -> local SQLite
+Telegram d-max -> VPS OpenClaw -> d-max tools -> production SQLite
+Browser /chat -> d-max API -> OpenClaw local agent -> tools -> SQLite
+Browser /drive -> LiveKit -> d-max voice agent -> xAI realtime -> ToolRunner -> SQLite
+```
+
+Local OpenClaw currently uses `openai-codex/gpt-5.5`. Do not switch Telegram or
+app chat back to a direct/plain model API path unless Dietrich explicitly asks
+for a provider experiment.
+
+## Concepts
+
+- Project: major initiative, goal, exploration, or workstream.
+- Project hierarchy: `projects.parent_id`; no separate subprojects table.
+- Category: dynamic life/business area.
 - Task: deterministic actionable unit connected to a project.
-- Brainstorm: post-MVP thinking/scoping session used to reflect, organize, and refine long-form thoughts before extracting projects or tasks.
+- Brainstorm: user-facing exploratory thinking/scoping language.
+- Thinking Memory: durable internal brainstorm domain: spaces, sessions,
+  typed thoughts, thought links, tensions, open loops, extraction gates.
 
 ## Data Model
 
-Completed MVP tables:
-- categories
-- projects
-- tasks
+Implemented tables:
 
-Do not add project_events in the MVP.
+```text
+categories, projects, tasks,
+thinking_spaces, thinking_sessions, thoughts, thought_links, tensions,
+app_chat_messages
+```
 
-The `projects` table must include a field called `markdown`.
+Rules:
 
-Post-MVP Brainstorm Mode may add:
-- brainstorms
-- brainstorm_links
-
-## Architecture
-
-Local development:
-
-Telegram d-max-dev
-→ local OpenClaw
-→ d-max tools
-→ local SQLite database
-
-Production:
-
-Telegram d-max
-→ VPS OpenClaw
-→ d-max tools
-→ production SQLite database
+- `projects.markdown` is required project memory.
+- Do not add `project_events` for the MVP.
+- Do not add `brainstorms`/`brainstorm_links` unless product direction changes;
+  Brainstorm is language, Thinking Memory is the implemented model.
 
 ## Engineering Rules
 
-- Prefer simple, explicit TypeScript.
-- Keep the deterministic data layer separate from agent prompts.
-- The database is the source of truth.
-- The agent may reason, summarize, and propose, but state changes must go through tools.
-- Write small modules.
-- Add scripts for setup, dev, and testing.
-- Never commit secrets or .env files.
+- Prefer simple, explicit TypeScript and small modules.
+- Keep deterministic data layer separate from prompts.
+- SQLite is the source of truth.
+- The agent may reason, summarize, and propose; durable state changes go
+  through tools/API services.
+- Natural language/voice paths use ToolRunner/OpenClaw; direct UI actions use
+  API routes/repositories.
+- Add setup/dev/test scripts when needed.
+- Never commit secrets, `.env`, provider keys, local SQLite runtime data, or
+  OpenClaw auth state.

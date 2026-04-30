@@ -1,105 +1,101 @@
 # d-max
 
-Agentic project, task, and thinking memory system.
+Agentic project, task, and thinking memory system for Dietrich.
+
+## Read First
+
+For a fresh-session handoff, start with [Current State](docs/current-state.md).
+It is the compact source of truth for implemented features, routes, provider
+state, and open hardening work.
+
+## System
 
 - Local dev bot: d-max-dev
 - Production bot: d-max
-- Agent runtime: OpenClaw
-- Development assistant: Codex
+- Runtime: OpenClaw
 - Data layer: SQLite
+- Development assistant: Codex
+- Browser app: Vite/React
+- Realtime voice prototype: LiveKit plus xAI realtime voice
 
-## Current Direction
+d-max exposes deterministic MCP tools for categories, projects, tasks, and
+Thinking Memory. The database is the source of truth; agentic state changes go
+through tools.
 
-The original MVP plan is archived at [docs/archive/mvp-plan.md](docs/archive/mvp-plan.md).
+## Implemented Interfaces
 
-The active post-MVP module is the [Thinking System](docs/thinking-system-plan.md). The earlier [Brainstorm Mode](docs/brainstorm-mode-plan.md) plan is archived as the superseded first draft.
-
-d-max runs OpenClaw and the local stdio d-max MCP server. d-max keeps deterministic state in SQLite and exposes category, project, task, and thinking tools to OpenClaw.
+- Telegram text and voice.
+- Browser routes: `/chat`, `/drive`, `/brainstorms`, `/projects`,
+  `/projects/:categoryName`, `/projects/:id`, `/tasks`, `/tasks/:id`,
+  `/review`.
+- App chat persists to SQLite and routes through OpenClaw so behavior matches
+  Telegram.
+- Chat voice messages are recorded with a sound bar, then sent as complete
+  messages.
+- Drive Mode creates a LiveKit room; the d-max LiveKit agent bridges browser
+  audio to xAI realtime voice and can capture transcripts into Thinking Memory.
 
 ## Thinking System
 
-Brainstorm remains a user-facing word, but the durable domain is Thinking Memory:
+Brainstorm is user-facing language. Thinking Memory is the durable model:
 
-- thinking spaces
-- thinking sessions
-- typed thoughts
-- thought links
-- tensions
-- open loops
-- project/task extraction gates
+```text
+thinking spaces, sessions, typed thoughts, thought links, tensions,
+open loops, project/task extraction gates
+```
 
-Thinking Memory is separate from Execution Memory. Exploratory thoughts may become project/task candidates, but projects and tasks are created only after explicit confirmation.
+Exploratory thoughts may become project/task candidates, but execution entities
+are created only after confirmation.
 
 Key docs:
 
+- [Current State](docs/current-state.md)
 - [Thinking System Plan](docs/thinking-system-plan.md)
 - [Manual Test Guide](docs/thinking-system-manual-test.md)
+- [Realtime Voice Plan](docs/realtime-voice-plan.md)
+- [App UI Plan](docs/app-ui-plan.md)
+- [Archived MVP Plan](docs/archive/mvp-plan.md)
 
 ## Local Setup
 
-Prerequisites:
-
-- Node 22.14+; Node 24 preferred
-- npm
-- OpenClaw CLI
-
-Install dependencies:
-
 ```bash
 npm install
-```
-
-Create local env:
-
-```bash
 cp .env.example .env
-```
-
-Initialize the SQLite database:
-
-```bash
 npm run setup
 ```
 
-Start the MCP scaffold:
+Run the MCP server:
 
 ```bash
 npm run mcp
 ```
 
-Run a local MCP smoke test:
+Run the mutating MCP smoke test:
 
 ```bash
 npm run smoke:mcp
 ```
 
-The smoke test starts the stdio MCP server, lists tools, and exercises category, project, task, and thinking tools.
+Run the browser app, API server, and LiveKit voice agent watcher:
 
-Important: `npm run smoke:mcp` is mutating. It creates smoke categories, projects, tasks, thinking spaces, thoughts, and tensions in the configured SQLite database.
+```bash
+npm run dev:app
+```
+
+Open `http://localhost:5173`.
+
+LiveKit Drive Mode requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
+`LIVEKIT_API_SECRET`. xAI realtime voice requires `XAI_API_KEY`.
 
 ## OpenClaw Checks
 
-Install OpenClaw if needed:
-
 ```bash
 npm install -g openclaw@latest
-```
-
-Validate the repo OpenClaw config template:
-
-```bash
 OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.example.json" openclaw config validate --json
-```
-
-Inspect the configured d-max MCP server:
-
-```bash
 OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.example.json" openclaw mcp show --json
 ```
 
-The current template was checked against OpenClaw `2026.4.26`.
-
-Run a local embedded OpenClaw agent turn without Telegram:
+Local embedded agent turn:
 
 ```bash
 OPENCLAW_STATE_DIR=/tmp/d-max-openclaw-state \
@@ -112,19 +108,17 @@ openclaw agent --local \
   --timeout 240
 ```
 
-`OPENCLAW_STATE_DIR=/tmp/d-max-openclaw-state` avoids writing OpenClaw runtime plugin state into `~/.openclaw` during sandboxed local tests.
+## Verification
 
-## Verified Local Path
+```bash
+npm run typecheck
+npm test
+npm run web:build
+```
 
-The following local path has been verified:
-
-- Telegram text message -> OpenClaw -> d-max MCP tools -> SQLite
-- Telegram voice message -> OpenClaw STT -> d-max MCP tools -> SQLite
-- Telegram voice message -> OpenClaw response -> Gemini TTS -> Telegram voice reply
-- Voice Brainstorm/Thinking capture -> Thinking tools -> SQLite -> structured response
-- Thinking project gate -> confirmed project creation -> `extracted_to` thought link
-- Thinking task gate -> confirmed task creation -> `extracted_to` thought links
+Verified local paths are summarized in [Current State](docs/current-state.md).
 
 ## Secrets
 
-Do not commit `.env`, Telegram bot tokens, provider API keys, local SQLite files, or OpenClaw local runtime state.
+Do not commit `.env`, Telegram bot tokens, provider API keys, local SQLite
+files, or OpenClaw local runtime/auth state.

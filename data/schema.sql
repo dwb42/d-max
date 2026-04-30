@@ -119,6 +119,15 @@ create table if not exists tensions (
   resolved_at text
 );
 
+create table if not exists app_chat_messages (
+  id integer primary key,
+  role text not null check (role in ('user', 'assistant')),
+  content text not null,
+  source text not null default 'app_text' check (source in ('app_text', 'app_voice_message', 'system')),
+  thinking_space_id integer references thinking_spaces(id),
+  created_at text not null
+);
+
 create index if not exists idx_projects_category_id on projects(category_id);
 create index if not exists idx_projects_parent_id on projects(parent_id);
 create index if not exists idx_tasks_project_id on tasks(project_id);
@@ -134,3 +143,5 @@ create index if not exists idx_thought_links_from_thought_id on thought_links(fr
 create index if not exists idx_thought_links_target on thought_links(to_entity_type, to_entity_id);
 create index if not exists idx_tensions_space_id on tensions(space_id);
 create index if not exists idx_tensions_status on tensions(status);
+create index if not exists idx_app_chat_messages_created_at on app_chat_messages(created_at, id);
+create index if not exists idx_app_chat_messages_thinking_space_id on app_chat_messages(thinking_space_id);
