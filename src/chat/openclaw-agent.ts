@@ -13,7 +13,7 @@ export type OpenClawAgentResult = {
 
 export type OpenClawActivity = {
   id: string;
-  kind: "tool_call" | "tool_result" | "plan" | "thinking";
+  kind: "tool_call" | "tool_result" | "plan" | "reasoning";
   status: "running" | "completed" | "failed";
   title: string;
   detail?: string;
@@ -710,19 +710,6 @@ function activityFromSessionRecord(record: Record<string, unknown>): OpenClawAct
             status: "running",
             title: part.name === "update_plan" ? "Plan aktualisiert" : `${formatToolName(part.name)} gestartet`,
             detail: summarizeToolArguments(part.name, args),
-            timestamp
-          } satisfies OpenClawActivity
-        ];
-      }
-
-      if (part.type === "thinking" && typeof part.thinking === "string" && part.thinking.trim()) {
-        return [
-          {
-            id: `thinking-${String(record.id ?? cryptoRandomId())}-${index}`,
-            kind: "thinking",
-            status: "completed",
-            title: "Gedankenschritt",
-            detail: part.thinking.trim().replace(/\s+/g, " ").slice(0, 220),
             timestamp
           } satisfies OpenClawActivity
         ];

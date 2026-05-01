@@ -85,7 +85,6 @@ export type VoiceEventType =
   | "voice_action_confirmed"
   | "voice_action_cancelled"
   | "voice_action_committed"
-  | "session_review_sent"
   | "error";
 
 export type VoiceSessionEvent = {

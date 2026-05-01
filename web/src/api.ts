@@ -10,8 +10,7 @@ import type {
   PersistedChatMessage,
   ProjectDetail,
   StateEvent,
-  TaskDetail,
-  ThinkingContext
+  TaskDetail
 } from "./types.js";
 
 export async function fetchOverview(): Promise<AppOverview> {
@@ -60,11 +59,6 @@ export async function fetchTaskDetail(taskId: number): Promise<TaskDetail> {
   return request<TaskDetail>(`/api/tasks/${taskId}`);
 }
 
-export async function fetchThinkingContext(spaceId: number): Promise<ThinkingContext> {
-  const response = await request<{ context: ThinkingContext }>(`/api/thinking/spaces/${spaceId}/context`);
-  return response.context;
-}
-
 export async function completeTask(id: number) {
   return request(`/api/tasks/${id}/complete`, { method: "POST" });
 }
@@ -77,23 +71,7 @@ export async function updateTaskStatus(id: number, status: string) {
   });
 }
 
-export async function updateThought(id: number, patch: { status?: string; maturity?: string; heat?: number }) {
-  return request(`/api/thinking/thoughts/${id}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(patch)
-  });
-}
-
-export async function updateTension(id: number, patch: { status?: string; pressure?: string }) {
-  return request(`/api/thinking/tensions/${id}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(patch)
-  });
-}
-
-export async function createVoiceSession(input: { mode: "drive"; thinkingSpaceId?: number | null }): Promise<LiveKitVoiceSession> {
+export async function createVoiceSession(input: { mode: "drive" }): Promise<LiveKitVoiceSession> {
   const response = await request<{ session: LiveKitVoiceSession }>("/api/voice/session", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -118,7 +96,6 @@ export async function sendChatMessage(input: {
   message: string;
   conversationId?: number | null;
   context?: ConversationContext | null;
-  thinkingSpaceId?: number | null;
   source?: "app_text" | "app_voice_message";
 }): Promise<AppChatResult> {
   return request<AppChatResult>("/api/chat/message", {
@@ -141,11 +118,10 @@ export async function streamChatMessage(
     message: string;
     conversationId?: number | null;
     context?: ConversationContext | null;
-    thinkingSpaceId?: number | null;
     source?: "app_text" | "app_voice_message";
   },
   handlers: {
-    onConversation?: (payload: { conversationId: number | null; context: ConversationContext; thinkingSpaceId: number | null }) => void;
+    onConversation?: (payload: { conversationId: number | null; context: ConversationContext }) => void;
     onActivity?: (activities: ChatActivity[]) => void;
     onAnswerDelta?: (delta: string) => void;
   } = {}
@@ -165,7 +141,7 @@ export async function streamChatMessage(
   const decoder = new TextDecoder();
   let buffer = "";
   let finalResult: AppChatResult | null = null;
-  let lastConversationPayload: { conversationId: number | null; context: ConversationContext; thinkingSpaceId: number | null } | null = null;
+  let lastConversationPayload: { conversationId: number | null; context: ConversationContext } | null = null;
   let lastActivities: ChatActivity[] = [];
 
   while (true) {
@@ -204,9 +180,6 @@ export async function streamChatMessage(
         reply: assistant.content,
         conversationId: lastConversationPayload.conversationId,
         context: lastConversationPayload.context,
-        thinkingSpaceId: lastConversationPayload.thinkingSpaceId,
-        captured: false,
-        savedThoughts: 0,
         messages,
         activities: lastActivities
       };
@@ -304,12 +277,12 @@ function parseSseEvent(raw: string): { event: string; data: unknown } | null {
 function handleChatStreamEvent(
   parsed: { event: string; data: unknown } | null,
   handlers: {
-    onConversation?: (payload: { conversationId: number | null; context: ConversationContext; thinkingSpaceId: number | null }) => void;
+    onConversation?: (payload: { conversationId: number | null; context: ConversationContext }) => void;
     onActivity?: (activities: ChatActivity[]) => void;
     onAnswerDelta?: (delta: string) => void;
   }
 ): {
-  conversation?: { conversationId: number | null; context: ConversationContext; thinkingSpaceId: number | null };
+  conversation?: { conversationId: number | null; context: ConversationContext };
   activities?: ChatActivity[];
   finalResult?: AppChatResult;
 } {
@@ -318,7 +291,7 @@ function handleChatStreamEvent(
   }
 
   if (parsed.event === "conversation") {
-    const payload = parsed.data as { conversationId: number | null; context: ConversationContext; thinkingSpaceId: number | null };
+    const payload = parsed.data as { conversationId: number | null; context: ConversationContext };
     handlers.onConversation?.(payload);
     return { conversation: payload };
   }

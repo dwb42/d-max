@@ -17,10 +17,6 @@ import { env } from "../config/env.js";
 import { createLiveKitAgentToken } from "../api/livekit.js";
 import { getLatestRegisteredVoiceSession } from "../api/voice-session-registry.js";
 import type { RegisteredVoiceSession } from "../api/voice-session-registry.js";
-import { openDatabase } from "../db/connection.js";
-import { createToolRunner } from "../mcp/tool-registry.js";
-import { VoiceToolBridge } from "./tool-bridge.js";
-import { mergeVoiceTranscripts, prepareVoiceCapture, shouldCaptureVoiceTranscript } from "./transcript-capture.js";
 import { XaiRealtimeSession } from "./xai-realtime-session.js";
 
 type AudioStats = {
@@ -36,8 +32,6 @@ type RunningAgent = {
   activeStreams: Set<Promise<void>>;
   xai: XaiRealtimeSession | null;
   audioOutput: AgentAudioOutput | null;
-  transcriptCapture: Promise<void>;
-  transcriptBuffer: VoiceTranscriptBuffer | null;
   session: RegisteredVoiceSession;
 };
 
@@ -47,11 +41,6 @@ type AgentAudioOutput = {
   enqueue: (audio: Int16Array) => void;
   clear: () => void;
   close: () => Promise<void>;
-};
-
-type VoiceTranscriptBuffer = {
-  push: (transcript: string) => void;
-  flush: () => Promise<void>;
 };
 
 const explicitRoomName = process.argv.find((arg) => arg.startsWith("--room="))?.slice("--room=".length);
@@ -65,8 +54,6 @@ if (!env.livekitUrl) {
 }
 
 const livekitUrl = env.livekitUrl;
-const db = openDatabase();
-const voiceBridge = new VoiceToolBridge(createToolRunner(), db);
 
 if (watchMode) {
   console.log(JSON.stringify({ event: "agent_watch_started" }, null, 2));
@@ -90,7 +77,6 @@ if (watchMode) {
     roomName: explicitRoomName,
     participantName: "browser",
     mode: "drive",
-    thinkingSpaceId: null,
     createdAt: new Date().toISOString()
   });
   process.on("SIGINT", () => void shutdown());
@@ -124,21 +110,8 @@ async function switchToRoom(session: RegisteredVoiceSession): Promise<void> {
   const room = new Room();
   const activeStreams = new Set<Promise<void>>();
   const audioOutput = createAgentAudioOutput(roomName);
-  let transcriptCapture = Promise.resolve();
-  const captureTranscript = (transcript: string | null) => {
-    if (!transcript) {
-      return;
-    }
-    transcriptCapture = transcriptCapture.then(() => captureVoiceTranscript(session, transcript)).catch((error: unknown) => {
-      console.error(JSON.stringify({ event: "voice_transcript_capture_error", roomName, error: error instanceof Error ? error.message : "unknown" }, null, 2));
-    });
-    if (running?.roomName === roomName) {
-      running.transcriptCapture = transcriptCapture;
-    }
-  };
-  const transcriptBuffer = createVoiceTranscriptBuffer(captureTranscript);
   const xai = createXaiSession(audioOutput);
-  running = { roomName, room, activeStreams, xai, audioOutput, transcriptCapture, transcriptBuffer, session };
+  running = { roomName, room, activeStreams, xai, audioOutput, session };
 
   console.log(JSON.stringify({ event: "agent_starting", roomName }, null, 2));
 
@@ -214,11 +187,9 @@ async function stopRunningAgent(): Promise<void> {
   const current = running;
   running = null;
   console.log(JSON.stringify({ event: "agent_room_switching", fromRoom: current.roomName }, null, 2));
-  await current.transcriptBuffer?.flush();
   await current.room.disconnect();
   current.xai?.close();
   await current.audioOutput?.close();
-  await current.transcriptCapture;
   await Promise.allSettled(Array.from(current.activeStreams));
 }
 
@@ -287,9 +258,6 @@ function createXaiSession(audioOutput: AgentAudioOutput | null): XaiRealtimeSess
     },
     onEvent: (event) => {
       const type = String(event.type ?? "unknown");
-      if (type === "conversation.item.input_audio_transcription.completed" && typeof event.transcript === "string") {
-        running?.transcriptBuffer?.push(event.transcript);
-      }
       if (
         type === "session.created" ||
         type === "session.updated" ||
@@ -368,68 +336,6 @@ function createAgentAudioOutput(roomName: string): AgentAudioOutput | null {
   };
 }
 
-async function captureVoiceTranscript(session: RegisteredVoiceSession, transcript: string): Promise<void> {
-  const capture = prepareVoiceCapture(transcript);
-  if (!session.thinkingSpaceId || !capture) {
-    return;
-  }
-
-  const result = await voiceBridge.captureThinking({
-    spaceId: session.thinkingSpaceId,
-    rawInput: capture.rawInput,
-    summary: capture.summary,
-    thoughts: capture.thoughts
-  });
-
-  console.log(
-    JSON.stringify(
-      {
-        event: "voice_transcript_captured",
-        roomName: session.roomName,
-        spaceId: session.thinkingSpaceId,
-        sessionId: result.sessionId,
-        savedThoughts: result.savedThoughts,
-        thoughtTypes: capture.thoughts.map((thought) => thought.type)
-      },
-      null,
-      2
-    )
-  );
-}
-
-function createVoiceTranscriptBuffer(onFlush: (transcript: string | null) => void): VoiceTranscriptBuffer {
-  let pending: string | null = null;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-
-  const flushNow = () => {
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
-    }
-
-    const transcript = pending;
-    pending = null;
-    onFlush(transcript);
-  };
-
-  return {
-    push: (transcript: string) => {
-      if (!shouldCaptureVoiceTranscript(transcript)) {
-        return;
-      }
-
-      pending = mergeVoiceTranscripts(pending, transcript);
-      if (timer) {
-        clearTimeout(timer);
-      }
-      timer = setTimeout(flushNow, 2000);
-    },
-    flush: async () => {
-      flushNow();
-    }
-  };
-}
-
 function isAgentParticipant(identity: string): boolean {
   return identity.startsWith("dmax-agent");
 }
@@ -459,6 +365,5 @@ async function shutdown(): Promise<void> {
   console.log(JSON.stringify({ event: "agent_stopping" }, null, 2));
   await stopRunningAgent();
   await dispose();
-  db.close();
   process.exit(0);
 }

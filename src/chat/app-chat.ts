@@ -16,7 +16,6 @@ export type AppChatMessageInput = {
   message: string;
   conversationId?: number | null;
   context?: ConversationContext | null;
-  thinkingSpaceId?: number | null;
   source?: "app_text" | "app_voice_message";
 };
 
@@ -24,9 +23,6 @@ export type AppChatMessageResult = {
   reply: string;
   conversationId: number | null;
   context: ConversationContext;
-  thinkingSpaceId: number | null;
-  captured: boolean;
-  savedThoughts: number;
   messages: AppChatMessage[];
   activities: OpenClawActivity[];
 };
@@ -36,7 +32,6 @@ export type AppChatAgentRunner = (message: string, options: { conversationId: nu
 export type PreparedAppChatTurn = {
   conversationId: number;
   context: ConversationContext;
-  thinkingSpaceId: number | null;
   agentMessage: string;
 };
 
@@ -93,9 +88,6 @@ export class AppChatService {
         reply,
         conversationId: input.conversationId ?? null,
         context: input.context ?? { type: "global" },
-        thinkingSpaceId: input.thinkingSpaceId ?? null,
-        captured: false,
-        savedThoughts: 0,
         messages: [],
         activities: []
       };
@@ -112,7 +104,6 @@ export class AppChatService {
     }
 
     const source = input.source ?? "app_text";
-    const spaceId = input.thinkingSpaceId ?? null;
     const resolved = this.resolveInputContext(input);
     const conversation = this.conversations.findById(input.conversationId ?? 0)
       ?? this.conversations.create({
@@ -124,7 +115,7 @@ export class AppChatService {
     if (previousMessages.length === 0 && !conversation.title?.trim()) {
       this.conversations.updateTitle(conversation.id, deriveConversationTitle(message));
     }
-    const userMessage = this.chatMessages.create({ conversationId: conversation.id, role: "user", content: message, source, thinkingSpaceId: spaceId });
+    const userMessage = this.chatMessages.create({ conversationId: conversation.id, role: "user", content: message, source });
 
     const agentMessage = buildContextualAgentMessage(message, resolved);
     this.promptLogs.create({
@@ -144,7 +135,6 @@ export class AppChatService {
     return {
       conversationId: conversation.id,
       context: resolved.context,
-      thinkingSpaceId: spaceId,
       agentMessage
     };
   }
@@ -161,8 +151,7 @@ export class AppChatService {
       conversationId: prepared.conversationId,
       role: "assistant",
       content: agentResult.text,
-      source: "system",
-      thinkingSpaceId: prepared.thinkingSpaceId
+      source: "system"
     });
     this.conversations.touch(prepared.conversationId);
 
@@ -170,9 +159,6 @@ export class AppChatService {
       reply: agentResult.text,
       conversationId: prepared.conversationId,
       context: prepared.context,
-      thinkingSpaceId: prepared.thinkingSpaceId,
-      captured: false,
-      savedThoughts: 0,
       messages: [assistantMessage],
       activities: agentResult.activities
     };
@@ -213,8 +199,7 @@ const OPENCLAW_TOOL_CONTEXT = [
   "Known d-max tool surface:",
   "- Categories: listCategories, createCategory, updateCategory",
   "- Projects: listProjects, getProject, createProject, updateProject, archiveProject, updateProjectMarkdown",
-  "- Tasks: listTasks, createTask, updateTask, completeTask, deleteTask",
-  "- Thinking Memory: listThinkingSpaces, getThinkingSpace, getThinkingContext, createThinkingSpace, updateThinkingSpace, createThinkingSession, captureThoughts, listThoughts, updateThought, linkThought, listThoughtLinks, createTension, updateTension, renderOpenLoops, renderProjectGate, renderTaskGate"
+  "- Tasks: listTasks, createTask, updateTask, completeTask, deleteTask"
 ].join("\n");
 
 function formatMemoryHistory(messages: AppChatMessage[]): string {

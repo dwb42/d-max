@@ -52,7 +52,7 @@ describe("task tools", () => {
     const created = await runner.run(
       "createTask",
       {
-        title: "Review Inbox",
+        title: "Clean Inbox",
         useInboxIfProjectMissing: true
       },
       { db }

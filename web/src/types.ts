@@ -39,62 +39,12 @@ export type Task = {
 export type ProjectDetail = {
   project: Project;
   tasks: Task[];
-  thoughtLinks: Array<{
-    id: number;
-    thoughtId: number;
-    toEntityType: string;
-    toEntityId: number;
-    relation: string;
-    createdAt: string;
-  }>;
 };
 
 export type TaskDetail = {
   task: Task;
   project: Project | null;
   category: Category | null;
-};
-
-export type ThinkingSpace = {
-  id: number;
-  title: string;
-  summary: string | null;
-  status: "active" | "paused" | "archived";
-  updatedAt: string;
-};
-
-export type Thought = {
-  id: number;
-  type: string;
-  content: string;
-  status: string;
-  maturity: string;
-  confidence: number;
-  heat: number;
-};
-
-export type Tension = {
-  id: number;
-  want: string;
-  but: string;
-  pressure: "low" | "medium" | "high";
-  status: string;
-};
-
-export type ThinkingContext = {
-  space: ThinkingSpace;
-  recentSessions: Array<{ id: number; summary: string | null; createdAt: string }>;
-  activeThoughts: Thought[];
-  unresolvedTensions: Tension[];
-  projectCandidates: Thought[];
-  taskCandidates: Thought[];
-  openLoops: {
-    recommendation: string;
-    hotThoughts: Thought[];
-    taskCandidates: Thought[];
-    projectCandidates: Thought[];
-    unresolvedTensions: Tension[];
-  };
 };
 
 export type ConversationContext =
@@ -108,7 +58,6 @@ export type AppOverview = {
   categories: Category[];
   projects: Project[];
   tasks: Task[];
-  thinkingSpaces: ThinkingSpace[];
 };
 
 export type LiveKitVoiceSession = {
@@ -122,9 +71,6 @@ export type AppChatResult = {
   reply: string;
   conversationId: number | null;
   context: ConversationContext;
-  thinkingSpaceId: number | null;
-  captured: boolean;
-  savedThoughts: number;
   messages: PersistedChatMessage[];
   activities: ChatActivity[];
 };
@@ -158,7 +104,7 @@ export type StateEvent = {
   id: number;
   source: "api" | "tool";
   operation: string;
-  entityType: "overview" | "category" | "project" | "task" | "thinking";
+  entityType: "overview" | "category" | "project" | "task";
   entityId: number | null;
   categoryId: number | null;
   projectId: number | null;
@@ -168,7 +114,7 @@ export type StateEvent = {
 
 export type ChatActivity = {
   id: string;
-  kind: "tool_call" | "tool_result" | "plan" | "thinking";
+  kind: "tool_call" | "tool_result" | "plan" | "reasoning";
   status: "running" | "completed" | "failed";
   title: string;
   detail?: string;
@@ -181,6 +127,5 @@ export type PersistedChatMessage = {
   role: "user" | "assistant";
   content: string;
   source: "app_text" | "app_voice_message" | "system";
-  thinkingSpaceId: number | null;
   createdAt: string;
 };

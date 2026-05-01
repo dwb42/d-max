@@ -10,7 +10,6 @@ export type AppChatMessage = {
   role: AppChatRole;
   content: string;
   source: AppChatSource;
-  thinkingSpaceId: number | null;
   createdAt: string;
 };
 
@@ -20,7 +19,6 @@ type AppChatMessageRow = {
   role: AppChatRole;
   content: string;
   source: AppChatSource;
-  thinking_space_id: number | null;
   created_at: string;
 };
 
@@ -29,17 +27,15 @@ export type CreateAppChatMessageInput = {
   role: AppChatRole;
   content: string;
   source?: AppChatSource;
-  thinkingSpaceId?: number | null;
 };
 
 function toMessage(row: AppChatMessageRow): AppChatMessage {
-    return {
-      id: row.id,
-      conversationId: row.conversation_id,
-      role: row.role,
+  return {
+    id: row.id,
+    conversationId: row.conversation_id,
+    role: row.role,
     content: row.content,
     source: row.source,
-    thinkingSpaceId: row.thinking_space_id,
     createdAt: row.created_at
   };
 }
@@ -59,10 +55,8 @@ export class AppChatRepository {
 
   create(input: CreateAppChatMessageInput, now = nowIso()): AppChatMessage {
     const result = this.db
-      .prepare(
-        "insert into app_chat_messages (conversation_id, role, content, source, thinking_space_id, created_at) values (?, ?, ?, ?, ?, ?)"
-      )
-      .run(input.conversationId ?? null, input.role, input.content, input.source ?? "app_text", input.thinkingSpaceId ?? null, now);
+      .prepare("insert into app_chat_messages (conversation_id, role, content, source, created_at) values (?, ?, ?, ?, ?)")
+      .run(input.conversationId ?? null, input.role, input.content, input.source ?? "app_text", now);
 
     return this.findById(Number(result.lastInsertRowid))!;
   }

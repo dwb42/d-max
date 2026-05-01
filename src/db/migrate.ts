@@ -10,6 +10,7 @@ export function migrate(databasePath?: string): void {
 
   try {
     migrateExistingAppChatMessages(db);
+    migrateRemovedThinkingDomain(db);
     migrateSortOrder(db);
     db.exec(schema);
     migratePromptLogs(db);
@@ -18,6 +19,82 @@ export function migrate(databasePath?: string): void {
   } finally {
     db.close();
   }
+}
+
+function migrateRemovedThinkingDomain(db: ReturnType<typeof openDatabase>): void {
+  db.pragma("foreign_keys = OFF");
+  try {
+    removeAppChatThinkingSpaceColumn(db);
+    removeThinkingStateEvents(db);
+
+    db.exec(`
+      drop table if exists thought_links;
+      drop table if exists tensions;
+      drop table if exists thoughts;
+      drop table if exists thinking_sessions;
+      drop table if exists thinking_spaces;
+    `);
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
+
+function removeAppChatThinkingSpaceColumn(db: ReturnType<typeof openDatabase>): void {
+  const existing = db
+    .prepare("select name from sqlite_master where type = 'table' and name = 'app_chat_messages'")
+    .get() as { name: string } | undefined;
+  if (!existing) {
+    return;
+  }
+
+  const columns = db.prepare("pragma table_info(app_chat_messages)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "thinking_space_id")) {
+    return;
+  }
+
+  db.exec(`
+    create table app_chat_messages_next (
+      id integer primary key,
+      conversation_id integer references app_conversations(id),
+      role text not null check (role in ('user', 'assistant')),
+      content text not null,
+      source text not null default 'app_text' check (source in ('app_text', 'app_voice_message', 'system')),
+      created_at text not null
+    );
+    insert into app_chat_messages_next (id, conversation_id, role, content, source, created_at)
+      select id, conversation_id, role, content, source, created_at from app_chat_messages;
+    drop table app_chat_messages;
+    alter table app_chat_messages_next rename to app_chat_messages;
+  `);
+}
+
+function removeThinkingStateEvents(db: ReturnType<typeof openDatabase>): void {
+  const existing = db
+    .prepare("select name from sqlite_master where type = 'table' and name = 'app_state_events'")
+    .get() as { name: string } | undefined;
+  if (!existing) {
+    return;
+  }
+
+  db.exec(`
+    create table app_state_events_next (
+      id integer primary key,
+      source text not null check (source in ('api', 'tool')),
+      operation text not null,
+      entity_type text not null check (entity_type in ('overview', 'category', 'project', 'task')),
+      entity_id integer,
+      category_id integer,
+      project_id integer,
+      task_id integer,
+      created_at text not null
+    );
+    insert into app_state_events_next (id, source, operation, entity_type, entity_id, category_id, project_id, task_id, created_at)
+      select id, source, operation, entity_type, entity_id, category_id, project_id, task_id, created_at
+      from app_state_events
+      where entity_type in ('overview', 'category', 'project', 'task');
+    drop table app_state_events;
+    alter table app_state_events_next rename to app_state_events;
+  `);
 }
 
 function migrateExistingAppChatMessages(db: ReturnType<typeof openDatabase>): void {
@@ -83,7 +160,7 @@ function migrateStateEvents(db: ReturnType<typeof openDatabase>): void {
       id integer primary key,
       source text not null check (source in ('api', 'tool')),
       operation text not null,
-      entity_type text not null check (entity_type in ('overview', 'category', 'project', 'task', 'thinking')),
+      entity_type text not null check (entity_type in ('overview', 'category', 'project', 'task')),
       entity_id integer,
       category_id integer,
       project_id integer,

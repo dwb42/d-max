@@ -1,6 +1,6 @@
 # d-max Current State
 
-Date: 2026-04-30
+Date: 2026-05-01
 
 Short handoff for fresh Codex/OpenClaw sessions. This file describes the
 implemented repository state; older plans are historical unless this file or
@@ -8,20 +8,17 @@ code says otherwise.
 
 ## Snapshot
 
-d-max is Dietrich's agentic project, task, and thinking memory system.
+d-max is Dietrich's agentic project, task, and project-memory system.
 
 Active interfaces:
 
 - Telegram bot for daily text and voice use.
-- Browser app for `/drive`, `/brainstorms`, `/projects`,
-  `/projects/:categoryName`, `/projects/:id`, `/tasks`, `/tasks/:id`, and
-  `/review`.
-- Browser/WebRTC realtime voice prototype using LiveKit, xAI realtime voice,
-  and the existing d-max ToolRunner.
+- Browser app for `/drive`, `/projects`, `/projects/:categoryName`,
+  `/projects/:id`, `/tasks`, `/tasks/:id`, and `/prompts`.
+- Browser/WebRTC realtime voice prototype using LiveKit and xAI realtime voice.
 
-Core rule: user-facing language may say Brainstorm; the durable implemented
-domain is Thinking Memory. State changes go through tools/API services; SQLite
-is the source of truth.
+SQLite is the source of truth. Durable state changes go through tools/API
+services.
 
 ## Data Model
 
@@ -29,24 +26,18 @@ SQLite tables:
 
 ```text
 categories, projects, tasks,
-thinking_spaces, thinking_sessions, thoughts, thought_links, tensions,
 app_chat_messages, app_conversations, app_prompt_logs, app_state_events
 ```
 
-`projects.markdown` is project memory. There is no `brainstorms` table.
+`projects.markdown` is required project memory. There are no exploratory memory
+tables or session-summary tables.
 
 ## Runtime And Provider State
 
 - Runtime: OpenClaw plus deterministic d-max MCP tools.
-- Tools cover categories, projects, tasks, Thinking Memory, open loops, and
-  project/task extraction gates.
+- Tools cover categories, projects, and tasks.
 - Local OpenClaw uses `openai-codex/gpt-5.5`; do not route Telegram/app chat
   back to plain OpenAI API unless explicitly experimenting.
-- Verified Telegram paths:
-  - text -> OpenClaw -> d-max tools -> SQLite
-  - voice -> OpenClaw STT -> d-max tools -> SQLite
-  - voice response -> Gemini TTS -> Telegram voice reply
-  - Brainstorm/Thinking capture and extraction gates
 
 ## Browser App
 
@@ -70,15 +61,14 @@ Implemented behavior:
 - Agent/tool state writes emit `app_state_events`; the browser subscribes via
   SSE and refetches visible state without a manual page reload.
 - `/projects`: grouped by category; clicking a category opens
-  `/projects/<category_name>` for that category; category taglines and top
-  counters are removed.
+  `/projects/<category_name>` for that category.
 - `/projects/:id`: markdown project memory rendered as UI, Back to Projects
-  plus Back to current category, linked tasks below project memory, generic
-  detail header/tagline removed.
+  plus Back to current category, linked tasks below project memory.
 - `/tasks/:id`: task detail with status, priority, due/completed/updated dates,
   notes, Back to Tasks, Back to Project, and status actions.
 - `/drive`: LiveKit room creation, browser mic publishing, audio meter,
   start/end controls.
+- `/prompts`: debug view for prompts sent to OpenClaw.
 
 ## API Server
 
@@ -89,25 +79,31 @@ GET  /health
 GET  /api/app/overview
 GET  /api/categories
 POST /api/categories
+PATCH /api/categories/order
 GET  /api/projects
 GET  /api/projects/:id
+PATCH /api/projects/order
 GET  /api/tasks
 GET  /api/tasks/:id
 PATCH /api/tasks/:id
 POST /api/tasks/:id/complete
-GET  /api/thinking/spaces
-GET  /api/thinking/spaces/:id/context
-PATCH /api/thinking/thoughts/:id
-PATCH /api/thinking/tensions/:id
+PATCH /api/tasks/order
+GET  /api/chat/conversations
+POST /api/chat/conversations
 GET  /api/chat/messages
+GET  /api/chat/activity
 POST /api/chat/message
+POST /api/chat/message/stream
+POST /api/chat/voice/transcribe
+GET  /api/debug/prompts
 GET  /api/state/events
 POST /api/voice/session
 ```
 
-Boundary: explicit UI actions use API routes/repositories; natural language
-from Telegram, app chat, chat voice messages, and realtime voice uses the
-agent/tool boundary.
+Boundary: explicit UI actions use API routes/repositories. Telegram and app
+chat natural-language turns use OpenClaw plus d-max tools. Browser Drive Mode
+currently bridges realtime audio to xAI; it does not yet perform durable
+ToolRunner state changes.
 
 ## Realtime Voice
 
@@ -115,8 +111,7 @@ Current browser-first path:
 
 ```text
 Browser Drive Mode -> LiveKit room -> d-max LiveKit agent
--> xAI realtime voice session -> voice-safe ToolBridge
--> existing ToolRunner -> SQLite
+-> xAI realtime voice session
 ```
 
 Implemented:
@@ -128,32 +123,18 @@ Implemented:
   back to LiveKit.
 - `src/voice/xai-realtime-session.ts`: xAI realtime WebSocket wrapper.
 - `src/voice/drive-mode-instructions.ts`: drive-mode voice policy.
-- Transcript capture merges/filters completed transcripts and saves simple
-  extracted thoughts into Thinking Memory through `VoiceToolBridge`.
-- Voice ToolBridge supports start/resume Brainstorm, capture Thinking Memory,
-  render open loops, create pending task actions, and commit confirmed tasks
-  through existing tools.
-- Tests cover session state, action ledger, audio contracts, event journal,
-  Twilio, transcript capture, and tool bridge.
 
 Hardening left:
 
 - Measure end-to-end latency and interruption behavior across LiveKit/xAI.
-- Implement robust realtime provider tool-calling, not only transcript capture.
+- Implement robust realtime provider tool-calling.
 - Improve session event observability and latency metrics.
 - Make pending action ledger durable before production voice commits.
-- Improve transcript interpretation beyond lightweight heuristics.
-- Decide voice event/transcript privacy and retention.
 
-## Telephony
+Known issue:
 
-Twilio is no longer first path, but foundation exists:
-
-- `src/voice/server.ts`
-- `src/voice/twilio.ts`
-- caller allow-listing and TwiML Media Stream tests
-
-Direction: prove browser/WebRTC voice through LiveKit before phone network.
+- Drive Mode can speak/listen through xAI, but durable project/task commits from
+  realtime voice are not wired after the exploratory memory removal.
 
 ## Environment And Secrets
 

@@ -6,15 +6,10 @@ import { createTestDatabase } from "../helpers/test-db.js";
 const CONTEXT_RELEVANT_TABLES = [
   "categories",
   "projects",
-  "tasks",
-  "thinking_spaces",
-  "thinking_sessions",
-  "thoughts",
-  "thought_links",
-  "tensions"
+  "tasks"
 ];
 
-const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "90b3c93c029ae8a2fee411355d5247d898dc2edc99517d70a7841d5f39146afc";
+const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "6129e5bfd029dc6ca0ce741896e6a3bba0d7bd89879295ff71f6c11d9d5cb5fb";
 
 describe("context resolver schema synchronization", () => {
   let db: Database.Database;
@@ -27,10 +22,10 @@ describe("context resolver schema synchronization", () => {
     db.close();
   });
 
-  it("forces a context resolver review when context-relevant schema changes", () => {
+  it("forces a context resolver inspection when context-relevant schema changes", () => {
     const signature = contextRelevantSchemaSignature(db);
 
-    expect(signature, "Review src/chat/conversation-context.ts before updating this schema signature.").toBe(
+    expect(signature, "Inspect src/chat/conversation-context.ts before updating this schema signature.").toBe(
       EXPECTED_CONTEXT_SCHEMA_SIGNATURE
     );
   });

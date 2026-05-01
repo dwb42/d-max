@@ -8,7 +8,6 @@ import {
   Copy,
   GitPullRequestArrow,
   GripVertical,
-  Lightbulb,
   Mic,
   Mic2,
   PanelRightOpen,
@@ -32,16 +31,13 @@ import {
   fetchPromptLogs,
   fetchProjectDetail,
   fetchTaskDetail,
-  fetchThinkingContext,
   reorderCategories,
   reorderProjects,
   reorderTasks,
   subscribeStateEvents,
   streamChatMessage,
   transcribeVoiceMessage,
-  updateTaskStatus,
-  updateTension,
-  updateThought
+  updateTaskStatus
 } from "./api.js";
 import type {
   AppOverview,
@@ -54,21 +50,18 @@ import type {
   ProjectDetail,
   StateEvent,
   Task,
-  TaskDetail,
-  ThinkingContext,
-  ThinkingSpace,
-  Thought
+  TaskDetail
 } from "./types.js";
 import "./styles.css";
 
-type View = "drive" | "thinking" | "projects" | "project" | "tasks" | "task" | "review" | "prompts";
+type View = "drive" | "projects" | "project" | "tasks" | "task" | "prompts";
 type RouteState = {
   view: View;
   projectId: number | null;
   taskId: number | null;
   categoryName: string | null;
 };
-type VoiceState = "idle" | "listening" | "thinking" | "speaking";
+type VoiceState = "idle" | "connecting" | "listening" | "speaking";
 type ChatVoicePhase = "idle" | "recording" | "transcribing";
 type ChatMessage = {
   id: string;
@@ -93,10 +86,8 @@ type AudioMeterHandle = {
 
 const navItems: Array<{ id: Exclude<View, "project">; label: string; icon: typeof Mic; path: string }> = [
   { id: "drive", label: "Drive", icon: Mic, path: "/drive" },
-  { id: "thinking", label: "Thinking", icon: Lightbulb, path: "/brainstorms" },
   { id: "projects", label: "Projects", icon: Blocks, path: "/projects" },
   { id: "tasks", label: "Tasks", icon: ClipboardList, path: "/tasks" },
-  { id: "review", label: "Review", icon: CheckCircle2, path: "/review" },
   { id: "prompts", label: "Prompts", icon: GitPullRequestArrow, path: "/prompts" }
 ];
 
@@ -117,16 +108,13 @@ function routeFromPath(path: string): RouteState {
 
   if (pathname === "/drive") return { view: "drive", projectId: null, taskId: null, categoryName: null };
   if (pathname === "/chat" || pathname === "/") return { view: "projects", projectId: null, taskId: null, categoryName: null };
-  if (pathname === "/brainstorms" || pathname === "/thinking") return { view: "thinking", projectId: null, taskId: null, categoryName: null };
   if (pathname === "/projects") return { view: "projects", projectId: null, taskId: null, categoryName: null };
   if (pathname === "/tasks") return { view: "tasks", projectId: null, taskId: null, categoryName: null };
-  if (pathname === "/review") return { view: "review", projectId: null, taskId: null, categoryName: null };
   if (pathname === "/prompts") return { view: "prompts", projectId: null, taskId: null, categoryName: null };
   return { view: "projects", projectId: null, taskId: null, categoryName: null };
 }
 
 function pathForRoute(view: View, projectId?: number | null): string {
-  if (view === "thinking") return "/brainstorms";
   if (view === "project") return `/projects/${projectId}`;
   if (view === "task") return "/tasks";
   return `/${view}`;
@@ -253,8 +241,6 @@ export default function App() {
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [promptLogs, setPromptLogs] = useState<AppPromptLog[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState<number | null>(null);
-  const [selectedSpaceId, setSelectedSpaceId] = useState<number | null>(null);
-  const [thinkingContext, setThinkingContext] = useState<ThinkingContext | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceRoom, setVoiceRoom] = useState<Room | null>(null);
@@ -358,7 +344,6 @@ export default function App() {
           message,
           conversationId: activeConversationId,
           context: activeContext,
-          thinkingSpaceId: selectedSpaceId,
           source: source === "voice" ? "app_voice_message" : "app_text"
         },
         {
@@ -386,9 +371,6 @@ export default function App() {
         setChatMessages(messagesWithActivities);
       }
       await refresh();
-      if (result.thinkingSpaceId) {
-        setSelectedSpaceId(result.thinkingSpaceId);
-      }
     } catch (err) {
       setChatMessages((current) => [
         ...current,
@@ -601,7 +583,6 @@ export default function App() {
       setError(null);
       const data = await fetchOverview();
       setOverview(data);
-      setSelectedSpaceId((current) => current ?? data.thinkingSpaces[0]?.id ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load d-max state.");
     }
@@ -622,11 +603,6 @@ export default function App() {
         .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load task."));
     }
 
-    if (selectedSpaceId) {
-      await fetchThinkingContext(selectedSpaceId)
-        .then(setThinkingContext)
-        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load thinking context."));
-    }
   }
 
   async function loadPrompts() {
@@ -662,7 +638,7 @@ export default function App() {
       }
       unsubscribe();
     };
-  }, [route, selectedSpaceId]);
+  }, [route]);
 
   useEffect(() => {
     const onPopState = () => setRoute(routeFromPath(`${window.location.pathname}${window.location.search}`));
@@ -687,17 +663,6 @@ export default function App() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
-
-  useEffect(() => {
-    if (!selectedSpaceId) {
-      setThinkingContext(null);
-      return;
-    }
-
-    fetchThinkingContext(selectedSpaceId)
-      .then(setThinkingContext)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load thinking context."));
-  }, [selectedSpaceId]);
 
   useEffect(() => {
     if (route.view !== "project" || !route.projectId) {
@@ -832,8 +797,8 @@ export default function App() {
             onStart={async () => {
               try {
                 setVoiceError(null);
-                setVoiceState("thinking");
-                const session = await createVoiceSession({ mode: "drive", thinkingSpaceId: selectedSpaceId });
+                setVoiceState("connecting");
+                const session = await createVoiceSession({ mode: "drive" });
                 const room = new Room({
                   adaptiveStream: true,
                   dynacast: true
@@ -880,26 +845,6 @@ export default function App() {
               setVoiceState("idle");
             }}
             audioLevel={audioLevel}
-            thinkingContext={thinkingContext}
-            spaces={overview?.thinkingSpaces ?? []}
-            selectedSpaceId={selectedSpaceId}
-            setSelectedSpaceId={setSelectedSpaceId}
-          />
-        )}
-        {!isEmptyState && view === "thinking" && (
-          <ThinkingView
-            spaces={overview?.thinkingSpaces ?? []}
-            selectedSpaceId={selectedSpaceId}
-            setSelectedSpaceId={setSelectedSpaceId}
-            context={thinkingContext}
-            onThoughtUpdate={async (thoughtId, status) => {
-              await updateThought(thoughtId, { status });
-              if (selectedSpaceId) setThinkingContext(await fetchThinkingContext(selectedSpaceId));
-            }}
-            onTensionResolve={async (tensionId) => {
-              await updateTension(tensionId, { status: "resolved" });
-              if (selectedSpaceId) setThinkingContext(await fetchThinkingContext(selectedSpaceId));
-            }}
           />
         )}
         {!isEmptyState && view === "projects" && (
@@ -986,7 +931,6 @@ export default function App() {
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
           />
         )}
-        {!isEmptyState && view === "review" && <ReviewView overview={overview} context={thinkingContext} onNavigate={navigate} />}
         {view === "prompts" && (
           <PromptInspectorView
             prompts={promptLogs}
@@ -1071,15 +1015,11 @@ function DriveView(props: {
   audioLevel: number;
   onStart: () => Promise<void>;
   onEnd: () => Promise<void>;
-  thinkingContext: ThinkingContext | null;
-  spaces: ThinkingSpace[];
-  selectedSpaceId: number | null;
-  setSelectedSpaceId: (id: number) => void;
 }) {
   const stateLabel = {
     idle: "Ready",
     listening: "Listening",
-    thinking: "Thinking",
+    connecting: "Connecting",
     speaking: "Speaking"
   }[props.voiceState];
 
@@ -1088,7 +1028,7 @@ function DriveView(props: {
       <div className={`voice-orb ${props.voiceState}`}>
         <SoundWave level={props.audioLevel} active={props.voiceState === "listening"} />
         <strong>{stateLabel}</strong>
-        <span>{props.thinkingContext?.space.title ?? "No active Brainstorm"}</span>
+        <span>{props.voiceRoomName ? "LiveKit connected" : "No active session"}</span>
       </div>
 
       <div className="drive-controls">
@@ -1103,20 +1043,6 @@ function DriveView(props: {
       </div>
 
       <div className="drive-context">
-        <label>
-          Brainstorm
-          <select value={props.selectedSpaceId ?? ""} onChange={(event) => props.setSelectedSpaceId(Number(event.target.value))}>
-            {props.spaces.map((space) => (
-              <option key={space.id} value={space.id}>
-                {space.title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="open-loop">
-          <span>Current open loop</span>
-          <p>{props.thinkingContext?.openLoops.recommendation ?? "Start a Brainstorm to create a voice context."}</p>
-        </div>
         <div className="open-loop">
           <span>LiveKit</span>
           <p>{props.voiceRoomName ? `Connected to ${props.voiceRoomName}` : "No active WebRTC room."}</p>
@@ -1135,7 +1061,6 @@ function ChatView(props: {
   activities: ChatActivity[];
   voicePhase: ChatVoicePhase;
   voiceLevel: number;
-  thinkingContext: ThinkingContext | null;
   onSubmit: (text: string) => void;
   onStartVoiceMessage: () => void;
   onConfirmVoiceMessage: () => void;
@@ -1155,7 +1080,7 @@ function ChatView(props: {
         ))}
         {props.busy ? (
           <article className="chat-message assistant pending">
-            <span className="thinking-dots">
+            <span className="loading-dots">
               <i />
               <i />
               <i />
@@ -1206,7 +1131,7 @@ function ChatView(props: {
         ) : null}
         {props.voicePhase === "transcribing" ? (
           <div className="voice-message-recorder transcribing">
-            <span className="thinking-dots">
+            <span className="loading-dots">
               <i />
               <i />
               <i />
@@ -1233,12 +1158,6 @@ function ChatView(props: {
           </button>
         </div>
       </form>
-
-      <aside className="chat-context">
-        <span>Brainstorm</span>
-        <strong>{props.thinkingContext?.space.title ?? "App Chat"}</strong>
-        <p>{props.thinkingContext?.openLoops.recommendation ?? "Messages are captured into a Brainstorm once they contain useful state."}</p>
-      </aside>
     </section>
   );
 }
@@ -1316,7 +1235,6 @@ function AgentDrawer(props: {
         activities={props.activities}
         voicePhase={props.voicePhase}
         voiceLevel={props.voiceLevel}
-        thinkingContext={null}
         onSubmit={props.onSubmit}
         onStartVoiceMessage={props.onStartVoiceMessage}
         onConfirmVoiceMessage={props.onConfirmVoiceMessage}
@@ -1403,68 +1321,6 @@ function SoundWave({ level, active }: { level: number; active: boolean }) {
     <div className={`soundwave ${active ? "active" : ""}`} style={{ "--level": String(level) } as CSSProperties}>
       {bars}
     </div>
-  );
-}
-
-function ThinkingView(props: {
-  spaces: ThinkingSpace[];
-  selectedSpaceId: number | null;
-  setSelectedSpaceId: (id: number) => void;
-  context: ThinkingContext | null;
-  onThoughtUpdate: (thoughtId: number, status: string) => Promise<void>;
-  onTensionResolve: (tensionId: number) => Promise<void>;
-}) {
-  return (
-    <section className="split-view">
-      <div className="list-pane">
-        {props.spaces.map((space) => (
-          <button key={space.id} className={`space-row ${props.selectedSpaceId === space.id ? "active" : ""}`} onClick={() => props.setSelectedSpaceId(space.id)}>
-            <strong>{space.title}</strong>
-            <span>{space.summary ?? "No summary yet"}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="detail-pane">
-        {!props.context ? (
-          <EmptyState title="No thinking space selected" />
-        ) : (
-          <>
-            <div className="section-heading">
-              <h2>{props.context.space.title}</h2>
-              <p>{props.context.openLoops.recommendation}</p>
-            </div>
-            <div className="grid two">
-              <Panel title="Tensions">
-                {props.context.unresolvedTensions.map((tension) => (
-                  <div className="tension-row" key={tension.id}>
-                    <div>
-                      <strong>{tension.want}</strong>
-                      <span>{tension.but}</span>
-                    </div>
-                    <button className="icon-button" onClick={() => void props.onTensionResolve(tension.id)} title="Resolve tension">
-                      <CheckCircle2 size={17} />
-                    </button>
-                  </div>
-                ))}
-              </Panel>
-              <Panel title="Candidates">
-                {[...props.context.projectCandidates, ...props.context.taskCandidates].map((thought) => (
-                  <ThoughtRow key={thought.id} thought={thought} onPark={() => void props.onThoughtUpdate(thought.id, "parked")} />
-                ))}
-              </Panel>
-            </div>
-            <Panel title="Hot Thoughts">
-              <div className="thought-list">
-                {props.context.openLoops.hotThoughts.map((thought) => (
-                  <ThoughtRow key={thought.id} thought={thought} onPark={() => void props.onThoughtUpdate(thought.id, "parked")} />
-                ))}
-              </div>
-            </Panel>
-          </>
-        )}
-      </div>
-    </section>
   );
 }
 
@@ -1829,46 +1685,6 @@ function TasksView(props: {
   );
 }
 
-function ReviewView({ overview, context, onNavigate }: { overview: AppOverview | null; context: ThinkingContext | null; onNavigate: (path: string) => void }) {
-  const candidateCount = (context?.projectCandidates.length ?? 0) + (context?.taskCandidates.length ?? 0);
-  const blockedTasks = overview?.tasks.filter((task) => task.status === "blocked") ?? [];
-  const urgentTasks = overview?.tasks.filter((task) => task.priority === "urgent" || task.priority === "high") ?? [];
-
-  return (
-    <section className="review-layout">
-      <Panel title="Needs Review">
-        <div className="review-kpis">
-          <Metric label="Candidates" value={candidateCount} />
-          <Metric label="Tensions" value={context?.unresolvedTensions.length ?? 0} />
-          <Metric label="Blocked" value={blockedTasks.length} />
-        </div>
-        <p className="muted">{context?.openLoops.recommendation ?? "No active Brainstorm selected."}</p>
-      </Panel>
-      <div className="grid two">
-        <Panel title="Project Candidates">
-          {(context?.projectCandidates ?? []).length === 0 ? <EmptyState title="No project candidates" /> : null}
-          {context?.projectCandidates.map((thought) => <ThoughtRow key={thought.id} thought={thought} />)}
-        </Panel>
-        <Panel title="Task Candidates">
-          {(context?.taskCandidates ?? []).length === 0 ? <EmptyState title="No task candidates" /> : null}
-          {context?.taskCandidates.map((thought) => <ThoughtRow key={thought.id} thought={thought} />)}
-        </Panel>
-      </div>
-      <Panel title="Execution Friction">
-        {[...blockedTasks, ...urgentTasks].slice(0, 8).map((task) => (
-          <button key={task.id} className="review-row" onClick={() => onNavigate("/tasks")}>
-            <strong>{task.title}</strong>
-            <span>
-              {task.status} · {task.priority}
-            </span>
-          </button>
-        ))}
-        {blockedTasks.length + urgentTasks.length === 0 ? <EmptyState title="No high-pressure execution friction" /> : null}
-      </Panel>
-    </section>
-  );
-}
-
 function PromptInspectorView(props: {
   prompts: AppPromptLog[];
   selectedPromptId: number | null;
@@ -2106,25 +1922,6 @@ function ActivityTrail({ activities }: { activities: ChatActivity[] }) {
   );
 }
 
-function ThoughtRow({ thought, onPark }: { thought: Thought; onPark?: () => void }) {
-  return (
-    <div className="thought-row">
-      <GitPullRequestArrow size={16} />
-      <div>
-        <strong>{thought.content}</strong>
-        <span>
-          {thought.type} · {thought.maturity} · heat {thought.heat.toFixed(1)}
-        </span>
-      </div>
-      {onPark ? (
-        <button className="small-button" onClick={onPark}>
-          Park
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
 function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="panel">
@@ -2150,11 +1947,9 @@ function EmptyState({ title }: { title: string }) {
 function titleForView(view: View): string {
   return {
     drive: "Drive Mode",
-    thinking: "Thinking Memory",
     projects: "Projects",
     project: "Project",
     task: "Task",
-    review: "Review",
     prompts: "Prompt Inspector",
     tasks: "Tasks"
   }[view];
@@ -2163,11 +1958,9 @@ function titleForView(view: View): string {
 function subtitleForView(view: View): string {
   return {
     drive: "Realtime voice surface; LiveKit connection comes next.",
-    thinking: "Brainstorm spaces, open loops, tensions, and candidates.",
     projects: "",
     project: "Project memory, linked tasks, and extracted context.",
     task: "Task status, priority, notes, and project context.",
-    review: "Candidates, open loops, and execution friction.",
     prompts: "Debug view for d-max prompts sent to OpenClaw.",
     tasks: "Concrete work across active projects."
   }[view];

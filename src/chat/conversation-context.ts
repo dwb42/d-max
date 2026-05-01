@@ -5,7 +5,6 @@ import { ProjectRepository } from "../repositories/projects.js";
 import type { Project } from "../repositories/projects.js";
 import { TaskRepository } from "../repositories/tasks.js";
 import type { Task } from "../repositories/tasks.js";
-import { ThinkingRepository } from "../repositories/thinking.js";
 import type { ConversationContextType } from "../repositories/app-conversations.js";
 
 export const conversationContextSchema = z.discriminatedUnion("type", [
@@ -65,7 +64,6 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   const categories = new CategoryRepository(db);
   const projects = new ProjectRepository(db);
   const tasks = new TaskRepository(db);
-  const thinking = new ThinkingRepository(db);
 
   if (context.type === "global") {
     return {
@@ -73,7 +71,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       ...storage,
       title: "Global Chat",
       ...buildPromptSections("global", "Global d-max chat without a focused UI entity.", [
-        "Use the tools to inspect projects, tasks, or Thinking Memory when the user asks for specific state.",
+        "Use the tools to inspect projects or tasks when the user asks for specific state.",
         "Do not assume a project or task target unless the user names one clearly."
       ])
     };
@@ -133,14 +131,12 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
 
     const category = categories.findById(project.categoryId);
     const projectTasks = tasks.list({ projectId: project.id });
-    const thoughtLinks = thinking.listThoughtLinks({ toEntityType: "project", toEntityId: project.id });
     const lines = [
       formatProjectHeader(project),
       `Category: ${category ? `#${category.id} ${category.name}` : "unknown"}`,
       `Project memory markdown:\n${truncate(project.markdown || "No project markdown yet.", 7000)}`,
       `Tasks (${projectTasks.length}, open/high-signal first):`,
-      ...rankTasks(projectTasks).slice(0, 30).map(formatTask),
-      `Linked Thinking Memory references: ${thoughtLinks.length}`
+      ...rankTasks(projectTasks).slice(0, 30).map(formatTask)
     ];
 
     return {

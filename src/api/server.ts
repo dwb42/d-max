@@ -8,7 +8,6 @@ import { CategoryRepository } from "../repositories/categories.js";
 import { ProjectRepository } from "../repositories/projects.js";
 import type { TaskStatus } from "../repositories/tasks.js";
 import { TaskRepository } from "../repositories/tasks.js";
-import { ThinkingRepository } from "../repositories/thinking.js";
 import { StateEventRepository } from "../repositories/state-events.js";
 import type { CreateStateEventInput, StateEvent } from "../repositories/state-events.js";
 import { AppChatService } from "../chat/app-chat.js";
@@ -25,7 +24,6 @@ const db = openDatabase();
 const categories = new CategoryRepository(db);
 const projects = new ProjectRepository(db);
 const tasks = new TaskRepository(db);
-const thinking = new ThinkingRepository(db);
 const stateEvents = new StateEventRepository(db);
 const chat = new AppChatService(db);
 
@@ -46,13 +44,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/app/overview") {
       const activeProjects = projects.list({ status: "active" });
       const openTasks = tasks.list().filter((task) => task.status !== "done" && task.status !== "cancelled");
-      const activeSpaces = thinking.listSpaces({ status: "active" });
 
       sendJson(res, 200, {
         categories: categories.list(),
         projects: activeProjects,
-        tasks: openTasks,
-        thinkingSpaces: activeSpaces
+        tasks: openTasks
       });
       return;
     }
@@ -101,8 +97,7 @@ const server = http.createServer(async (req, res) => {
 
       sendJson(res, 200, {
         project,
-        tasks: tasks.list({ projectId: project.id }),
-        thoughtLinks: thinking.listThoughtLinks({ toEntityType: "project", toEntityId: project.id })
+        tasks: tasks.list({ projectId: project.id })
       });
       return;
     }
@@ -148,11 +143,6 @@ const server = http.createServer(async (req, res) => {
       const task = tasks.complete(Number(completeTaskMatch[1]));
       emitApiStateEvent({ operation: "completeTask", entityType: "task", entityId: task.id, taskId: task.id, projectId: task.projectId });
       sendJson(res, 200, { task });
-      return;
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/thinking/spaces") {
-      sendJson(res, 200, { spaces: thinking.listSpaces({ status: "active" }) });
       return;
     }
 
@@ -202,9 +192,6 @@ const server = http.createServer(async (req, res) => {
             reply: "Schreib mir kurz, was du sortieren oder anlegen möchtest.",
             conversationId: body.conversationId ?? null,
             context: body.context ?? { type: "global" },
-            thinkingSpaceId: body.thinkingSpaceId ?? null,
-            captured: false,
-            savedThoughts: 0,
             messages: [],
             activities: []
           });
@@ -215,8 +202,7 @@ const server = http.createServer(async (req, res) => {
       await sendSse(res, async (send) => {
         send("conversation", {
           conversationId: prepared.conversationId,
-          context: prepared.context,
-          thinkingSpaceId: prepared.thinkingSpaceId
+          context: prepared.context
         });
 
         const sessionId = `dmax-web-chat-${prepared.conversationId}`;
@@ -288,30 +274,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const thinkingContextMatch = url.pathname.match(/^\/api\/thinking\/spaces\/(\d+)\/context$/);
-    if (req.method === "GET" && thinkingContextMatch) {
-      sendJson(res, 200, { context: thinking.getThinkingContext(Number(thinkingContextMatch[1])) });
-      return;
-    }
-
-    const thoughtMatch = url.pathname.match(/^\/api\/thinking\/thoughts\/(\d+)$/);
-    if (req.method === "PATCH" && thoughtMatch) {
-      const body = updateThoughtBody.parse(await readJson(req));
-      const thought = thinking.updateThought({ id: Number(thoughtMatch[1]), ...body });
-      emitApiStateEvent({ operation: "updateThought", entityType: "thinking", entityId: thought.spaceId });
-      sendJson(res, 200, { thought });
-      return;
-    }
-
-    const tensionMatch = url.pathname.match(/^\/api\/thinking\/tensions\/(\d+)$/);
-    if (req.method === "PATCH" && tensionMatch) {
-      const body = updateTensionBody.parse(await readJson(req));
-      const tension = thinking.updateTension({ id: Number(tensionMatch[1]), ...body });
-      emitApiStateEvent({ operation: "updateTension", entityType: "thinking", entityId: tension.spaceId });
-      sendJson(res, 200, { tension });
-      return;
-    }
-
     sendJson(res, 404, { error: "Not found" });
   } catch (error) {
     const status = error instanceof z.ZodError ? 400 : 500;
@@ -360,27 +322,14 @@ const reorderTasksBody = z.object({
   taskIds: z.array(z.number().int().positive()).min(1)
 });
 
-const updateThoughtBody = z.object({
-  status: z.enum(["active", "parked", "resolved", "contradicted", "discarded"]).optional(),
-  maturity: z.enum(["spark", "named", "connected", "testable", "committed", "operational"]).optional(),
-  heat: z.number().min(0).max(1).optional()
-});
-
-const updateTensionBody = z.object({
-  status: z.enum(["unresolved", "parked", "resolved", "discarded"]).optional(),
-  pressure: z.enum(["low", "medium", "high"]).optional()
-});
-
 const voiceSessionBody = z.object({
-  mode: z.literal("drive"),
-  thinkingSpaceId: z.number().int().positive().nullable().optional()
+  mode: z.literal("drive")
 });
 
 const chatMessageBody = z.object({
   message: z.string().trim().min(1),
   conversationId: z.number().int().positive().nullable().optional(),
   context: conversationContextSchema.nullable().optional(),
-  thinkingSpaceId: z.number().int().positive().nullable().optional(),
   source: z.enum(["app_text", "app_voice_message"]).optional()
 });
 

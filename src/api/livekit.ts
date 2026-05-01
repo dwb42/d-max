@@ -10,7 +10,7 @@ export type LiveKitVoiceSession = {
   participantName: string;
 };
 
-export async function createLiveKitVoiceSession(input: { mode: "drive"; thinkingSpaceId?: number | null }): Promise<LiveKitVoiceSession> {
+export async function createLiveKitVoiceSession(input: { mode: "drive" }): Promise<LiveKitVoiceSession> {
   if (!env.livekitUrl || !env.livekitApiKey || !env.livekitApiSecret) {
     throw new Error("LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET are required.");
   }
@@ -20,10 +20,7 @@ export async function createLiveKitVoiceSession(input: { mode: "drive"; thinking
   const token = new AccessToken(env.livekitApiKey, env.livekitApiSecret, {
     identity: participantName,
     name: "Dietrich",
-    metadata: JSON.stringify({
-      mode: input.mode,
-      thinkingSpaceId: input.thinkingSpaceId ?? null
-    })
+    metadata: JSON.stringify({ mode: input.mode })
   });
 
   token.addGrant({
@@ -45,7 +42,6 @@ export async function createLiveKitVoiceSession(input: { mode: "drive"; thinking
     roomName,
     participantName,
     mode: input.mode,
-    thinkingSpaceId: input.thinkingSpaceId ?? null,
     createdAt: new Date().toISOString()
   });
 

@@ -5,7 +5,6 @@ export type RegisteredVoiceSession = {
   roomName: string;
   participantName: string;
   mode: "drive";
-  thinkingSpaceId: number | null;
   createdAt: string;
 };
 
@@ -30,4 +29,3 @@ export function listRegisteredVoiceSessions(): RegisteredVoiceSession[] {
 export function getLatestRegisteredVoiceSession(): RegisteredVoiceSession | null {
   return listRegisteredVoiceSessions()[0] ?? null;
 }
-

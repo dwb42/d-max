@@ -11,15 +11,7 @@ const STATE_MUTATING_TOOLS = new Set<ToolName>([
   "createTask",
   "updateTask",
   "completeTask",
-  "deleteTask",
-  "createThinkingSpace",
-  "updateThinkingSpace",
-  "createThinkingSession",
-  "captureThoughts",
-  "updateThought",
-  "linkThought",
-  "createTension",
-  "updateTension"
+  "deleteTask"
 ]);
 
 export function isStateMutatingTool(name: ToolName): boolean {
@@ -65,8 +57,7 @@ export function stateEventFromToolResult(name: ToolName, input: unknown, result:
     };
   }
 
-  const thinkingId = numberValue(dataRecord?.spaceId) ?? numberValue(inputRecord?.spaceId) ?? numberValue(dataRecord?.id) ?? numberValue(inputRecord?.id);
-  return { ...base, entityType: "thinking", entityId: thinkingId };
+  return null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
