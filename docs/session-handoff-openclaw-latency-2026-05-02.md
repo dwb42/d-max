@@ -557,6 +557,158 @@ Small d-max-side cleanup that remains valid regardless of the OpenClaw fix:
 - Correct `openclaw/config.web.json` tool allow entries to CamelCase d-max MCP
   names so allowlist warnings disappear and the intended policy is explicit.
 
+## Latest Update: MCP-Only Tool Calling Patch
+
+This section captures the working state after testing an MCP-only OpenClaw tool
+path for d-max browser chat.
+
+### Implemented Behavior
+
+The d-max browser-chat OpenClaw config now explicitly allows only the 14 d-max
+MCP tools with their CamelCase OpenClaw names:
+
+```text
+d-max__listCategories
+d-max__createCategory
+d-max__updateCategory
+d-max__listProjects
+d-max__getProject
+d-max__createProject
+d-max__updateProject
+d-max__archiveProject
+d-max__updateProjectMarkdown
+d-max__listTasks
+d-max__createTask
+d-max__updateTask
+d-max__completeTask
+d-max__deleteTask
+```
+
+A temporary global OpenClaw dist patch adds:
+
+```text
+DMAX_OPENCLAW_MCP_ONLY_TOOLS=1
+```
+
+When this flag is set and the effective allowlist contains only MCP-style names
+(`server__tool`) or `bundle-mcp`, OpenClaw skips local/provider tool creation in
+the embedded selection path. MCP discovery and MCP tool materialization still
+run, so d-max tools remain available.
+
+If a future config explicitly allows a local OpenClaw tool such as
+`web_search`, `web_fetch`, `browser`, `read`, or `exec`, the skip condition does
+not apply and local/provider tools can be built again.
+
+### Files Changed
+
+Repo file:
+
+```text
+openclaw/config.web.json
+```
+
+Global OpenClaw dist file:
+
+```text
+/opt/homebrew/lib/node_modules/openclaw/dist/selection-D9uTvvsw.js
+```
+
+Backup:
+
+```text
+/opt/homebrew/lib/node_modules/openclaw/dist/selection-D9uTvvsw.js.dmax-mcp-only-20260502225304.bak
+```
+
+Rollback:
+
+```bash
+cp /opt/homebrew/lib/node_modules/openclaw/dist/selection-D9uTvvsw.js.dmax-mcp-only-20260502225304.bak \
+  /opt/homebrew/lib/node_modules/openclaw/dist/selection-D9uTvvsw.js
+node --check /opt/homebrew/lib/node_modules/openclaw/dist/selection-D9uTvvsw.js
+```
+
+Runtime disable without restoring the file:
+
+```text
+DMAX_OPENCLAW_MCP_ONLY_TOOLS=0
+```
+
+### Verification
+
+Commands:
+
+```bash
+node --check /opt/homebrew/lib/node_modules/openclaw/dist/selection-D9uTvvsw.js
+OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.web.json" openclaw config validate --json
+npm run typecheck
+```
+
+All passed.
+
+### Measurements
+
+Baseline with corrected config but without `DMAX_OPENCLAW_MCP_ONLY_TOOLS=1`:
+
+```text
+traceId=mcp-only-baseline-1777755351
+conversationId=64
+openclaw.selection.tools_raw_created: 17852.5ms
+final effective tool count: 14
+```
+
+Patched warm `ping` turns with `DMAX_OPENCLAW_MCP_ONLY_TOOLS=1`:
+
+```text
+traceId=mcp-only-patched-warm-1-1777755823
+HTTP total: 3.974s
+openclaw.selection.tools_raw_created: 0.073ms
+final effective tool count: 14
+
+traceId=mcp-only-patched-warm-2-1777755827
+HTTP total: 4.886s
+openclaw.selection.tools_raw_created: 0.177ms
+final effective tool count: 14
+
+traceId=mcp-only-patched-warm-3-1777755832
+HTTP total: 5.324s
+openclaw.selection.tools_raw_created: 0.064ms
+final effective tool count: 14
+```
+
+Browser UI test on project 7:
+
+```text
+traceId=browser-chat-20260502211205-816a1066
+context: project:7
+Browser/API end-to-end: 6.7s
+sessions.send finished: 121ms
+openclaw.selection.tools_raw_created: 0.073ms
+final effective tool count: 14
+MCP calls: completeTask x2
+MCP call duration: 1-2ms each
+```
+
+Read-only MCP smoke:
+
+```text
+traceId=mcp-only-tool-smoke-1777755877
+prompt: Liste meine offenen Aufgaben kurz.
+MCP calls: listTasks, listProjects
+openclaw.selection.tools_raw_created: 0.061ms
+final effective tool count: 14
+```
+
+### Result
+
+The previous warm `tools_raw_created` cost of roughly `18s` is eliminated for
+the MCP-only browser-chat path. Remaining latency is OpenClaw run setup, MCP
+runtime/materialization, model reasoning/generation, and any actual tool calls.
+
+The current architectural opening is to keep the default d-max agent fast and
+MCP-only, then route occasional web/search/browser work through an explicitly
+separate agent or backend orchestration tool that enables local OpenClaw web
+tools only for that delegated run.
+
 ## Current Goal
 
 Reduce latency for browser DMAX chat via OpenClaw, especially contextual chats such

@@ -16,6 +16,32 @@
       }
     }
   },
+  "models": {
+    "providers": {
+      "openai-codex": {
+        "baseUrl": "https://chatgpt.com/backend-api",
+        "api": "openai-codex-responses",
+        "auth": "oauth",
+        "models": [
+          {
+            "id": "gpt-5.5",
+            "name": "GPT-5.5",
+            "api": "openai-codex-responses",
+            "reasoning": true,
+            "input": ["text", "image"],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 400000,
+            "maxTokens": 128000
+          }
+        ]
+      }
+    }
+  },
   "mcp": {
     "servers": {
       "d-max": {
@@ -34,6 +60,24 @@
     "order": {
       "openai-codex": ["openai-codex:default"]
     }
+  },
+  "tools": {
+    "allow": [
+      "d-max__listCategories",
+      "d-max__createCategory",
+      "d-max__updateCategory",
+      "d-max__listProjects",
+      "d-max__getProject",
+      "d-max__createProject",
+      "d-max__updateProject",
+      "d-max__archiveProject",
+      "d-max__updateProjectMarkdown",
+      "d-max__listTasks",
+      "d-max__createTask",
+      "d-max__updateTask",
+      "d-max__completeTask",
+      "d-max__deleteTask"
+    ]
   },
   "channels": {
     "telegram": {
