@@ -9,11 +9,16 @@ const CONFIRMATION_REQUIRED_TOOLS = new Set<ToolName>([
 type ConfirmationInput = {
   tool: ToolName;
   input: Record<string, unknown>;
+  allowConfirmedActions?: boolean;
 };
 
-export function requiresConfirmation({ tool, input }: ConfirmationInput): boolean {
-  if (input.confirmed === true) {
+export function requiresConfirmation({ tool, input, allowConfirmedActions = false }: ConfirmationInput): boolean {
+  if (input.confirmed === true && allowConfirmedActions) {
     return false;
+  }
+
+  if (tool === "updateProject" && typeof input.type === "string") {
+    return true;
   }
 
   return CONFIRMATION_REQUIRED_TOOLS.has(tool);
@@ -24,10 +29,15 @@ export function buildConfirmationRequest({ tool, input }: ConfirmationInput): Co
     ok: false,
     requiresConfirmation: true,
     confirmationKind: tool,
-    summary: `Confirm ${tool}?`,
+    summary: `Confirmation required for ${tool}. This tool call was not applied.`,
     proposedAction: {
       tool,
-      input
+      input: withoutConfirmedFlag(input)
     }
   };
+}
+
+function withoutConfirmedFlag(input: Record<string, unknown>): Record<string, unknown> {
+  const { confirmed: _confirmed, ...rest } = input;
+  return rest;
 }

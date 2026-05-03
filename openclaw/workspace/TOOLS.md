@@ -11,6 +11,33 @@ Use adaptive structure, not a hard template. Common sections: `# Overview`,
 `# Notes`. Do not add empty sections just to satisfy a template. Large rewrites
 require confirmation.
 
+## Category Descriptions
+
+Categories are life areas. The category `description` field is Markdown and
+captures scope, current situation and subjective satisfaction, target state, and
+high-level measures such as existing/planned projects and habits. Use
+`updateCategory` to persist description changes after Dietrich agrees with the
+wording.
+
+## Initiative Types
+
+The technical object is still Project. Use the `type` field when creating or
+updating projects:
+- `idea` for loose thoughts, impulses, possibilities, and "Idee dokumentieren"
+- `project` for concrete goal-oriented work and "Projekt anlegen"; use
+  `startDate` and `endDate` in YYYY-MM-DD when Dietrich gives a bounded
+  project time span
+- `habit` for ongoing practices, routines, and "Gewohnheit starten"
+
+Use system `Inbox` when the correct category is unclear. Do not make
+`category_id` optional.
+Ideas are not time-bound. Habits are ongoing and usually have no clear
+start/end date. Bounded initiatives such as trips, launches, and finite
+workstreams belong to `type=project` and can carry a start/end date range.
+Changing an existing project's `type` is a lifecycle decision and requires
+confirmation. A repeated request is not confirmation. If a tool returns
+`requiresConfirmation`, the change was not applied.
+
 ## Confirmation
 
 Require confirmation for:

@@ -1,14 +1,17 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const apiPort = process.env.DMAX_API_PORT ?? "3088";
+const apiTarget = `http://localhost:${apiPort}`;
+
 export default defineConfig({
   root: "web",
   plugins: [react()],
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://localhost:3088",
-      "/health": "http://localhost:3088"
+      "/api": apiTarget,
+      "/health": apiTarget
     }
   },
   build: {
@@ -16,4 +19,3 @@ export default defineConfig({
     emptyOutDir: true
   }
 });
-

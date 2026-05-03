@@ -69,7 +69,7 @@ describe("task tools", () => {
       confirmationKind: "deleteTask"
     });
 
-    const deleted = await runner.run("deleteTask", { id: taskId, confirmed: true }, { db });
+    const deleted = await runner.run("deleteTask", { id: taskId, confirmed: true }, { db, allowConfirmedActions: true });
     expect(deleted).toMatchObject({ ok: true });
   });
 });

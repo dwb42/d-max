@@ -20,6 +20,7 @@ export type ToolName =
 export type ToolContext = {
   db?: Database.Database;
   now?: Date;
+  allowConfirmedActions?: boolean;
 };
 
 export type ConfirmationRequest = {

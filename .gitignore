@@ -11,6 +11,7 @@ data/*.db
 data/*.db-shm
 data/*.db-wal
 data/backups/
+data/diagnostics/
 data/openclaw-web-state/
 dist/
 dist-web/
@@ -27,6 +28,9 @@ openclaw/**/tokens/
 openclaw/**/state/
 openclaw/media/
 openclaw/workspace/.openclaw/
+openclaw/workspace/auth-profiles.json
+openclaw/workspace/dmax-research/
 openclaw/workspace/HEARTBEAT.md
 openclaw/workspace/IDENTITY.md
 openclaw/workspace/USER.md
+openclaw/config.web.json.clobbered.*

@@ -4,6 +4,7 @@ create table if not exists categories (
   id integer primary key,
   name text not null unique,
   description text,
+  color text not null default '#27806f',
   sort_order integer not null default 0,
   is_system integer not null default 0 check (is_system in (0, 1)),
   created_at text not null,
@@ -14,10 +15,13 @@ create table if not exists projects (
   id integer primary key,
   category_id integer not null references categories(id),
   parent_id integer references projects(id),
+  type text not null default 'project' check (type in ('idea', 'project', 'habit')),
   name text not null,
   status text not null default 'active' check (status in ('active', 'paused', 'completed', 'archived')),
   summary text,
   markdown text not null default '',
+  start_date text,
+  end_date text,
   sort_order integer not null default 0,
   is_system integer not null default 0 check (is_system in (0, 1)),
   created_at text not null,
@@ -73,6 +77,7 @@ create table if not exists app_prompt_logs (
   memory_history text not null,
   tools text not null,
   final_prompt text not null,
+  turn_trace text,
   created_at text not null,
   check (
     (context_type in ('global', 'projects') and context_entity_id is null)
@@ -93,6 +98,9 @@ create table if not exists app_state_events (
 );
 
 create index if not exists idx_projects_category_id on projects(category_id);
+create index if not exists idx_projects_type on projects(type);
+create index if not exists idx_projects_start_date on projects(start_date);
+create index if not exists idx_projects_end_date on projects(end_date);
 create index if not exists idx_categories_sort_order on categories(sort_order, id);
 create index if not exists idx_projects_category_sort_order on projects(category_id, sort_order, id);
 create index if not exists idx_projects_parent_id on projects(parent_id);

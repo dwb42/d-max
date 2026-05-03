@@ -43,6 +43,9 @@ describe("AppChatService", () => {
     expect(result.conversationId).toBeTypeOf("number");
     expect(result.context).toEqual({ type: "global" });
     expect(agentMessages[0]).toContain("Type: global");
+    expect(agentMessages[0]).toContain("Initiative type guidance");
+    expect(agentMessages[0]).toContain("Use type=idea");
+    expect(agentMessages[0]).toContain("Use type=habit");
     expect(agentMessages[0]).toContain("Projekt einwöchige Fahrradtour im Juni");
   });
 
@@ -87,13 +90,27 @@ describe("AppChatService", () => {
       contextType: "project",
       contextEntityId: project.id,
       userInput: "Fasse mir dieses Projekt zusammen.",
-      openClawSessionId: `dmax-web-chat-${result.conversationId}`
+      openClawSessionId: `explicit:dmax-web-chat-${result.conversationId}`
     });
     expect(promptLog.systemInstructions).toContain("Context contract");
+    expect(promptLog.systemInstructions).toContain("Initiative type guidance");
     expect(promptLog.contextData).toContain("Health Rhythm");
     expect(promptLog.memoryHistory).toContain("No previous app chat messages");
     expect(promptLog.tools).toContain("createProject");
+    expect(promptLog.tools).toContain("createProject with type = idea");
+    expect(promptLog.tools).toContain("system Inbox category");
     expect(promptLog.finalPrompt).toBe(agentMessages[0]);
+    expect(promptLog.turnTrace?.events.map((event) => event.label)).toEqual(
+      expect.arrayContaining([
+        "chat_prepare_started",
+        "context_resolved",
+        "prompt_log_persisted",
+        "agent_turn_started",
+        "agent_turn_finished",
+        "assistant_message_persisted"
+      ])
+    );
+    expect(promptLog.turnTrace?.totalMs).toBeTypeOf("number");
   });
 
   it("starts a fresh contextual conversation unless a conversation id is provided", async () => {
@@ -167,5 +184,40 @@ describe("AppChatService", () => {
     expect(messages).toHaveLength(2);
     expect(messages[1]).toMatchObject({ role: "assistant", source: "system" });
     expect(messages[1].content).toContain("agent timeout");
+  });
+
+  it("rejects concurrent turns in the same conversation before persisting a duplicate user message", async () => {
+    let releaseAgent!: () => void;
+    let agentStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      agentStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseAgent = resolve;
+    });
+    const conversation = service.createConversation({ type: "global" });
+    service = new AppChatService(db, async () => {
+      agentStarted();
+      await release;
+      return { text: "done", activities: [] };
+    });
+
+    const firstTurn = service.handleMessage({
+      message: "Erste Nachricht",
+      conversationId: conversation.id
+    });
+    await started;
+
+    await expect(
+      service.handleMessage({
+        message: "Zweite Nachricht",
+        conversationId: conversation.id
+      })
+    ).rejects.toThrow(/läuft bereits ein Agent-Turn/);
+    expect(service.listMessages({ conversationId: conversation.id }).map((message) => message.content)).toEqual(["Erste Nachricht"]);
+
+    releaseAgent();
+    await firstTurn;
+    expect(service.listMessages({ conversationId: conversation.id }).map((message) => message.content)).toEqual(["Erste Nachricht", "done"]);
   });
 });

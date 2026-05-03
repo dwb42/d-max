@@ -7,8 +7,12 @@ import type {
   ChatActivity,
   ConversationContext,
   LiveKitVoiceSession,
+  OpenClawStatus,
   PersistedChatMessage,
+  Project,
   ProjectDetail,
+  ProjectType,
+  PromptTemplateDefinition,
   StateEvent,
   TaskDetail
 } from "./types.js";
@@ -17,9 +21,31 @@ export async function fetchOverview(): Promise<AppOverview> {
   return request<AppOverview>("/api/app/overview");
 }
 
-export async function createCategory(input: { name: string; description?: string | null }): Promise<Category> {
+export async function fetchOpenClawStatus(): Promise<OpenClawStatus> {
+  const response = await request<{ openClaw: OpenClawStatus }>("/api/openclaw/status");
+  return response.openClaw;
+}
+
+export async function prewarmOpenClaw(context?: ConversationContext | null): Promise<void> {
+  await request("/api/openclaw/prewarm", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ context: context ?? null })
+  });
+}
+
+export async function createCategory(input: { name: string; description?: string | null; color?: string | null }): Promise<Category> {
   const response = await request<{ category: Category }>("/api/categories", {
     method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.category;
+}
+
+export async function updateCategory(categoryId: number, input: { name?: string; description?: string | null; color?: string | null }): Promise<Category> {
+  const response = await request<{ category: Category }>(`/api/categories/${categoryId}`, {
+    method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input)
   });
@@ -41,6 +67,48 @@ export async function reorderProjects(categoryId: number, projectIds: number[]):
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ categoryId, projectIds })
   });
+}
+
+export async function fetchProjects(): Promise<Project[]> {
+  const response = await request<{ projects: Project[] }>("/api/projects");
+  return response.projects;
+}
+
+export async function createProject(input: {
+  categoryId: number;
+  type: ProjectType;
+  name: string;
+  summary?: string | null;
+  markdown?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+}): Promise<Project> {
+  const response = await request<{ project: Project }>("/api/projects", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.project;
+}
+
+export async function updateProject(
+  projectId: number,
+  input: {
+    categoryId?: number;
+    parentId?: number | null;
+    name?: string;
+    status?: Project["status"];
+    summary?: string | null;
+    startDate?: string | null;
+    endDate?: string | null;
+  }
+): Promise<Project> {
+  const response = await request<{ project: Project }>(`/api/projects/${projectId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.project;
 }
 
 export async function reorderTasks(projectId: number, taskIds: number[]): Promise<void> {
@@ -98,11 +166,22 @@ export async function sendChatMessage(input: {
   context?: ConversationContext | null;
   source?: "app_text" | "app_voice_message";
 }): Promise<AppChatResult> {
-  return request<AppChatResult>("/api/chat/message", {
+  const trace = createBrowserChatTrace();
+  recordBrowserChatTraceEvent(trace, "browser_json_request_started", {
+    conversationId: input.conversationId ?? null,
+    contextType: input.context?.type ?? null,
+    messageChars: input.message.length
+  });
+  const result = await request<AppChatResult>("/api/chat/message", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-dmax-trace-id": trace.traceId },
     body: JSON.stringify(input)
   });
+  recordBrowserChatTraceEvent(trace, "browser_json_response_received", {
+    conversationId: result.conversationId,
+    replyChars: result.reply.length
+  });
+  return result;
 }
 
 function audioFilename(mimeType: string): string {
@@ -126,10 +205,20 @@ export async function streamChatMessage(
     onAnswerDelta?: (delta: string) => void;
   } = {}
 ): Promise<AppChatResult> {
+  const trace = createBrowserChatTrace();
+  recordBrowserChatTraceEvent(trace, "browser_stream_request_started", {
+    conversationId: input.conversationId ?? null,
+    contextType: input.context?.type ?? null,
+    messageChars: input.message.length
+  });
   const response = await fetch("/api/chat/message/stream", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", "x-dmax-trace-id": trace.traceId },
     body: JSON.stringify(input)
+  });
+  recordBrowserChatTraceEvent(trace, "browser_stream_response_headers_received", {
+    ok: response.ok,
+    status: response.status
   });
 
   if (!response.ok || !response.body) {
@@ -143,11 +232,16 @@ export async function streamChatMessage(
   let finalResult: AppChatResult | null = null;
   let lastConversationPayload: { conversationId: number | null; context: ConversationContext } | null = null;
   let lastActivities: ChatActivity[] = [];
+  let sawFirstChunk = false;
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) {
       break;
+    }
+    if (!sawFirstChunk) {
+      sawFirstChunk = true;
+      recordBrowserChatTraceEvent(trace, "browser_stream_first_chunk_received", { bytes: value.byteLength });
     }
 
     buffer += decoder.decode(value, { stream: true });
@@ -156,6 +250,9 @@ export async function streamChatMessage(
 
     for (const rawEvent of events) {
       const parsed = parseSseEvent(rawEvent);
+      if (parsed?.event === "done") {
+        recordBrowserChatTraceEvent(trace, "browser_stream_done_event_received");
+      }
       const next = handleChatStreamEvent(parsed, handlers);
       if (next.conversation) lastConversationPayload = next.conversation;
       if (next.activities) lastActivities = next.activities;
@@ -166,6 +263,9 @@ export async function streamChatMessage(
   const finalBuffer = buffer.trim();
   if (finalBuffer) {
     const parsed = parseSseEvent(finalBuffer);
+    if (parsed?.event === "done") {
+      recordBrowserChatTraceEvent(trace, "browser_stream_done_event_received");
+    }
     const next = handleChatStreamEvent(parsed, handlers);
     if (next.conversation) lastConversationPayload = next.conversation;
     if (next.activities) lastActivities = next.activities;
@@ -173,6 +273,9 @@ export async function streamChatMessage(
   }
 
   if (!finalResult && lastConversationPayload?.conversationId) {
+    recordBrowserChatTraceEvent(trace, "browser_stream_fallback_messages_fetch_started", {
+      conversationId: lastConversationPayload.conversationId
+    });
     const messages = await fetchChatMessages(lastConversationPayload.conversationId);
     const assistant = [...messages].reverse().find((message) => message.role === "assistant");
     if (assistant) {
@@ -187,9 +290,15 @@ export async function streamChatMessage(
   }
 
   if (!finalResult) {
+    recordBrowserChatTraceEvent(trace, "browser_stream_finished_without_final_result");
     throw new Error("Chat stream ended before d-max returned a final answer.");
   }
 
+  recordBrowserChatTraceEvent(trace, "browser_stream_result_ready", {
+    conversationId: finalResult.conversationId,
+    replyChars: finalResult.reply.length,
+    activityCount: finalResult.activities?.length ?? 0
+  });
   return finalResult;
 }
 
@@ -224,6 +333,11 @@ export async function fetchPromptLogs(): Promise<AppPromptLog[]> {
   return response.prompts;
 }
 
+export async function fetchPromptTemplates(): Promise<PromptTemplateDefinition[]> {
+  const response = await request<{ templates: PromptTemplateDefinition[] }>("/api/debug/prompt-templates");
+  return response.templates;
+}
+
 export function subscribeStateEvents(handlers: { onStateChange: (event: StateEvent) => void; onError?: () => void }): () => void {
   const events = new EventSource("/api/state/events");
   events.addEventListener("state_change", (event) => {
@@ -245,6 +359,45 @@ function conversationContextSearchParams(context: ConversationContext): URLSearc
     params.set("contextEntityId", String(context.taskId));
   }
   return params;
+}
+
+type BrowserChatTrace = {
+  traceId: string;
+  startedAtMs: number;
+};
+
+function createBrowserChatTrace(): BrowserChatTrace {
+  const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(16).slice(2, 10);
+  return {
+    traceId: `browser-chat-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-${suffix}`,
+    startedAtMs: performance.now()
+  };
+}
+
+function recordBrowserChatTraceEvent(trace: BrowserChatTrace, event: string, detail?: Record<string, unknown>): void {
+  const payload = JSON.stringify({
+    traceId: trace.traceId,
+    event,
+    ts: new Date().toISOString(),
+    msFromTraceStart: Math.max(0, performance.now() - trace.startedAtMs),
+    ...(detail ? { detail } : {})
+  });
+
+  if (typeof navigator !== "undefined" && "sendBeacon" in navigator) {
+    const sent = navigator.sendBeacon("/api/diagnostics/chat-event", new Blob([payload], { type: "application/json" }));
+    if (sent) {
+      return;
+    }
+  }
+
+  void fetch("/api/diagnostics/chat-event", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: payload,
+    keepalive: true
+  }).catch(() => undefined);
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

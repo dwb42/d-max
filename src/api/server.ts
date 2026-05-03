@@ -6,15 +6,24 @@ import { openDatabase } from "../db/connection.js";
 import { migrate } from "../db/migrate.js";
 import { CategoryRepository } from "../repositories/categories.js";
 import { ProjectRepository } from "../repositories/projects.js";
+import type { ProjectType } from "../repositories/projects.js";
 import type { TaskStatus } from "../repositories/tasks.js";
 import { TaskRepository } from "../repositories/tasks.js";
 import { StateEventRepository } from "../repositories/state-events.js";
 import type { CreateStateEventInput, StateEvent } from "../repositories/state-events.js";
 import { AppChatService } from "../chat/app-chat.js";
-import { conversationContextSchema } from "../chat/conversation-context.js";
-import { listOpenClawSessionActivities } from "../chat/openclaw-agent.js";
+import { conversationContextSchema, listPromptTemplates } from "../chat/conversation-context.js";
+import {
+  checkOpenClawGatewayStatus,
+  createOpenClawActivityCursor,
+  listOpenClawSessionActivities,
+  listOpenClawSessionActivitiesSince,
+  warmOpenClawGateway
+} from "../chat/openclaw-agent.js";
+import type { OpenClawActivityCursor } from "../chat/openclaw-agent.js";
 import { transcribeAudio } from "../chat/openai-transcription.js";
 import { createLiveKitVoiceSession } from "./livekit.js";
+import { createChatTurnTraceId, recordChatTurnDiagnosticEvent } from "../diagnostics/chat-turns.js";
 
 const port = env.dmaxApiPort;
 
@@ -38,6 +47,43 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/health") {
       sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/openclaw/status") {
+      sendJson(res, 200, { openClaw: await checkOpenClawGatewayStatus() });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/openclaw/prewarm") {
+      const traceStartedAt = new Date().toISOString();
+      const traceId = getRequestTraceId(req);
+      recordApiDiagnostic(traceId, traceStartedAt, "api_prewarm_request_started");
+      const body = prewarmOpenClawBody.parse(await readJson(req));
+      recordApiDiagnostic(traceId, traceStartedAt, "api_prewarm_body_read_finished");
+      if (body.context) {
+        const prepared = await chat.prepareConversationContext(body.context, { traceId, traceStartedAt });
+        recordApiDiagnostic(traceId, traceStartedAt, "api_prewarm_response_send_started", {
+          conversationId: prepared.conversation.id,
+          created: prepared.created,
+          openClawSessionId: prepared.openClawSession?.sessionId ?? null
+        });
+        sendJson(res, 200, {
+          ok: true,
+          state: prepared.openClawSession ? "ready" : "warming",
+          conversation: prepared.conversation,
+          created: prepared.created,
+          openClawSessionKey: prepared.openClawSessionKey,
+          openClawSessionId: prepared.openClawSession?.sessionId ?? null
+        });
+        return;
+      }
+
+      void warmOpenClawGateway().catch((error) => {
+        console.error("OpenClaw prewarm failed", error);
+      });
+      recordApiDiagnostic(traceId, traceStartedAt, "api_prewarm_gateway_warmup_dispatched");
+      sendJson(res, 202, { ok: true, state: "warming", conversation: null });
       return;
     }
 
@@ -66,6 +112,15 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    const categoryMatch = url.pathname.match(/^\/api\/categories\/(\d+)$/);
+    if (req.method === "PATCH" && categoryMatch) {
+      const body = updateCategoryBody.parse(await readJson(req));
+      const category = categories.update({ id: Number(categoryMatch[1]), ...body });
+      emitApiStateEvent({ operation: "updateCategory", entityType: "category", entityId: category.id, categoryId: category.id });
+      sendJson(res, 200, { category });
+      return;
+    }
+
     if (req.method === "PATCH" && url.pathname === "/api/categories/order") {
       const body = reorderCategoriesBody.parse(await readJson(req));
       const nextCategories = categories.reorder(body.categoryIds);
@@ -75,7 +130,20 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/api/projects") {
-      sendJson(res, 200, { projects: projects.list({ status: parseOptionalStatus(url.searchParams.get("status")) }) });
+      sendJson(res, 200, {
+        projects: projects.list({
+          status: parseOptionalStatus(url.searchParams.get("status")),
+          type: parseOptionalProjectType(url.searchParams.get("type"))
+        })
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/projects") {
+      const body = createProjectBody.parse(await readJson(req));
+      const project = projects.create(body);
+      emitApiStateEvent({ operation: "createProject", entityType: "project", entityId: project.id, projectId: project.id, categoryId: project.categoryId });
+      sendJson(res, 200, { project });
       return;
     }
 
@@ -99,6 +167,14 @@ const server = http.createServer(async (req, res) => {
         project,
         tasks: tasks.list({ projectId: project.id })
       });
+      return;
+    }
+
+    if (req.method === "PATCH" && projectMatch) {
+      const body = updateProjectBody.parse(await readJson(req));
+      const project = projects.update({ id: Number(projectMatch[1]), ...body });
+      emitApiStateEvent({ operation: "updateProject", entityType: "project", entityId: project.id, projectId: project.id, categoryId: project.categoryId });
+      sendJson(res, 200, { project });
       return;
     }
 
@@ -177,15 +253,36 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/chat/message") {
+      const traceStartedAt = new Date().toISOString();
+      const traceId = getRequestTraceId(req);
+      recordApiDiagnostic(traceId, traceStartedAt, "api_body_read_started");
       const body = chatMessageBody.parse(await readJson(req));
-      const result = await chat.handleMessage(body);
+      recordApiDiagnostic(traceId, traceStartedAt, "api_body_read_finished");
+      const prepared = chat.prepareMessageTurn(body, { traceStartedAt, traceId });
+      if (!prepared) {
+        sendJson(res, 200, {
+          reply: "Schreib mir kurz, was du sortieren oder anlegen möchtest.",
+          conversationId: body.conversationId ?? null,
+          context: body.context ?? { type: "global" },
+          messages: [],
+          activities: []
+        });
+        return;
+      }
+      const agentResult = await chat.runPreparedTurn(prepared);
+      const result = chat.completePreparedTurn(prepared, agentResult);
+      recordApiDiagnostic(traceId, traceStartedAt, "api_response_send_started", { conversationId: result.conversationId });
       sendJson(res, 200, result);
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/chat/message/stream") {
+      const traceStartedAt = new Date().toISOString();
+      const traceId = getRequestTraceId(req);
+      recordApiDiagnostic(traceId, traceStartedAt, "api_body_read_started");
       const body = chatMessageBody.parse(await readJson(req));
-      const prepared = chat.prepareMessageTurn(body);
+      recordApiDiagnostic(traceId, traceStartedAt, "api_body_read_finished");
+      const prepared = chat.prepareMessageTurn(body, { traceStartedAt, traceId });
       if (!prepared) {
         sendSse(res, async (send) => {
           send("done", {
@@ -195,26 +292,34 @@ const server = http.createServer(async (req, res) => {
             messages: [],
             activities: []
           });
-        });
+        }, traceId);
         return;
       }
 
       await sendSse(res, async (send) => {
+        recordApiDiagnostic(traceId, traceStartedAt, "api_sse_opened", { conversationId: prepared.conversationId });
         send("conversation", {
           conversationId: prepared.conversationId,
           context: prepared.context
         });
+        recordApiDiagnostic(traceId, traceStartedAt, "api_sse_conversation_sent", { conversationId: prepared.conversationId });
 
-        const sessionId = `dmax-web-chat-${prepared.conversationId}`;
+        let activityCursor: OpenClawActivityCursor | null = null;
+        void chat.prepareOpenClawConversationSession(prepared.conversationId)
+          .then((openClawSession) => {
+            activityCursor = openClawSession?.sessionId ? createOpenClawActivityCursor(openClawSession.sessionId) : null;
+          })
+          .catch(() => undefined);
+
         let lastActivitiesJson = "";
-        const publishActivities = () => {
-          const activities = listOpenClawSessionActivities(sessionId);
+        const publishActivities = (activities = activityCursor ? listOpenClawSessionActivitiesSince(activityCursor) : []) => {
           const nextJson = JSON.stringify(activities);
           if (nextJson === lastActivitiesJson) {
             return activities;
           }
           lastActivitiesJson = nextJson;
           send("activity", { activities });
+          recordApiDiagnostic(traceId, traceStartedAt, "api_sse_activity_sent", { activityCount: activities.length });
           return activities;
         };
         const activityInterval = setInterval(publishActivities, 1000);
@@ -225,24 +330,52 @@ const server = http.createServer(async (req, res) => {
           const activities = agentResult.activities.length ? agentResult.activities : publishActivities();
           const result = chat.completePreparedTurn(prepared, { ...agentResult, activities });
           send("activity", { activities: result.activities });
+          recordApiDiagnostic(traceId, traceStartedAt, "api_sse_final_activity_sent", { activityCount: result.activities.length });
+          let sentFirstAnswerDelta = false;
           for (const chunk of chunkText(result.reply, 18)) {
+            if (!sentFirstAnswerDelta) {
+              sentFirstAnswerDelta = true;
+              recordApiDiagnostic(traceId, traceStartedAt, "api_sse_first_answer_delta_sent", { replyChars: result.reply.length });
+            }
             send("answer_delta", { delta: chunk });
             await delay(18);
           }
+          recordApiDiagnostic(traceId, traceStartedAt, "api_sse_answer_deltas_finished", { replyChars: result.reply.length });
           send("done", result);
+          recordApiDiagnostic(traceId, traceStartedAt, "api_sse_done_sent", { conversationId: result.conversationId });
         } catch (error) {
           clearInterval(activityInterval);
           const detail = error instanceof Error ? error.message : "Unknown agent error";
-          const agentResult = { text: `Ich konnte den Agent-Turn nicht sauber abschließen: ${detail}`, activities: publishActivities() };
+          const agentResult = { text: `Ich konnte den Agent-Turn nicht sauber abschließen: ${detail}`, activities: [] };
           const result = chat.completePreparedTurn(prepared, agentResult);
           send("activity", { activities: result.activities });
+          let sentFirstAnswerDelta = false;
           for (const chunk of chunkText(result.reply, 18)) {
+            if (!sentFirstAnswerDelta) {
+              sentFirstAnswerDelta = true;
+              recordApiDiagnostic(traceId, traceStartedAt, "api_sse_first_answer_delta_sent", { replyChars: result.reply.length, error: true });
+            }
             send("answer_delta", { delta: chunk });
             await delay(18);
           }
           send("done", result);
+          recordApiDiagnostic(traceId, traceStartedAt, "api_sse_error_done_sent", { error: detail });
         }
+      }, traceId);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/diagnostics/chat-event") {
+      const body = browserDiagnosticBody.parse(await readJson(req));
+      recordChatTurnDiagnosticEvent({
+        traceId: body.traceId,
+        source: "browser",
+        event: body.event,
+        ts: body.ts,
+        msFromTraceStart: body.msFromTraceStart,
+        detail: body.detail ?? undefined
       });
+      sendJson(res, 204, null);
       return;
     }
 
@@ -259,12 +392,18 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      sendJson(res, 200, { activities: listOpenClawSessionActivities(`dmax-web-chat-${conversationId}`) });
+      const openClawSession = await chat.prepareOpenClawConversationSession(conversationId).catch(() => null);
+      sendJson(res, 200, { activities: openClawSession?.sessionId ? listOpenClawSessionActivities(openClawSession.sessionId) : [] });
       return;
     }
 
     if (req.method === "GET" && url.pathname === "/api/debug/prompts") {
       sendJson(res, 200, { prompts: chat.listPromptLogs() });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/debug/prompt-templates") {
+      sendJson(res, 200, { templates: listPromptTemplates() });
       return;
     }
 
@@ -283,6 +422,11 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(port, () => {
   console.log(`d-max api server listening on http://localhost:${port}`);
+  void warmOpenClawGateway().catch((error: unknown) => {
+    console.error(
+      `OpenClaw gateway warmup failed: ${error instanceof Error ? error.message : "unknown error"}`
+    );
+  });
 });
 
 process.on("SIGINT", () => shutdown());
@@ -305,7 +449,37 @@ const updateTaskBody = z.object({
 
 const createCategoryBody = z.object({
   name: z.string().trim().min(1),
-  description: z.string().trim().min(1).nullable().optional()
+  description: z.string().nullable().optional(),
+  color: z.string().trim().regex(/^#[0-9a-f]{6}$/i).nullable().optional()
+});
+
+const updateCategoryBody = z.object({
+  name: z.string().trim().min(1).optional(),
+  description: z.string().nullable().optional(),
+  color: z.string().trim().regex(/^#[0-9a-f]{6}$/i).nullable().optional()
+});
+
+const projectDateBody = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable();
+
+const createProjectBody = z.object({
+  categoryId: z.number().int().positive(),
+  parentId: z.number().int().positive().nullable().optional(),
+  type: z.enum(["idea", "project", "habit"]).optional(),
+  name: z.string().trim().min(1),
+  summary: z.string().trim().min(1).nullable().optional(),
+  markdown: z.string().optional(),
+  startDate: projectDateBody.optional(),
+  endDate: projectDateBody.optional()
+});
+
+const updateProjectBody = z.object({
+  categoryId: z.number().int().positive().optional(),
+  parentId: z.number().int().positive().nullable().optional(),
+  name: z.string().trim().min(1).optional(),
+  status: z.enum(["active", "paused", "completed", "archived"]).optional(),
+  summary: z.string().trim().min(1).nullable().optional(),
+  startDate: projectDateBody.optional(),
+  endDate: projectDateBody.optional()
 });
 
 const reorderCategoriesBody = z.object({
@@ -331,6 +505,18 @@ const chatMessageBody = z.object({
   conversationId: z.number().int().positive().nullable().optional(),
   context: conversationContextSchema.nullable().optional(),
   source: z.enum(["app_text", "app_voice_message"]).optional()
+});
+
+const prewarmOpenClawBody = z.object({
+  context: conversationContextSchema.nullable().optional()
+});
+
+const browserDiagnosticBody = z.object({
+  traceId: z.string().trim().min(1).max(120),
+  event: z.string().trim().min(1).max(120),
+  ts: z.string().trim().min(1),
+  msFromTraceStart: z.number().finite().nonnegative().optional(),
+  detail: z.record(z.unknown()).optional()
 });
 
 const createConversationBody = z.object({
@@ -364,6 +550,14 @@ function parseOptionalStatus(status: string | null) {
   return undefined;
 }
 
+function parseOptionalProjectType(type: string | null): ProjectType | undefined {
+  if (type === "idea" || type === "project" || type === "habit") {
+    return type;
+  }
+
+  return undefined;
+}
+
 function parseOptionalPositiveInt(value: string | null): number | null {
   if (!value) {
     return null;
@@ -384,6 +578,24 @@ function parseOptionalNonNegativeInt(value: string | null): number | null {
 
 function emitApiStateEvent(input: Omit<CreateStateEventInput, "source">): StateEvent {
   return stateEvents.create({ source: "api", ...input });
+}
+
+function getRequestTraceId(req: http.IncomingMessage): string {
+  const header = req.headers["x-dmax-trace-id"];
+  if (typeof header === "string" && header.trim()) {
+    return header.trim().slice(0, 120);
+  }
+
+  return createChatTurnTraceId();
+}
+
+function recordApiDiagnostic(
+  traceId: string,
+  traceStartedAt: string,
+  event: string,
+  detail?: Record<string, unknown>
+): void {
+  recordChatTurnDiagnosticEvent({ traceId, traceStartedAt, source: "api", event, detail });
 }
 
 async function streamStateEvents(req: http.IncomingMessage, res: http.ServerResponse, after: number): Promise<void> {
@@ -427,12 +639,14 @@ async function streamStateEvents(req: http.IncomingMessage, res: http.ServerResp
 
 async function sendSse(
   res: http.ServerResponse,
-  handler: (send: (event: string, payload: unknown) => void) => Promise<void>
+  handler: (send: (event: string, payload: unknown) => void) => Promise<void>,
+  traceId?: string
 ): Promise<void> {
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
-    connection: "keep-alive"
+    connection: "keep-alive",
+    ...(traceId ? { "x-dmax-trace-id": traceId } : {})
   });
 
   const send = (event: string, payload: unknown) => {
@@ -499,7 +713,8 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "http://localhost:5173",
     "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
-    "access-control-allow-headers": "content-type"
+    "access-control-allow-headers": "content-type,x-dmax-trace-id",
+    "access-control-expose-headers": "x-dmax-trace-id"
   });
   res.end(JSON.stringify(body));
 }

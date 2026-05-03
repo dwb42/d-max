@@ -9,7 +9,7 @@ const CONTEXT_RELEVANT_TABLES = [
   "tasks"
 ];
 
-const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "6129e5bfd029dc6ca0ce741896e6a3bba0d7bd89879295ff71f6c11d9d5cb5fb";
+const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "2f091fa3f430e0b770fa42da24a8cdff1e8f958138b6bc2c2aa5f532103c2180";
 
 describe("context resolver schema synchronization", () => {
   let db: Database.Database;

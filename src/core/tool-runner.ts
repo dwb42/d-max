@@ -35,7 +35,15 @@ export class ToolRunner {
 
     const input = parsed.data;
 
-    if (typeof input === "object" && input !== null && requiresConfirmation({ tool: name, input: input as Record<string, unknown> })) {
+    if (
+      typeof input === "object"
+      && input !== null
+      && requiresConfirmation({
+        tool: name,
+        input: input as Record<string, unknown>,
+        allowConfirmedActions: context.allowConfirmedActions === true
+      })
+    ) {
       return buildConfirmationRequest({ tool: name, input: input as Record<string, unknown> });
     }
 

@@ -20,8 +20,12 @@ npm run setup
 Run the app stack:
 
 ```bash
-npm run dev:app
+npm run dev
 ```
+
+`npm run dev` is the default local entrypoint. It warms the local OpenClaw
+gateway first and then starts the API and Vite web app. If LiveKit is configured,
+it also starts the Drive voice agent in watch mode.
 
 Open `http://localhost:5173`.
 

@@ -2,17 +2,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, MutableRefObject, ReactNode } from "react";
 import {
   Blocks,
+  CalendarDays,
   CheckCircle2,
   Circle,
   ClipboardList,
   Copy,
+  FileText,
   GitPullRequestArrow,
   GripVertical,
+  Lightbulb,
+  LayoutGrid,
   Mic,
   Mic2,
-  PanelRightOpen,
   Pause,
   Play,
+  Plus,
+  Repeat2,
   Send,
   Square,
   X
@@ -23,20 +28,27 @@ import {
   completeTask,
   createCategory,
   createChatConversation,
+  createProject,
   createVoiceSession,
   fetchChatActivity,
   fetchChatConversations,
   fetchChatMessages,
+  fetchOpenClawStatus,
   fetchOverview,
+  fetchProjects,
   fetchPromptLogs,
+  fetchPromptTemplates,
   fetchProjectDetail,
   fetchTaskDetail,
+  prewarmOpenClaw,
   reorderCategories,
   reorderProjects,
   reorderTasks,
   subscribeStateEvents,
   streamChatMessage,
   transcribeVoiceMessage,
+  updateCategory,
+  updateProject,
   updateTaskStatus
 } from "./api.js";
 import type {
@@ -46,15 +58,19 @@ import type {
   ChatActivity,
   AppPromptLog,
   PersistedChatMessage,
+  OpenClawStatus,
   Project,
   ProjectDetail,
+  ProjectType,
+  PromptTemplateDefinition,
   StateEvent,
   Task,
   TaskDetail
 } from "./types.js";
 import "./styles.css";
 
-type View = "drive" | "projects" | "project" | "tasks" | "task" | "prompts";
+type CollectionView = "ideas" | "projects" | "habits";
+type View = "drive" | "lifeAreas" | "lifeArea" | "timeline" | CollectionView | "project" | "tasks" | "task" | "promptTemplates" | "prompts";
 type RouteState = {
   view: View;
   projectId: number | null;
@@ -84,15 +100,33 @@ type AudioMeterHandle = {
   raf: number;
 };
 
-const navItems: Array<{ id: Exclude<View, "project">; label: string; icon: typeof Mic; path: string }> = [
-  { id: "drive", label: "Drive", icon: Mic, path: "/drive" },
-  { id: "projects", label: "Projects", icon: Blocks, path: "/projects" },
-  { id: "tasks", label: "Tasks", icon: ClipboardList, path: "/tasks" },
-  { id: "prompts", label: "Prompts", icon: GitPullRequestArrow, path: "/prompts" }
+type NavItem = { id: Exclude<View, "project" | "task">; label: string; icon: typeof Mic; path: string };
+
+const primaryNavItems: NavItem[] = [
+  { id: "lifeAreas", label: "Lebensbereiche", icon: LayoutGrid, path: "/lebensbereiche" },
+  { id: "ideas", label: "Ideen", icon: Lightbulb, path: "/ideas" },
+  { id: "projects", label: "Projekte", icon: Blocks, path: "/projects" },
+  { id: "habits", label: "Gewohnheiten", icon: Repeat2, path: "/habits" },
+  { id: "tasks", label: "Massnahmen", icon: ClipboardList, path: "/tasks" },
+  { id: "timeline", label: "Timeline", icon: CalendarDays, path: "/calendar/timeline" }
+];
+
+const secondaryNavItems: NavItem[] = [
+  { id: "promptTemplates", label: "Prompt-Vorlagen", icon: FileText, path: "/prompt-vorlagen" },
+  { id: "prompts", label: "Prompts", icon: GitPullRequestArrow, path: "/prompts" },
+  { id: "drive", label: "Drive", icon: Mic, path: "/drive" }
 ];
 
 function routeFromPath(path: string): RouteState {
   const [pathname] = path.split("?");
+  const lifeAreaMatch = pathname.match(/^\/lebensbereiche\/([^/]+)$/);
+  if (lifeAreaMatch) {
+    return { view: "lifeArea", projectId: null, taskId: null, categoryName: decodeURIComponent(lifeAreaMatch[1] ?? "") };
+  }
+  const ideaCategoryMatch = pathname.match(/^\/ideas\/([^/]+)$/);
+  if (ideaCategoryMatch) {
+    return { view: "ideas", projectId: null, taskId: null, categoryName: decodeURIComponent(ideaCategoryMatch[1] ?? "") };
+  }
   const projectMatch = pathname.match(/^\/projects\/(\d+)$/);
   if (projectMatch) {
     return { view: "project", projectId: Number(projectMatch[1]), taskId: null, categoryName: null };
@@ -101,27 +135,49 @@ function routeFromPath(path: string): RouteState {
   if (categoryMatch) {
     return { view: "projects", projectId: null, taskId: null, categoryName: decodeURIComponent(categoryMatch[1] ?? "") };
   }
+  const habitCategoryMatch = pathname.match(/^\/habits\/([^/]+)$/);
+  if (habitCategoryMatch) {
+    return { view: "habits", projectId: null, taskId: null, categoryName: decodeURIComponent(habitCategoryMatch[1] ?? "") };
+  }
   const taskMatch = pathname.match(/^\/tasks\/(\d+)$/);
   if (taskMatch) {
     return { view: "task", projectId: null, taskId: Number(taskMatch[1]), categoryName: null };
   }
 
   if (pathname === "/drive") return { view: "drive", projectId: null, taskId: null, categoryName: null };
-  if (pathname === "/chat" || pathname === "/") return { view: "projects", projectId: null, taskId: null, categoryName: null };
+  if (pathname === "/lebensbereiche") return { view: "lifeAreas", projectId: null, taskId: null, categoryName: null };
+  if (pathname === "/calendar/timeline") return { view: "timeline", projectId: null, taskId: null, categoryName: null };
+  if (pathname === "/chat" || pathname === "/") return { view: "lifeAreas", projectId: null, taskId: null, categoryName: null };
+  if (pathname === "/ideas") return { view: "ideas", projectId: null, taskId: null, categoryName: null };
   if (pathname === "/projects") return { view: "projects", projectId: null, taskId: null, categoryName: null };
+  if (pathname === "/habits") return { view: "habits", projectId: null, taskId: null, categoryName: null };
   if (pathname === "/tasks") return { view: "tasks", projectId: null, taskId: null, categoryName: null };
+  if (pathname === "/prompt-vorlagen") return { view: "promptTemplates", projectId: null, taskId: null, categoryName: null };
   if (pathname === "/prompts") return { view: "prompts", projectId: null, taskId: null, categoryName: null };
-  return { view: "projects", projectId: null, taskId: null, categoryName: null };
+  return { view: "lifeAreas", projectId: null, taskId: null, categoryName: null };
 }
 
 function pathForRoute(view: View, projectId?: number | null): string {
   if (view === "project") return `/projects/${projectId}`;
   if (view === "task") return "/tasks";
+  if (view === "lifeAreas") return "/lebensbereiche";
+  if (view === "timeline") return "/calendar/timeline";
+  if (view === "promptTemplates") return "/prompt-vorlagen";
   return `/${view}`;
 }
 
-function pathForProjectCategory(categoryName: string): string {
-  return `/projects/${encodeURIComponent(categoryName)}`;
+function pathForLifeArea(categoryName: string): string {
+  return `/lebensbereiche/${encodeURIComponent(categoryName)}`;
+}
+
+function pathForCollectionCategory(view: CollectionView, categoryName: string): string {
+  return `/${view}/${encodeURIComponent(categoryName)}`;
+}
+
+function collectionViewForProjectType(type: ProjectType): CollectionView {
+  if (type === "idea") return "ideas";
+  if (type === "habit") return "habits";
+  return "projects";
 }
 
 function getRouteConversationContext(
@@ -130,13 +186,17 @@ function getRouteConversationContext(
   projectDetail: ProjectDetail | null,
   taskDetail: TaskDetail | null
 ): { context: ConversationContext; label: string } | null {
-  if (route.view === "projects" && route.categoryName) {
+  if ((isCollectionView(route.view) || route.view === "lifeArea") && route.categoryName) {
     const category = overview?.categories.find((candidate) => candidate.name.toLowerCase() === route.categoryName?.toLowerCase());
     return category ? { context: { type: "category", categoryId: category.id }, label: category.name } : null;
   }
 
-  if (route.view === "projects") {
-    return { context: { type: "projects" }, label: "Projects" };
+  if (isCollectionView(route.view)) {
+    return { context: { type: "projects" }, label: titleForView(route.view) };
+  }
+
+  if (route.view === "lifeAreas" || route.view === "timeline") {
+    return { context: { type: "projects" }, label: titleForView(route.view) };
   }
 
   if (route.view === "project" && route.projectId) {
@@ -237,10 +297,13 @@ function preferredAudioMimeType(): string {
 export default function App() {
   const [route, setRoute] = useState<RouteState>(() => routeFromPath(`${window.location.pathname}${window.location.search}`));
   const [overview, setOverview] = useState<AppOverview | null>(null);
+  const [lifeAreaProjects, setLifeAreaProjects] = useState<Project[] | null>(null);
   const [projectDetail, setProjectDetail] = useState<ProjectDetail | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplateDefinition[]>([]);
   const [promptLogs, setPromptLogs] = useState<AppPromptLog[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState<number | null>(null);
+  const [openClawStatus, setOpenClawStatus] = useState<OpenClawStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceRoom, setVoiceRoom] = useState<Room | null>(null);
@@ -281,31 +344,68 @@ export default function App() {
   const chatThreadRef = useRef<HTMLDivElement | null>(null);
   const appShellRef = useRef<HTMLDivElement | null>(null);
   const view = route.view;
-  const isEmptyState = Boolean(overview && overview.categories.length === 0 && overview.projects.length === 0 && overview.tasks.length === 0);
+  const hasUserCategories = Boolean(overview?.categories.some((category) => !category.isSystem));
+  const isEmptyState = Boolean(overview && !hasUserCategories && overview.projects.length === 0 && overview.tasks.length === 0);
   const routeConversationContext = useMemo(() => getRouteConversationContext(route, overview, projectDetail, taskDetail), [route, overview, projectDetail, taskDetail]);
-  const routeConversationContextKey = routeConversationContext ? conversationContextKey(routeConversationContext.context) : "none";
+  const agentTarget = useMemo<{ context: ConversationContext; label: string }>(
+    () => routeConversationContext ?? { context: { type: "global" }, label: "Global Chat" },
+    [routeConversationContext]
+  );
+  const agentTargetKey = conversationContextKey(agentTarget.context);
 
   useEffect(() => {
-    if (!agentDrawer.open || !routeConversationContext || chatBusy) {
+    let active = true;
+
+    async function loadOpenClawStatus() {
+      try {
+        const status = await fetchOpenClawStatus();
+        if (active) {
+          setOpenClawStatus(status);
+        }
+      } catch (err) {
+        if (active) {
+          setOpenClawStatus({
+            state: "unavailable",
+            detail: err instanceof Error ? err.message : "OpenClaw status request failed.",
+            checkedAt: new Date().toISOString()
+          });
+        }
+      }
+    }
+
+    void loadOpenClawStatus();
+    const interval = window.setInterval(() => void loadOpenClawStatus(), 15_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
+    void prewarmOpenClaw(agentTarget.context).catch(() => undefined);
+  }, [agentTargetKey]);
+
+  useEffect(() => {
+    if (!agentDrawer.open || chatBusy) {
       return;
     }
 
     const currentKey = conversationContextKey(agentDrawer.context);
-    if (currentKey === routeConversationContextKey) {
-      if (agentDrawer.label !== routeConversationContext.label) {
-        setAgentDrawer((current) => ({ ...current, label: routeConversationContext.label }));
+    if (currentKey === agentTargetKey) {
+      if (agentDrawer.label !== agentTarget.label) {
+        setAgentDrawer((current) => ({ ...current, label: agentTarget.label }));
       }
       return;
     }
 
-    void openContextualAgent(routeConversationContext.context, routeConversationContext.label);
+    void openContextualAgent(agentTarget.context, agentTarget.label);
   }, [
     agentDrawer.context,
     agentDrawer.label,
     agentDrawer.open,
+    agentTarget,
+    agentTargetKey,
     chatBusy,
-    routeConversationContext,
-    routeConversationContextKey
   ]);
 
   function navigate(path: string) {
@@ -391,6 +491,15 @@ export default function App() {
     const preferredConversationId =
       conversationContextKey(agentDrawer.context) === conversationContextKey(context) ? agentDrawer.conversationId : null;
     await loadContextualAgent(context, label, preferredConversationId);
+  }
+
+  function toggleContextualAgent(context: ConversationContext, label: string) {
+    if (agentDrawer.open && conversationContextKey(agentDrawer.context) === conversationContextKey(context)) {
+      closeContextualAgent();
+      return;
+    }
+
+    void openContextualAgent(context, label);
   }
 
   async function loadContextualAgent(context: ConversationContext, label: string, preferredConversationId?: number | null) {
@@ -591,6 +700,12 @@ export default function App() {
   async function refreshVisibleState(_event?: StateEvent) {
     await refresh();
 
+    if (route.view === "lifeAreas" || route.view === "lifeArea") {
+      await fetchProjects()
+        .then(setLifeAreaProjects)
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load initiatives."));
+    }
+
     if (route.view === "project" && route.projectId) {
       await fetchProjectDetail(route.projectId)
         .then(setProjectDetail)
@@ -612,6 +727,14 @@ export default function App() {
       setSelectedPromptId((current) => (current && prompts.some((prompt) => prompt.id === current) ? current : prompts.at(-1)?.id ?? null));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load prompt logs.");
+    }
+  }
+
+  async function loadPromptTemplates() {
+    try {
+      setPromptTemplates(await fetchPromptTemplates());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load prompt templates.");
     }
   }
 
@@ -676,6 +799,17 @@ export default function App() {
   }, [route]);
 
   useEffect(() => {
+    if (route.view !== "lifeAreas" && route.view !== "lifeArea") {
+      setLifeAreaProjects(null);
+      return;
+    }
+
+    fetchProjects()
+      .then(setLifeAreaProjects)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load initiatives."));
+  }, [route]);
+
+  useEffect(() => {
     if (route.view !== "task" || !route.taskId) {
       setTaskDetail(null);
       return;
@@ -722,6 +856,14 @@ export default function App() {
     void loadPrompts();
   }, [view]);
 
+  useEffect(() => {
+    if (view !== "promptTemplates") {
+      return;
+    }
+
+    void loadPromptTemplates();
+  }, [view]);
+
   return (
     <div
       className={`app-shell ${agentDrawer.open ? "with-agent-drawer" : ""}`}
@@ -730,33 +872,32 @@ export default function App() {
     >
       <aside className="sidebar">
         <button className="brand brand-link" onClick={() => navigate("/projects")} title="Zur Startseite">
-          <div className="brand-mark">d</div>
+          <div className="brand-mark">D</div>
           <div>
-            <div className="brand-name">d-max</div>
-            <div className="brand-subtitle">voice-first memory</div>
+            <div className="brand-name">MAX</div>
           </div>
         </button>
 
-        <nav className="nav">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = view === item.id || (view === "project" && item.id === "projects") || (view === "task" && item.id === "tasks");
-            return (
-              <button key={item.id} className={`nav-item ${active ? "active" : ""}`} onClick={() => navigate(item.path)}>
-                <Icon size={18} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
+        <nav className="nav primary-nav">
+          {primaryNavItems.map((item) => renderNavItem(item, view, projectDetail, navigate))}
+        </nav>
+
+        <nav className="nav secondary-nav">
+          {secondaryNavItems.map((item) => renderNavItem(item, view, projectDetail, navigate))}
         </nav>
       </aside>
 
       <main className="main">
-        {view !== "project" && view !== "task" ? (
+        <DmaxAgentButton
+          status={openClawStatus}
+          active={agentDrawer.open && conversationContextKey(agentDrawer.context) === agentTargetKey}
+          onClick={() => toggleContextualAgent(agentTarget.context, agentTarget.label)}
+        />
+        {view !== "project" && view !== "task" && view !== "lifeArea" ? (
           <header className="topbar">
             <div>
-              {view === "projects" && route.categoryName ? (
-                <button className="topbar-title-link" onClick={() => navigate("/projects")}>
+              {isCollectionView(view) && route.categoryName ? (
+                <button className="topbar-title-link" onClick={() => navigate(`/${view}`)}>
                   {titleForView(view)}
                 </button>
               ) : (
@@ -769,17 +910,7 @@ export default function App() {
 
         {error ? <div className="error-banner">{error}</div> : null}
 
-        {!isEmptyState && routeConversationContext && view !== "project" && view !== "task" ? (
-          <button
-            className="context-agent-button"
-            onClick={() => void openContextualAgent(routeConversationContext.context, routeConversationContext.label)}
-          >
-            <PanelRightOpen size={18} />
-            d-max
-          </button>
-        ) : null}
-
-        {isEmptyState ? (
+        {isEmptyState && view !== "lifeAreas" ? (
           <OnboardingView
             onCreateCategory={async (name) => {
               await createCategory({ name });
@@ -847,14 +978,44 @@ export default function App() {
             audioLevel={audioLevel}
           />
         )}
-        {!isEmptyState && view === "projects" && (
+        {view === "lifeAreas" && (
+          <LifeAreasView
+            categories={overview?.categories ?? []}
+            projects={lifeAreaProjects ?? overview?.projects ?? []}
+            onOpenLifeArea={(categoryName) => navigate(pathForLifeArea(categoryName))}
+            onOpenProject={(projectId) => navigate(`/projects/${projectId}`)}
+          />
+        )}
+        {view === "lifeArea" && (
+          <LifeAreaDetailView
+            category={overview?.categories.find((category) => category.name.toLowerCase() === route.categoryName?.toLowerCase()) ?? null}
+            projects={lifeAreaProjects ?? overview?.projects ?? []}
+            onBack={() => navigate("/lebensbereiche")}
+            onOpenProject={(projectId) => navigate(`/projects/${projectId}`)}
+            onUpdateCategory={async (categoryId, input) => {
+              await updateCategory(categoryId, input);
+              await refresh();
+            }}
+          />
+        )}
+        {!isEmptyState && view === "timeline" && (
+          <TimelineView
+            categories={overview?.categories ?? []}
+            projects={overview?.projects ?? []}
+            onOpenProject={(projectId) => navigate(`/projects/${projectId}`)}
+          />
+        )}
+        {!isEmptyState && isCollectionView(view) && (
           <ProjectsView
             categories={overview?.categories ?? []}
             projects={overview?.projects ?? []}
             tasks={overview?.tasks ?? []}
+            projectType={projectTypeForCollectionView(view)}
+            singularLabel={singularLabelForCollectionView(view)}
+            pluralLabel={titleForView(view)}
             categoryFilterName={route.categoryName}
             onOpenProject={(projectId) => navigate(`/projects/${projectId}`)}
-            onOpenCategory={(categoryName) => navigate(pathForProjectCategory(categoryName))}
+            onOpenCategory={(categoryName) => navigate(pathForCollectionCategory(view, categoryName))}
             onReorderCategories={async (categoryIds) => {
               await reorderCategories(categoryIds);
               await refresh();
@@ -863,14 +1024,27 @@ export default function App() {
               await reorderProjects(categoryId, projectIds);
               await refresh();
             }}
+            onCreateProject={async (input) => {
+              try {
+                setError(null);
+                const project = await createProject(input);
+                await refresh();
+                navigate(`/projects/${project.id}`);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Eintrag konnte nicht angelegt werden.");
+                throw err;
+              }
+            }}
           />
         )}
         {!isEmptyState && view === "project" && (
           <ProjectDetailView
             detail={projectDetail}
             categories={overview?.categories ?? []}
-            onBack={() => navigate("/projects")}
-            onBackToCategory={(categoryName) => navigate(pathForProjectCategory(categoryName))}
+            onBack={() => navigate(`/${collectionViewForProjectType(projectDetail?.project.type ?? "project")}`)}
+            onBackToCategory={(categoryName) =>
+              navigate(pathForCollectionCategory(collectionViewForProjectType(projectDetail?.project.type ?? "project"), categoryName))
+            }
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
             onComplete={async (taskId) => {
               await completeTask(taskId);
@@ -887,11 +1061,11 @@ export default function App() {
               await refresh();
               if (route.projectId) setProjectDetail(await fetchProjectDetail(route.projectId));
             }}
-            onAskDmax={
-              routeConversationContext
-                ? () => void openContextualAgent(routeConversationContext.context, routeConversationContext.label)
-                : undefined
-            }
+            onUpdateProject={async (projectId, input) => {
+              await updateProject(projectId, input);
+              await refresh();
+              setProjectDetail(await fetchProjectDetail(projectId));
+            }}
           />
         )}
         {!isEmptyState && view === "task" && (
@@ -909,11 +1083,6 @@ export default function App() {
               await refresh();
               setTaskDetail(await fetchTaskDetail(taskId));
             }}
-            onAskDmax={
-              routeConversationContext
-                ? () => void openContextualAgent(routeConversationContext.context, routeConversationContext.label)
-                : undefined
-            }
           />
         )}
         {!isEmptyState && view === "tasks" && (
@@ -929,6 +1098,12 @@ export default function App() {
               await refresh();
             }}
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
+          />
+        )}
+        {view === "promptTemplates" && (
+          <PromptTemplatesView
+            templates={promptTemplates}
+            onRefresh={() => void loadPromptTemplates()}
           />
         )}
         {view === "prompts" && (
@@ -1008,6 +1183,52 @@ function detachAllRemoteAudio(remoteAudioElementsRef: MutableRefObject<HTMLAudio
   remoteAudioElementsRef.current = [];
 }
 
+function renderNavItem(
+  item: NavItem,
+  view: View,
+  projectDetail: ProjectDetail | null,
+  navigate: (path: string) => void
+) {
+  const Icon = item.icon;
+  const active =
+    view === item.id
+    || (view === "lifeArea" && item.id === "lifeAreas")
+    || (view === "project" && projectDetail?.project.type && collectionViewForProjectType(projectDetail.project.type) === item.id)
+    || (view === "task" && item.id === "tasks");
+
+  return (
+    <button key={item.id} className={`nav-item ${active ? "active" : ""}`} onClick={() => navigate(item.path)}>
+      <Icon size={18} />
+      <span>{item.label}</span>
+    </button>
+  );
+}
+
+function DmaxAgentButton(props: { status: OpenClawStatus | null; active: boolean; onClick: () => void }) {
+  const state = props.status?.state ?? "starting";
+  const statusText = state === "ready" ? null : state === "starting" ? "Starting..." : "Offline";
+  const tooltip = {
+    ready: "Dein OpenClaw-Agent ist bereit.",
+    starting: "Dein OpenClaw-Agent startet gerade. Bitte kurz warten.",
+    unavailable: "Dein OpenClaw-Agent reagiert nicht."
+  }[state];
+  const ariaLabel = statusText ? `DMAX ${statusText}` : "DMAX bereit";
+
+  return (
+    <button
+      type="button"
+      className={`dmax-agent-button ${state} ${props.active ? "active" : ""}`}
+      title={tooltip}
+      aria-label={ariaLabel}
+      onClick={props.onClick}
+    >
+      <span className="dmax-agent-status-dot" aria-hidden="true" />
+      <span className="dmax-agent-label">DMAX</span>
+      {statusText ? <span className="dmax-agent-status-text">{statusText}</span> : null}
+    </button>
+  );
+}
+
 function DriveView(props: {
   voiceState: VoiceState;
   voiceError: string | null;
@@ -1068,17 +1289,19 @@ function ChatView(props: {
   threadRef: MutableRefObject<HTMLDivElement | null>;
 }) {
   const isVoiceActive = props.voicePhase !== "idle";
+  const visibleMessages = props.messages.filter((message) => message.text.trim() || message.activities?.length || message.source);
+  const hasStreamingAssistantText = props.messages.some((message) => message.role === "assistant" && message.text.trim());
   return (
     <section className="chat-layout">
       <div className="chat-thread" ref={props.threadRef}>
-        {props.messages.map((message) => (
+        {visibleMessages.map((message) => (
           <article key={message.id} className={`chat-message ${message.role}`}>
             <RichText text={message.text} />
             {message.activities?.length ? <ActivityTrail activities={message.activities} /> : null}
             {message.source ? <span>{message.source === "voice" ? "voice message" : "text"}</span> : null}
           </article>
         ))}
-        {props.busy ? (
+        {props.busy && !hasStreamingAssistantText ? (
           <article className="chat-message assistant pending">
             <span className="loading-dots">
               <i />
@@ -1324,46 +1547,376 @@ function SoundWave({ level, active }: { level: number; active: boolean }) {
   );
 }
 
+function isCollectionView(view: View): view is CollectionView {
+  return view === "ideas" || view === "projects" || view === "habits";
+}
+
+function projectTypeForCollectionView(view: CollectionView): ProjectType {
+  if (view === "ideas") return "idea";
+  if (view === "habits") return "habit";
+  return "project";
+}
+
+function singularLabelForCollectionView(view: CollectionView): string {
+  if (view === "ideas") return "Idee";
+  if (view === "habits") return "Gewohnheit";
+  return "Projekt";
+}
+
+const projectTypeOptions: Array<{ value: ProjectType; label: string }> = [
+  { value: "idea", label: "Idee" },
+  { value: "project", label: "Projekt" },
+  { value: "habit", label: "Gewohnheit" }
+];
+
+function projectTypeLabel(type: ProjectType): string {
+  return projectTypeOptions.find((option) => option.value === type)?.label ?? "Eintrag";
+}
+
+function preferredCategoryId(categories: AppOverview["categories"], categoryFilterName: string | null): number {
+  const categoryFromRoute = categoryFilterName
+    ? categories.find((category) => category.name.toLowerCase() === categoryFilterName.toLowerCase())
+    : null;
+  return categoryFromRoute?.id ?? categories.find((category) => category.name === "Inbox")?.id ?? categories[0]?.id ?? 0;
+}
+
+function defaultProjectMarkdown(type: ProjectType, name: string): string {
+  if (type === "idea") {
+    return `# Gedanke\n\n${name}\n\n# Offene Fragen\n\n- \n`;
+  }
+
+  if (type === "habit") {
+    return `# Praxis\n\n${name}\n\n# Rhythmus\n\nNoch offen.\n\n# Reflexion\n\nNoch keine Reflexion.\n`;
+  }
+
+  return `# Ziel\n\n${name}\n\n# Kontext\n\nNoch offen.\n\n# Naechste Massnahmen\n\n- \n`;
+}
+
+function ProjectTypeBadge({ type }: { type: ProjectType }) {
+  return <span className={`type-badge ${type}`}>{projectTypeLabel(type)}</span>;
+}
+
+function displayProjectName(project: Pick<Project, "name" | "isSystem">): string {
+  return project.isSystem && project.name === "Inbox" ? "Task Inbox" : project.name;
+}
+
+function propsCountLabel(count: number, singularLabel: string, pluralLabel: string): string {
+  return count === 1 ? singularLabel : pluralLabel;
+}
+
+function LifeAreasView(props: {
+  categories: AppOverview["categories"];
+  projects: Project[];
+  onOpenLifeArea: (categoryName: string) => void;
+  onOpenProject: (projectId: number) => void;
+}) {
+  const groups = props.categories.map((category) => {
+    const initiatives = props.projects.filter((project) => project.categoryId === category.id);
+    return {
+      category,
+      initiatives,
+      byType: projectTypeOptions.map((option) => ({
+        ...option,
+        projects: initiatives.filter((project) => project.type === option.value)
+      }))
+    };
+  });
+
+  return (
+    <section className="life-area-view">
+      {groups.map((group) => (
+        <section className="life-area-section" key={group.category.id}>
+          <div className="life-area-heading">
+            <div>
+              <span className="life-area-color" style={{ background: group.category.color }} />
+              <button className="life-area-title-link" onClick={() => props.onOpenLifeArea(group.category.name)}>
+                {group.category.name}
+              </button>
+              {group.category.isSystem ? <span className="system-badge">System</span> : null}
+            </div>
+            <span>{group.initiatives.length} {propsCountLabel(group.initiatives.length, "Initiative", "Initiatives")}</span>
+          </div>
+          {group.category.description ? <p className="life-area-description">{firstMarkdownLine(group.category.description)}</p> : null}
+
+          <LifeAreaInitiativeGroups groups={group.byType} onOpenProject={props.onOpenProject} />
+        </section>
+      ))}
+      {groups.length === 0 ? <EmptyState title="Noch keine Lebensbereiche" /> : null}
+    </section>
+  );
+}
+
+function LifeAreaDetailView(props: {
+  category: AppOverview["categories"][number] | null;
+  projects: Project[];
+  onBack: () => void;
+  onOpenProject: (projectId: number) => void;
+  onUpdateCategory: (categoryId: number, input: { name?: string; description?: string | null; color?: string | null }) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [description, setDescription] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setDescription(props.category?.description ?? "");
+    setEditing(false);
+  }, [props.category]);
+
+  if (!props.category) {
+    return <EmptyState title="Lebensbereich nicht gefunden" />;
+  }
+
+  const category = props.category;
+  const initiatives = props.projects.filter((project) => project.categoryId === category.id);
+  const groups = projectTypeOptions.map((option) => ({
+    ...option,
+    projects: initiatives.filter((project) => project.type === option.value)
+  }));
+
+  return (
+    <section className="project-detail life-area-detail">
+      <div className="back-actions">
+        <div className="back-action-group">
+          <button className="small-button back-button" onClick={props.onBack}>
+            Zurueck zu Lebensbereiche
+          </button>
+        </div>
+      </div>
+
+      <div className="section-heading">
+        <div className="project-title-line">
+          <span className="life-area-color large" style={{ background: category.color }} />
+          <h2>{category.name}</h2>
+          {category.isSystem ? <span className="system-badge">System</span> : null}
+        </div>
+        <p>{category.description ? firstMarkdownLine(category.description) : `${initiatives.length} ${propsCountLabel(initiatives.length, "Initiative", "Initiatives")}`}</p>
+      </div>
+
+      <section className="panel life-area-description-panel">
+        <div className="panel-heading-row">
+          <h3>Beschreibung</h3>
+          <button className="small-button" onClick={() => setEditing((current) => !current)}>
+            {editing ? "Abbrechen" : "Bearbeiten"}
+          </button>
+        </div>
+        {editing ? (
+          <form
+            className="life-area-description-form"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (busy) return;
+              setBusy(true);
+              try {
+                await props.onUpdateCategory(category.id, { description });
+                setEditing(false);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={16} />
+            <div className="form-actions">
+              <button className="primary-action compact" type="submit" disabled={busy}>
+                Speichern
+              </button>
+            </div>
+          </form>
+        ) : category.description ? (
+          <RichText text={category.description} />
+        ) : (
+          <EmptyState title="Noch keine Beschreibung" />
+        )}
+      </section>
+
+      <section className="life-area-detail-initiatives">
+        <div className="panel-heading-row">
+          <h3>Initiatives</h3>
+        </div>
+        <LifeAreaInitiativeGroups groups={groups} onOpenProject={props.onOpenProject} />
+      </section>
+    </section>
+  );
+}
+
+function LifeAreaInitiativeGroups(props: {
+  groups: Array<{ value: ProjectType; label: string; projects: Project[] }>;
+  onOpenProject: (projectId: number) => void;
+}) {
+  return (
+    <div className="life-area-type-grid">
+      {props.groups.map((typeGroup) => (
+        <section className="life-area-type-section" key={typeGroup.value}>
+          <div className="life-area-type-heading">
+            <ProjectTypeBadge type={typeGroup.value} />
+            <span>{typeGroup.projects.length}</span>
+          </div>
+          {typeGroup.projects.length === 0 ? (
+            <div className="life-area-empty">Keine {typeGroup.label.toLowerCase()}.</div>
+          ) : (
+            <div className="life-area-initiative-list">
+              {typeGroup.projects.map((project) => (
+                <button className="life-area-initiative-row" key={project.id} onClick={() => props.onOpenProject(project.id)}>
+                  <span>{displayProjectName(project)}</span>
+                  <small>
+                    {project.type === "project" && formatProjectDateRangeForUi(project) ? `${formatProjectDateRangeForUi(project)} · ` : ""}
+                    {project.status}
+                  </small>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function ProjectsView({
   categories,
   projects,
   tasks,
+  projectType,
+  singularLabel,
+  pluralLabel,
   categoryFilterName,
   onOpenProject,
   onOpenCategory,
   onReorderCategories,
-  onReorderProjects
+  onReorderProjects,
+  onCreateProject
 }: {
   categories: AppOverview["categories"];
   projects: Project[];
   tasks: Task[];
+  projectType: ProjectType;
+  singularLabel: string;
+  pluralLabel: string;
   categoryFilterName: string | null;
   onOpenProject: (projectId: number) => void;
   onOpenCategory: (categoryName: string) => void;
   onReorderCategories: (categoryIds: number[]) => Promise<void>;
   onReorderProjects: (categoryId: number, projectIds: number[]) => Promise<void>;
+  onCreateProject: (input: {
+    categoryId: number;
+    type: ProjectType;
+    name: string;
+    summary?: string | null;
+    markdown?: string;
+    startDate?: string | null;
+    endDate?: string | null;
+  }) => Promise<void>;
 }) {
   const [draggedCategoryId, setDraggedCategoryId] = useState<number | null>(null);
   const [categoryDropId, setCategoryDropId] = useState<number | null>(null);
   const [draggedProject, setDraggedProject] = useState<{ categoryId: number; projectId: number } | null>(null);
   const [projectDropId, setProjectDropId] = useState<number | null>(null);
+  const [newProjectCategoryId, setNewProjectCategoryId] = useState<number>(() => preferredCategoryId(categories, categoryFilterName));
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectStartDate, setNewProjectStartDate] = useState("");
+  const [newProjectEndDate, setNewProjectEndDate] = useState("");
+  const [creatingProject, setCreatingProject] = useState(false);
   const visibleCategories = categoryFilterName
     ? categories.filter((category) => category.name.toLowerCase() === categoryFilterName.toLowerCase())
     : categories;
+  const visibleProjects = projects.filter((project) => project.type === projectType);
   const groupedProjects = visibleCategories
     .map((category) => ({
       category,
-      projects: projects.filter((project) => project.categoryId === category.id)
+      projects: visibleProjects.filter((project) => project.categoryId === category.id)
     }))
     .filter((group) => group.projects.length > 0);
-  const uncategorizedProjects = categoryFilterName ? [] : projects.filter((project) => !categories.some((category) => category.id === project.categoryId));
+  const uncategorizedProjects = categoryFilterName ? [] : visibleProjects.filter((project) => !categories.some((category) => category.id === project.categoryId));
   const groups = uncategorizedProjects.length > 0
     ? [...groupedProjects, { category: { id: 0, name: "Uncategorized", description: null, isSystem: false }, projects: uncategorizedProjects }]
     : groupedProjects;
   const reorderableCategoryIds = groups.map((group) => group.category.id).filter((id) => id > 0);
+  const canReorderVisibleProjects = true;
+  const selectedCategoryId = categories.some((category) => category.id === newProjectCategoryId)
+    ? newProjectCategoryId
+    : preferredCategoryId(categories, categoryFilterName);
+  const hasDateFields = projectType === "project";
+  const hasInvalidNewProjectDateRange = hasDateFields && projectDateRangeInvalid(newProjectStartDate, newProjectEndDate);
+
+  useEffect(() => {
+    const preferred = preferredCategoryId(categories, categoryFilterName);
+    if (categoryFilterName || !categories.some((category) => category.id === newProjectCategoryId)) {
+      setNewProjectCategoryId(preferred);
+    }
+  }, [categories, categoryFilterName, newProjectCategoryId]);
 
   return (
     <section className="project-grid">
+      <form
+        className={`entry-create ${hasDateFields ? "with-dates" : ""}`}
+        onSubmit={async (event) => {
+          event.preventDefault();
+          const name = newProjectName.trim();
+          if (!name || !selectedCategoryId || creatingProject || hasInvalidNewProjectDateRange) {
+            return;
+          }
+          setCreatingProject(true);
+          try {
+            await onCreateProject({
+              categoryId: selectedCategoryId,
+              type: projectType,
+              name,
+              markdown: defaultProjectMarkdown(projectType, name),
+              startDate: hasDateFields ? newProjectStartDate || null : undefined,
+              endDate: hasDateFields ? newProjectEndDate || null : undefined
+            });
+            setNewProjectName("");
+            setNewProjectStartDate("");
+            setNewProjectEndDate("");
+          } finally {
+            setCreatingProject(false);
+          }
+        }}
+      >
+        <select value={selectedCategoryId || ""} onChange={(event) => setNewProjectCategoryId(Number(event.target.value))} aria-label="Kategorie">
+          {categories.map((category) => (
+            <option key={category.id} value={category.id}>
+              {category.name}
+            </option>
+          ))}
+        </select>
+        <input
+          value={newProjectName}
+          onChange={(event) => setNewProjectName(event.target.value)}
+          placeholder={`${singularLabel} benennen`}
+        />
+        {hasDateFields ? (
+          <div className="entry-date-fields">
+            <label>
+              Start
+              <input
+                type="date"
+                value={newProjectStartDate}
+                onChange={(event) => setNewProjectStartDate(event.target.value)}
+                aria-label="Startdatum"
+              />
+            </label>
+            <label>
+              Ende
+              <input
+                type="date"
+                value={newProjectEndDate}
+                min={newProjectStartDate || undefined}
+                onChange={(event) => setNewProjectEndDate(event.target.value)}
+                aria-label="Enddatum"
+              />
+            </label>
+          </div>
+        ) : null}
+        <button
+          className="primary-action compact"
+          type="submit"
+          disabled={!newProjectName.trim() || !selectedCategoryId || creatingProject || hasInvalidNewProjectDateRange}
+        >
+          <Plus size={17} />
+          {creatingProject ? "Anlegen" : "Anlegen"}
+        </button>
+      </form>
+
       {groups.map((group) => (
         <section
           className={`project-category ${draggedCategoryId === group.category.id ? "dragging" : ""} ${categoryDropId === group.category.id ? "drag-over" : ""}`}
@@ -1392,7 +1945,7 @@ function ProjectsView({
                 </button>
               )}
             </div>
-            {group.category.id !== 0 && !categoryFilterName ? (
+            {group.category.id !== 0 && !categoryFilterName && canReorderVisibleProjects ? (
               <button
                 className="drag-handle"
                 draggable
@@ -1410,18 +1963,19 @@ function ProjectsView({
                 <GripVertical size={17} />
               </button>
             ) : null}
-            <span>{group.projects.length} projects</span>
+            <span>{group.projects.length} {propsCountLabel(group.projects.length, singularLabel, pluralLabel)}</span>
           </div>
           <div className="project-category-list">
             {group.projects.map((project) => {
               const projectTasks = tasks.filter((task) => task.projectId === project.id);
               return (
                 <article
-                  className={`project-row clickable draggable-row ${draggedProject?.projectId === project.id ? "dragging" : ""} ${projectDropId === project.id ? "drag-over" : ""}`}
+                  className={`project-row clickable ${canReorderVisibleProjects ? "draggable-row" : ""} ${draggedProject?.projectId === project.id ? "dragging" : ""} ${projectDropId === project.id ? "drag-over" : ""}`}
                   key={project.id}
-                  draggable
+                  draggable={canReorderVisibleProjects}
                   onClick={() => onOpenProject(project.id)}
                   onDragStart={(event) => {
+                    if (!canReorderVisibleProjects) return;
                     event.dataTransfer.effectAllowed = "move";
                     setDraggedProject({ categoryId: group.category.id, projectId: project.id });
                   }}
@@ -1445,12 +1999,17 @@ function ProjectsView({
                   }}
                 >
                   <div>
-                    <h3>{project.name}</h3>
+                    <div className="project-title-line">
+                      <h3>{displayProjectName(project)}</h3>
+                      <ProjectTypeBadge type={project.type} />
+                      {project.isSystem ? <span className="system-badge">System</span> : null}
+                    </div>
                     <p>{project.summary ?? firstMarkdownLine(project.markdown)}</p>
                   </div>
                   <div className="row-meta">
+                    {project.type === "project" && formatProjectDateRangeForUi(project) ? <span>{formatProjectDateRangeForUi(project)}</span> : null}
                     <span>{project.status}</span>
-                    <span>{projectTasks.length} tasks</span>
+                    <span>{projectTasks.length} Massnahmen</span>
                   </div>
                 </article>
               );
@@ -1458,8 +2017,171 @@ function ProjectsView({
           </div>
         </section>
       ))}
-      {groups.length === 0 ? <EmptyState title="No projects yet" /> : null}
+      {groups.length === 0 ? <EmptyState title={`Keine ${pluralLabel.toLowerCase()} in dieser Ansicht`} /> : null}
     </section>
+  );
+}
+
+const timelineMonthOptions = [3, 6, 12, 18];
+
+function TimelineView(props: {
+  categories: AppOverview["categories"];
+  projects: Project[];
+  onOpenProject: (projectId: number) => void;
+}) {
+  const [monthsAhead, setMonthsAhead] = useState(6);
+  const today = useMemo(() => startOfUtcDay(new Date()), []);
+  const range = useMemo(() => visibleTimelineRange(today, monthsAhead), [today, monthsAhead]);
+  const totalDays = daysBetween(range.start, range.end) + 1;
+  const monthLabels = useMemo(() => buildTimelineMonths(range.start, range.end), [range]);
+  const weekLabels = useMemo(() => buildTimelineWeeks(range.start, range.end), [range]);
+  const todayOffset = dateOffsetPercent(today, range.start, totalDays);
+  const categoryById = new Map(props.categories.map((category) => [category.id, category]));
+  const entries = props.projects
+    .filter((project) => project.type === "project" && project.status === "active" && project.startDate && project.endDate)
+    .map((project) => {
+      const category = categoryById.get(project.categoryId);
+      const start = project.startDate ? parseDateOnlyUtc(project.startDate) : null;
+      const end = project.endDate ? parseDateOnlyUtc(project.endDate) : null;
+      if (!category || !start || !end || end < range.start || start > range.end) {
+        return null;
+      }
+
+      const clippedStart = start < range.start ? range.start : start;
+      const clippedEnd = end > range.end ? range.end : end;
+      return {
+        project,
+        category,
+        left: dateOffsetPercent(clippedStart, range.start, totalDays),
+        width: Math.max(((daysBetween(clippedStart, clippedEnd) + 1) / totalDays) * 100, 0.7)
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+    .sort((a, b) => {
+      const dateCompare = (a.project.startDate ?? "").localeCompare(b.project.startDate ?? "");
+      return dateCompare || a.project.sortOrder - b.project.sortOrder || a.project.name.localeCompare(b.project.name);
+    });
+  const groups = props.categories
+    .map((category) => ({
+      category,
+      entries: entries.filter((entry) => entry.category.id === category.id)
+    }))
+    .filter((group) => group.entries.length > 0);
+  const chartMinWidth = Math.max(980, totalDays * 7);
+
+  return (
+    <section className="timeline-panel">
+      <div className="timeline-toolbar">
+        <div>
+          <h2>Projekt-Timeline</h2>
+          <p>
+            {formatTimelineRange(range.start, range.end)} · aktive Projekte mit Start und Ende
+          </p>
+        </div>
+        <label>
+          Zeitraum
+          <select value={monthsAhead} onChange={(event) => setMonthsAhead(Number(event.target.value))}>
+            {timelineMonthOptions.map((option) => (
+              <option key={option} value={option}>
+                +{option} Monate
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {groups.length === 0 ? (
+        <EmptyState title="Keine aktiven datierten Projekte in diesem Zeitraum" />
+      ) : (
+        <div className="timeline-scroll">
+          <div className="timeline-frame" style={{ minWidth: chartMinWidth }}>
+            <div className="timeline-header-row">
+              <div className="timeline-corner">Kategorien</div>
+              <div className="timeline-axis">
+                <div className="timeline-months">
+                  {monthLabels.map((month) => (
+                    <div
+                      className="timeline-month"
+                      key={month.key}
+                      style={{ left: `${month.left}%`, width: `${month.width}%` }}
+                    >
+                      {month.label}
+                    </div>
+                  ))}
+                </div>
+                <div className="timeline-weeks">
+                  {weekLabels.map((week) => (
+                    <div className="timeline-week" key={week.key} style={{ left: `${week.left}%` }}>
+                      {week.label}
+                    </div>
+                  ))}
+                </div>
+                {todayOffset !== null ? (
+                  <div className="timeline-today-label" style={{ left: `${todayOffset}%` }}>
+                    Heute
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="timeline-body">
+              {groups.map((group) => (
+                <div
+                  className="timeline-row"
+                  key={group.category.id}
+                  style={{ "--timeline-row-height": `${Math.max(78, 28 + group.entries.length * 38)}px` } as CSSProperties}
+                >
+                  <div className="timeline-row-label">
+                    <span className="timeline-category-swatch" style={{ background: group.category.color }} />
+                    <span>{group.category.name}</span>
+                    <strong>{group.entries.length}</strong>
+                  </div>
+                  <div className="timeline-chart">
+                    <TimelineGrid monthLabels={monthLabels} weekLabels={weekLabels} todayOffset={todayOffset} />
+                    {group.entries.map((entry, index) => (
+                      <button
+                        className="timeline-bar"
+                        key={entry.project.id}
+                        onClick={() => props.onOpenProject(entry.project.id)}
+                        style={
+                          {
+                            left: `${entry.left}%`,
+                            width: `${entry.width}%`,
+                            top: `${14 + index * 38}px`,
+                            "--category-color": entry.category.color
+                          } as CSSProperties
+                        }
+                        title={`${displayProjectName(entry.project)} · ${formatProjectDateRangeForUi(entry.project) ?? ""}`}
+                      >
+                        <span>{displayProjectName(entry.project)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TimelineGrid(props: {
+  monthLabels: Array<{ key: string; left: number; width: number; label: string }>;
+  weekLabels: Array<{ key: string; left: number; label: string }>;
+  todayOffset: number | null;
+}) {
+  return (
+    <div className="timeline-grid-lines" aria-hidden="true">
+      {props.monthLabels.map((month) => (
+        <span className="timeline-month-line" key={month.key} style={{ left: `${month.left}%` }} />
+      ))}
+      {props.weekLabels.map((week) => (
+        <span className="timeline-week-line" key={week.key} style={{ left: `${week.left}%` }} />
+      ))}
+      {props.todayOffset !== null ? <span className="timeline-today-line" style={{ left: `${props.todayOffset}%` }} /> : null}
+    </div>
   );
 }
 
@@ -1472,7 +2194,18 @@ function ProjectDetailView(props: {
   onComplete: (taskId: number) => Promise<void>;
   onStatus: (taskId: number, status: string) => Promise<void>;
   onReorderTasks?: (projectId: number, taskIds: number[]) => Promise<void>;
-  onAskDmax?: () => void;
+  onUpdateProject: (
+    projectId: number,
+    input: {
+      categoryId?: number;
+      parentId?: number | null;
+      name?: string;
+      status?: Project["status"];
+      summary?: string | null;
+      startDate?: string | null;
+      endDate?: string | null;
+    }
+  ) => Promise<void>;
 }) {
   if (!props.detail) {
     return <EmptyState title="Loading project..." />;
@@ -1480,36 +2213,37 @@ function ProjectDetailView(props: {
 
   const category = props.categories.find((candidate) => candidate.id === props.detail?.project.categoryId);
   const projectId = props.detail.project.id;
+  const project = props.detail.project;
+  const backLabel = titleForView(collectionViewForProjectType(project.type));
   return (
     <section className="project-detail">
       <div className="back-actions">
         <div className="back-action-group">
           <button className="small-button back-button" onClick={props.onBack}>
-            Back to Projects
+            Zurueck zu {backLabel}
           </button>
           {category ? (
             <button className="small-button back-button" onClick={() => props.onBackToCategory(category.name)}>
-              Back to {category.name}
+              Zurueck zu {category.name}
             </button>
           ) : null}
         </div>
-        {props.onAskDmax ? (
-          <button className="small-button ask-dmax-small" onClick={props.onAskDmax}>
-            <PanelRightOpen size={15} />
-            d-max
-          </button>
-        ) : null}
       </div>
       <div className="section-heading">
-        <h2>{props.detail.project.name}</h2>
-        <p>{props.detail.project.summary ?? firstMarkdownLine(props.detail.project.markdown)}</p>
+        <div className="project-title-line">
+          <h2>{displayProjectName(project)}</h2>
+          <ProjectTypeBadge type={project.type} />
+          {project.isSystem ? <span className="system-badge">System</span> : null}
+        </div>
+        <p>{project.summary ?? firstMarkdownLine(project.markdown)}</p>
       </div>
+      <ProjectBasicsForm project={project} categories={props.categories} onUpdateProject={props.onUpdateProject} />
       <section className="panel">
-        <RichText text={props.detail.project.markdown || "No project markdown yet."} />
+        <RichText text={project.markdown || "No project markdown yet."} />
       </section>
-      <Panel title="Tasks">
+      <Panel title="Massnahmen">
         {props.detail.tasks.length === 0 ? (
-          <EmptyState title="No tasks yet" />
+          <EmptyState title="Noch keine Massnahmen" />
         ) : (
           <TasksView
             tasks={props.detail.tasks}
@@ -1531,7 +2265,6 @@ function TaskDetailView(props: {
   onOpenProject: (projectId: number) => void;
   onComplete: (taskId: number) => Promise<void>;
   onStatus: (taskId: number, status: string) => Promise<void>;
-  onAskDmax?: () => void;
 }) {
   if (!props.detail) {
     return <EmptyState title="Loading task..." />;
@@ -1543,20 +2276,14 @@ function TaskDetailView(props: {
       <div className="back-actions">
         <div className="back-action-group">
           <button className="small-button back-button" onClick={props.onBack}>
-            Back to Tasks
+            Zurueck zu Massnahmen
           </button>
           {project ? (
             <button className="small-button back-button" onClick={() => props.onOpenProject(project.id)}>
-              Back to Project
+              Zurueck zum Eintrag
             </button>
           ) : null}
         </div>
-        {props.onAskDmax ? (
-          <button className="small-button ask-dmax-small" onClick={props.onAskDmax}>
-            <PanelRightOpen size={15} />
-            d-max
-          </button>
-        ) : null}
       </div>
 
       <div className="section-heading task-detail-heading">
@@ -1565,7 +2292,7 @@ function TaskDetailView(props: {
           <p>{project?.name ?? `Project ${task.projectId}`}</p>
         </div>
         <button className="small-button" onClick={() => void props.onComplete(task.id)}>
-          Mark Done
+          Erledigt
         </button>
       </div>
 
@@ -1604,10 +2331,179 @@ function TaskDetailView(props: {
         </dl>
       </section>
 
-      <Panel title="Notes">
-        <p className="notes-text">{task.notes ?? "No notes yet."}</p>
+      <Panel title="Notizen">
+        <p className="notes-text">{task.notes ?? "Noch keine Notizen."}</p>
       </Panel>
     </section>
+  );
+}
+
+function ProjectBasicsForm(props: {
+  project: Project;
+  categories: AppOverview["categories"];
+  onUpdateProject: (
+    projectId: number,
+    input: {
+      categoryId?: number;
+      parentId?: number | null;
+      name?: string;
+      status?: Project["status"];
+      summary?: string | null;
+      startDate?: string | null;
+      endDate?: string | null;
+    }
+  ) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(props.project.name);
+  const [summary, setSummary] = useState(props.project.summary ?? "");
+  const [categoryId, setCategoryId] = useState(props.project.categoryId);
+  const [status, setStatus] = useState<Project["status"]>(props.project.status);
+  const [startDate, setStartDate] = useState(props.project.startDate ?? "");
+  const [endDate, setEndDate] = useState(props.project.endDate ?? "");
+  const [busy, setBusy] = useState(false);
+  const hasDateFields = props.project.type === "project";
+  const hasInvalidDateRange = hasDateFields && projectDateRangeInvalid(startDate, endDate);
+
+  useEffect(() => {
+    setName(props.project.name);
+    setSummary(props.project.summary ?? "");
+    setCategoryId(props.project.categoryId);
+    setStatus(props.project.status);
+    setStartDate(props.project.startDate ?? "");
+    setEndDate(props.project.endDate ?? "");
+  }, [props.project]);
+
+  if (!editing) {
+    const category = props.categories.find((candidate) => candidate.id === props.project.categoryId);
+    return (
+      <section className="panel basics-panel">
+        <div className="panel-heading-row">
+          <h3>Basisdaten</h3>
+          <button className="small-button" onClick={() => setEditing(true)}>
+            Bearbeiten
+          </button>
+        </div>
+        <dl className="detail-list compact">
+          <div>
+            <dt>Typ</dt>
+            <dd>
+              <ProjectTypeBadge type={props.project.type} />
+            </dd>
+          </div>
+          <div>
+            <dt>Kategorie</dt>
+            <dd>{category?.name ?? `Category ${props.project.categoryId}`}</dd>
+          </div>
+          <div>
+            <dt>Status</dt>
+            <dd>{props.project.status}</dd>
+          </div>
+          {hasDateFields ? (
+            <>
+              <div>
+                <dt>Start</dt>
+                <dd>{props.project.startDate ?? "Offen"}</dd>
+              </div>
+              <div>
+                <dt>Ende</dt>
+                <dd>{props.project.endDate ?? "Offen"}</dd>
+              </div>
+            </>
+          ) : null}
+        </dl>
+      </section>
+    );
+  }
+
+  return (
+    <form
+      className="panel basics-panel"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const trimmedName = name.trim();
+        if (!trimmedName || busy || hasInvalidDateRange) return;
+        setBusy(true);
+        try {
+          await props.onUpdateProject(props.project.id, {
+            name: trimmedName,
+            summary: summary.trim() || null,
+            categoryId,
+            status,
+            startDate: hasDateFields ? startDate || null : undefined,
+            endDate: hasDateFields ? endDate || null : undefined
+          });
+          setEditing(false);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <div className="panel-heading-row">
+        <h3>Basisdaten bearbeiten</h3>
+        <button
+          type="button"
+          className="small-button"
+          onClick={() => {
+            setName(props.project.name);
+            setSummary(props.project.summary ?? "");
+            setCategoryId(props.project.categoryId);
+            setStatus(props.project.status);
+            setStartDate(props.project.startDate ?? "");
+            setEndDate(props.project.endDate ?? "");
+            setEditing(false);
+          }}
+        >
+          Abbrechen
+        </button>
+      </div>
+      <div className="basics-form-grid">
+        <label>
+          Name
+          <input value={name} onChange={(event) => setName(event.target.value)} />
+        </label>
+        <label>
+          Kategorie
+          <select value={categoryId} onChange={(event) => setCategoryId(Number(event.target.value))}>
+            {props.categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Status
+          <select value={status} onChange={(event) => setStatus(event.target.value as Project["status"])}>
+            <option value="active">active</option>
+            <option value="paused">paused</option>
+            <option value="completed">completed</option>
+            <option value="archived">archived</option>
+          </select>
+        </label>
+        {hasDateFields ? (
+          <>
+            <label>
+              Start
+              <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+            </label>
+            <label>
+              Ende
+              <input type="date" value={endDate} min={startDate || undefined} onChange={(event) => setEndDate(event.target.value)} />
+            </label>
+          </>
+        ) : null}
+        <label className="basics-summary-field">
+          Summary
+          <textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={3} />
+        </label>
+      </div>
+      <div className="form-actions">
+        <button className="primary-action compact" type="submit" disabled={!name.trim() || busy || hasInvalidDateRange}>
+          Speichern
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -1665,7 +2561,7 @@ function TasksView(props: {
           </button>
           <div>
             <h2>{task.title}</h2>
-            <p>{projectById.get(task.projectId)?.name ?? `Project ${task.projectId}`}</p>
+            <p>{projectById.get(task.projectId) ? displayProjectName(projectById.get(task.projectId)!) : `Project ${task.projectId}`}</p>
           </div>
           <select
             value={task.status}
@@ -1681,6 +2577,43 @@ function TasksView(props: {
           <span className={`priority ${task.priority}`}>{task.priority}</span>
         </article>
       ))}
+    </section>
+  );
+}
+
+function PromptTemplatesView(props: {
+  templates: PromptTemplateDefinition[];
+  onRefresh: () => void;
+}) {
+  return (
+    <section className="prompt-template-view">
+      <div className="prompt-toolbar">
+        <div>
+          <span className="eyebrow">Agent Context</span>
+          <h2>Prompt-Vorlagen</h2>
+        </div>
+        <button className="small-button" onClick={props.onRefresh}>
+          Refresh
+        </button>
+      </div>
+
+      <div className="prompt-template-list">
+        {props.templates.map((template) => (
+          <section className="prompt-template-card panel" key={template.id}>
+            <div className="prompt-template-card-heading">
+              <div>
+                <h3>{template.name}</h3>
+                <p>{template.route}</p>
+              </div>
+              <span>{template.effectiveContext}</span>
+            </div>
+            <PromptSection title="System / Instructions" text={template.systemInstructions} />
+            <PromptSection title="Kontextdaten Template" text={template.contextDataTemplate} />
+            <PromptSection title="Finaler Prompt Template" text={template.finalPromptTemplate} emphasis />
+          </section>
+        ))}
+        {props.templates.length === 0 ? <EmptyState title="Keine Prompt-Vorlagen geladen." /> : null}
+      </div>
     </section>
   );
 }
@@ -1759,6 +2692,7 @@ function PromptInspectorView(props: {
                 </button>
               </div>
 
+              {selected.turnTrace ? <TurnTracePanel trace={selected.turnTrace} /> : null}
               <PromptSection title="User Input" text={selected.userInput} />
               <PromptSection title="System / Instructions" text={selected.systemInstructions} />
               <PromptSection title="Kontextdaten" text={selected.contextData} />
@@ -1773,6 +2707,65 @@ function PromptInspectorView(props: {
   );
 }
 
+function TurnTracePanel({ trace }: { trace: AppPromptLog["turnTrace"] }) {
+  if (!trace) {
+    return null;
+  }
+
+  const latestRun = trace.openClaw?.runs.at(-1) ?? null;
+  return (
+    <section className="prompt-section turn-trace-panel">
+      <div className="turn-trace-heading">
+        <h3>Turn Timeline</h3>
+        <span>{trace.totalMs !== null ? formatDuration(trace.totalMs) : "läuft"}</span>
+      </div>
+      <p className="turn-trace-id">{trace.traceId}</p>
+      {latestRun ? (
+        <div className="turn-trace-summary">
+          <div>
+            <span>Vor OpenClaw Session</span>
+            <strong>{formatNullableDuration(latestRun.preSessionDelayMs)}</strong>
+          </div>
+          <div>
+            <span>Session bis Model Done</span>
+            <strong>{formatNullableDuration(latestRun.sessionToModelCompletedMs)}</strong>
+          </div>
+          <div>
+            <span>Tools</span>
+            <strong>{latestRun.toolCount ?? "n/a"}</strong>
+          </div>
+          <div>
+            <span>Tokens</span>
+            <strong>{formatUsageTotal(latestRun.usage)}</strong>
+          </div>
+        </div>
+      ) : null}
+      <ol className="turn-trace-events">
+        {trace.events.map((event, index) => (
+          <li key={`${event.label}-${index}`}>
+            <span>{formatDuration(event.msFromStart)}</span>
+            <strong>{event.label}</strong>
+            {event.detail ? <small>{formatTraceDetail(event.detail)}</small> : null}
+          </li>
+        ))}
+      </ol>
+      {trace.openClaw?.runs.length ? (
+        <ol className="turn-trace-events openclaw-runs">
+          {trace.openClaw.runs.map((run) => (
+            <li key={run.runId}>
+              <span>{formatNullableDuration(run.preSessionDelayMs)}</span>
+              <strong>openclaw.session.started</strong>
+              <small>
+                model {formatNullableDuration(run.sessionToModelCompletedMs)} · total {formatNullableDuration(run.sessionToEndedMs)}
+              </small>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </section>
+  );
+}
+
 function PromptSection({ title, text, emphasis = false }: { title: string; text: string; emphasis?: boolean }) {
   return (
     <section className={`prompt-section ${emphasis ? "emphasis" : ""}`}>
@@ -1780,6 +2773,28 @@ function PromptSection({ title, text, emphasis = false }: { title: string; text:
       <pre>{text || "—"}</pre>
     </section>
   );
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+}
+
+function formatNullableDuration(ms: number | null): string {
+  return ms === null ? "n/a" : formatDuration(ms);
+}
+
+function formatUsageTotal(usage: Record<string, unknown> | null): string {
+  const total = usage?.total;
+  return typeof total === "number" ? total.toLocaleString("de-DE") : "n/a";
+}
+
+function formatTraceDetail(detail: Record<string, unknown>): string {
+  return Object.entries(detail)
+    .map(([key, value]) => `${key}: ${typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : JSON.stringify(value)}`)
+    .join(" · ");
 }
 
 function formatPromptTimestamp(value: string): string {
@@ -1947,22 +2962,34 @@ function EmptyState({ title }: { title: string }) {
 function titleForView(view: View): string {
   return {
     drive: "Drive Mode",
-    projects: "Projects",
-    project: "Project",
-    task: "Task",
+    lifeAreas: "Lebensbereiche",
+    lifeArea: "Lebensbereich",
+    timeline: "Timeline",
+    ideas: "Ideen",
+    projects: "Projekte",
+    habits: "Gewohnheiten",
+    project: "Eintrag",
+    task: "Massnahme",
     prompts: "Prompt Inspector",
-    tasks: "Tasks"
+    promptTemplates: "Prompt-Vorlagen",
+    tasks: "Massnahmen"
   }[view];
 }
 
 function subtitleForView(view: View): string {
   return {
     drive: "Realtime voice surface; LiveKit connection comes next.",
+    lifeAreas: "Categories mit ihren Ideen, Projekten und Gewohnheiten.",
+    lifeArea: "Beschreibung, Kontext und Initiatives.",
+    timeline: "Aktive Projekte entlang der Zeitachse.",
+    ideas: "",
     projects: "",
-    project: "Project memory, linked tasks, and extracted context.",
-    task: "Task status, priority, notes, and project context.",
+    habits: "",
+    project: "Memory, Massnahmen und Kontext.",
+    task: "Status, Prioritaet, Notizen und Kontext.",
     prompts: "Debug view for d-max prompts sent to OpenClaw.",
-    tasks: "Concrete work across active projects."
+    promptTemplates: "Kontextabhängige Vorlagen für DMAX und OpenClaw.",
+    tasks: "Konkrete Massnahmen ueber aktive Eintraege hinweg."
   }[view];
 }
 
@@ -1971,6 +2998,107 @@ function firstMarkdownLine(markdown: string): string {
     .split("\n")
     .map((line) => line.replace(/^#+\s*/, "").trim())
     .find(Boolean) ?? "No project memory yet";
+}
+
+function projectDateRangeInvalid(startDate: string, endDate: string): boolean {
+  return Boolean(startDate && endDate && startDate > endDate);
+}
+
+function formatProjectDateRangeForUi(project: Pick<Project, "startDate" | "endDate">): string | null {
+  if (project.startDate && project.endDate) {
+    return `${formatDateOnly(project.startDate)} - ${formatDateOnly(project.endDate)}`;
+  }
+  if (project.startDate) {
+    return `ab ${formatDateOnly(project.startDate)}`;
+  }
+  if (project.endDate) {
+    return `bis ${formatDateOnly(project.endDate)}`;
+  }
+  return null;
+}
+
+function visibleTimelineRange(today: Date, monthsAhead: number): { start: Date; end: Date } {
+  const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
+  const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + monthsAhead + 1, 0));
+  return { start, end };
+}
+
+function buildTimelineMonths(start: Date, end: Date): Array<{ key: string; left: number; width: number; label: string }> {
+  const totalDays = daysBetween(start, end) + 1;
+  const months: Array<{ key: string; left: number; width: number; label: string }> = [];
+  let cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+
+  while (cursor <= end) {
+    const monthStart = cursor < start ? start : cursor;
+    const monthEndCandidate = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0));
+    const monthEnd = monthEndCandidate > end ? end : monthEndCandidate;
+    months.push({
+      key: `${cursor.getUTCFullYear()}-${cursor.getUTCMonth()}`,
+      left: dateOffsetPercent(monthStart, start, totalDays) ?? 0,
+      width: ((daysBetween(monthStart, monthEnd) + 1) / totalDays) * 100,
+      label: cursor.toLocaleDateString("de-DE", { month: "short", year: "numeric", timeZone: "UTC" })
+    });
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+  }
+
+  return months;
+}
+
+function buildTimelineWeeks(start: Date, end: Date): Array<{ key: string; left: number; label: string }> {
+  const totalDays = daysBetween(start, end) + 1;
+  const firstMonday = new Date(start);
+  const day = firstMonday.getUTCDay();
+  const daysUntilMonday = (8 - day) % 7;
+  firstMonday.setUTCDate(firstMonday.getUTCDate() + daysUntilMonday);
+
+  const weeks: Array<{ key: string; left: number; label: string }> = [];
+  for (let cursor = firstMonday; cursor <= end; cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate() + 7))) {
+    weeks.push({
+      key: cursor.toISOString().slice(0, 10),
+      left: dateOffsetPercent(cursor, start, totalDays) ?? 0,
+      label: String(cursor.getUTCDate())
+    });
+  }
+
+  return weeks;
+}
+
+function dateOffsetPercent(date: Date, start: Date, totalDays: number): number | null {
+  if (date < start || totalDays <= 0) {
+    return null;
+  }
+
+  return (daysBetween(start, date) / totalDays) * 100;
+}
+
+function parseDateOnlyUtc(value: string): Date | null {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function startOfUtcDay(date: Date): Date {
+  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+}
+
+function daysBetween(start: Date, end: Date): number {
+  return Math.round((end.getTime() - start.getTime()) / 86_400_000);
+}
+
+function formatTimelineRange(start: Date, end: Date): string {
+  return `${start.toLocaleDateString("de-DE", { month: "short", year: "numeric", timeZone: "UTC" })} - ${end.toLocaleDateString("de-DE", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC"
+  })}`;
+}
+
+function formatDateOnly(value: string): string {
+  const [year, month, day] = value.split("-");
+  return day && month && year ? `${day}.${month}.${year}` : value;
 }
 
 function startAudioMeter(stream: MediaStream, ref: MutableRefObject<AudioMeterHandle | null>, setLevel: (level: number) => void): void {

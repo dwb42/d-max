@@ -1,6 +1,8 @@
 import type Database from "better-sqlite3";
 import { nowIso } from "../db/time.js";
 import type { ConversationContextType } from "./app-conversations.js";
+import { parseTurnTrace } from "../chat/turn-trace.js";
+import type { AppChatTurnTrace } from "../chat/turn-trace.js";
 
 export type AppPromptLog = {
   id: number;
@@ -15,6 +17,7 @@ export type AppPromptLog = {
   memoryHistory: string;
   tools: string;
   finalPrompt: string;
+  turnTrace: AppChatTurnTrace | null;
   createdAt: string;
 };
 
@@ -31,6 +34,7 @@ type AppPromptLogRow = {
   memory_history: string;
   tools: string;
   final_prompt: string;
+  turn_trace: string | null;
   created_at: string;
 };
 
@@ -46,6 +50,7 @@ export type CreateAppPromptLogInput = {
   memoryHistory: string;
   tools: string;
   finalPrompt: string;
+  turnTrace?: AppChatTurnTrace | null;
 };
 
 function toPromptLog(row: AppPromptLogRow): AppPromptLog {
@@ -62,6 +67,7 @@ function toPromptLog(row: AppPromptLogRow): AppPromptLog {
     memoryHistory: row.memory_history,
     tools: row.tools,
     finalPrompt: row.final_prompt,
+    turnTrace: parseTurnTrace(row.turn_trace),
     createdAt: row.created_at
   };
 }
@@ -91,8 +97,9 @@ export class AppPromptLogRepository {
           memory_history,
           tools,
           final_prompt,
+          turn_trace,
           created_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         input.conversationId ?? null,
@@ -106,6 +113,7 @@ export class AppPromptLogRepository {
         input.memoryHistory,
         input.tools,
         input.finalPrompt,
+        input.turnTrace ? JSON.stringify(input.turnTrace) : null,
         now
       );
 
@@ -115,5 +123,10 @@ export class AppPromptLogRepository {
   findById(id: number): AppPromptLog | null {
     const row = this.db.prepare("select * from app_prompt_logs where id = ?").get(id) as AppPromptLogRow | undefined;
     return row ? toPromptLog(row) : null;
+  }
+
+  updateTurnTrace(id: number, turnTrace: AppChatTurnTrace): AppPromptLog {
+    this.db.prepare("update app_prompt_logs set turn_trace = ? where id = ?").run(JSON.stringify(turnTrace), id);
+    return this.findById(id)!;
   }
 }

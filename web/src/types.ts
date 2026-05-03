@@ -2,20 +2,26 @@ export type Category = {
   id: number;
   name: string;
   description: string | null;
+  color: string;
   sortOrder: number;
   isSystem: boolean;
   createdAt?: string;
   updatedAt?: string;
 };
 
+export type ProjectType = "idea" | "project" | "habit";
+
 export type Project = {
   id: number;
   categoryId: number;
   parentId: number | null;
+  type: ProjectType;
   name: string;
   status: "active" | "paused" | "completed" | "archived";
   summary: string | null;
   markdown: string;
+  startDate: string | null;
+  endDate: string | null;
   sortOrder: number;
   isSystem: boolean;
   createdAt?: string;
@@ -60,6 +66,12 @@ export type AppOverview = {
   tasks: Task[];
 };
 
+export type OpenClawStatus = {
+  state: "ready" | "starting" | "unavailable";
+  detail: string;
+  checkedAt: string;
+};
+
 export type LiveKitVoiceSession = {
   livekitUrl: string;
   token: string;
@@ -97,7 +109,53 @@ export type AppPromptLog = {
   memoryHistory: string;
   tools: string;
   finalPrompt: string;
+  turnTrace: AppChatTurnTrace | null;
   createdAt: string;
+};
+
+export type PromptTemplateDefinition = {
+  id: string;
+  name: string;
+  route: string;
+  effectiveContext: ConversationContext["type"];
+  systemInstructions: string;
+  contextDataTemplate: string;
+  finalPromptTemplate: string;
+};
+
+export type AppChatTurnTraceEvent = {
+  label: string;
+  at: string;
+  msFromStart: number;
+  detail?: Record<string, unknown>;
+};
+
+export type OpenClawTrajectoryRunSummary = {
+  runId: string;
+  sessionStartedAt: string;
+  modelCompletedAt: string | null;
+  sessionEndedAt: string | null;
+  preSessionDelayMs: number | null;
+  sessionToModelCompletedMs: number | null;
+  sessionToEndedMs: number | null;
+  toolCount: number | null;
+  usage: Record<string, unknown> | null;
+};
+
+export type OpenClawTrajectorySummary = {
+  sessionId: string;
+  trajectoryFile: string;
+  runs: OpenClawTrajectoryRunSummary[];
+};
+
+export type AppChatTurnTrace = {
+  version: 1;
+  traceId: string;
+  startedAt: string;
+  completedAt: string | null;
+  totalMs: number | null;
+  events: AppChatTurnTraceEvent[];
+  openClaw: OpenClawTrajectorySummary | null;
 };
 
 export type StateEvent = {

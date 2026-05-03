@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { deriveConversationTitle } from "../chat/conversation-title.js";
+import { categoryColorForSortOrder } from "../repositories/categories.js";
+import { nowIso } from "./time.js";
 import { openDatabase } from "./connection.js";
 
 export function migrate(databasePath?: string): void {
@@ -12,7 +14,11 @@ export function migrate(databasePath?: string): void {
     migrateExistingAppChatMessages(db);
     migrateRemovedThinkingDomain(db);
     migrateSortOrder(db);
+    migrateCategoryColors(db);
+    migrateProjectTypes(db);
+    migrateProjectDates(db);
     db.exec(schema);
+    ensureInboxCategory(db);
     migratePromptLogs(db);
     migrateStateEvents(db);
     backfillConversationTitles(db);
@@ -128,8 +134,8 @@ function migrateExistingAppChatMessages(db: ReturnType<typeof openDatabase>): vo
 }
 
 function migratePromptLogs(db: ReturnType<typeof openDatabase>): void {
-  db.exec(`
-    create table if not exists app_prompt_logs (
+    db.exec(`
+      create table if not exists app_prompt_logs (
       id integer primary key,
       conversation_id integer references app_conversations(id),
       user_message_id integer references app_chat_messages(id),
@@ -142,6 +148,7 @@ function migratePromptLogs(db: ReturnType<typeof openDatabase>): void {
       memory_history text not null,
       tools text not null,
       final_prompt text not null,
+      turn_trace text,
       created_at text not null,
       check (
         (context_type in ('global', 'projects') and context_entity_id is null)
@@ -152,6 +159,11 @@ function migratePromptLogs(db: ReturnType<typeof openDatabase>): void {
     create index if not exists idx_app_prompt_logs_conversation_id on app_prompt_logs(conversation_id, created_at, id);
     create index if not exists idx_app_prompt_logs_context on app_prompt_logs(context_type, context_entity_id, created_at);
   `);
+
+  const columns = db.prepare("pragma table_info(app_prompt_logs)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "turn_trace")) {
+    db.exec("alter table app_prompt_logs add column turn_trace text");
+  }
 }
 
 function migrateStateEvents(db: ReturnType<typeof openDatabase>): void {
@@ -177,6 +189,87 @@ function migrateSortOrder(db: ReturnType<typeof openDatabase>): void {
   ensureSortOrderColumn(db, "categories", "is_system desc, lower(name) asc, id asc");
   ensureSortOrderColumn(db, "projects", "category_id asc, is_system desc, lower(name) asc, id asc");
   ensureSortOrderColumn(db, "tasks", "project_id asc, due_at is null, due_at asc, updated_at desc, id asc");
+}
+
+function migrateCategoryColors(db: ReturnType<typeof openDatabase>): void {
+  const existing = db
+    .prepare("select name from sqlite_master where type = 'table' and name = 'categories'")
+    .get() as { name: string } | undefined;
+  if (!existing) {
+    return;
+  }
+
+  const columns = db.prepare("pragma table_info(categories)").all() as Array<{ name: string }>;
+  const addedColorColumn = !columns.some((column) => column.name === "color");
+  if (addedColorColumn) {
+    db.exec("alter table categories add column color text not null default '#27806f'");
+  }
+
+  const rows = db
+    .prepare(addedColorColumn ? "select id, sort_order from categories" : "select id, sort_order from categories where color = ''")
+    .all() as Array<{ id: number; sort_order: number }>;
+  const update = db.prepare("update categories set color = ? where id = ?");
+  const transaction = db.transaction(() => {
+    rows.forEach((row) => update.run(categoryColorForSortOrder(row.sort_order), row.id));
+  });
+  transaction();
+}
+
+function migrateProjectTypes(db: ReturnType<typeof openDatabase>): void {
+  const existing = db
+    .prepare("select name from sqlite_master where type = 'table' and name = 'projects'")
+    .get() as { name: string } | undefined;
+  if (!existing) {
+    return;
+  }
+
+  const columns = db.prepare("pragma table_info(projects)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "type")) {
+    db.exec("alter table projects add column type text not null default 'project' check (type in ('idea', 'project', 'habit'))");
+  }
+
+  db.exec("create index if not exists idx_projects_type on projects(type)");
+}
+
+function migrateProjectDates(db: ReturnType<typeof openDatabase>): void {
+  const existing = db
+    .prepare("select name from sqlite_master where type = 'table' and name = 'projects'")
+    .get() as { name: string } | undefined;
+  if (!existing) {
+    return;
+  }
+
+  const columns = db.prepare("pragma table_info(projects)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "start_date")) {
+    db.exec("alter table projects add column start_date text");
+  }
+  if (!columns.some((column) => column.name === "end_date")) {
+    db.exec("alter table projects add column end_date text");
+  }
+
+  db.exec(`
+    create index if not exists idx_projects_start_date on projects(start_date);
+    create index if not exists idx_projects_end_date on projects(end_date);
+  `);
+}
+
+function ensureInboxCategory(db: ReturnType<typeof openDatabase>): void {
+  const now = nowIso();
+  const existing = db.prepare("select id, is_system from categories where lower(name) = lower('Inbox')").get() as
+    | { id: number; is_system: number }
+    | undefined;
+
+  if (!existing) {
+    const row = db.prepare("select coalesce(max(sort_order), 0) + 1000 as next from categories").get() as { next: number };
+    db.prepare(
+      "insert into categories (name, description, color, sort_order, is_system, created_at, updated_at) values ('Inbox', ?, ?, ?, 1, ?, ?)"
+    ).run("System fallback for uncategorized initiatives and concrete tasks without project context.", categoryColorForSortOrder(row.next), row.next, now, now);
+    return;
+  }
+
+  if (existing.is_system !== 1) {
+    db.prepare("update categories set is_system = 1, updated_at = ? where id = ?").run(now, existing.id);
+  }
 }
 
 function ensureSortOrderColumn(db: ReturnType<typeof openDatabase>, table: string, orderBy: string): void {

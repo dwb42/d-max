@@ -5,6 +5,7 @@ export type Category = {
   id: number;
   name: string;
   description: string | null;
+  color: string;
   sortOrder: number;
   isSystem: boolean;
   createdAt: string;
@@ -15,6 +16,7 @@ type CategoryRow = {
   id: number;
   name: string;
   description: string | null;
+  color: string;
   sort_order: number;
   is_system: number;
   created_at: string;
@@ -24,6 +26,7 @@ type CategoryRow = {
 export type CreateCategoryInput = {
   name: string;
   description?: string | null;
+  color?: string | null;
   isSystem?: boolean;
 };
 
@@ -31,6 +34,7 @@ export type UpdateCategoryInput = {
   id: number;
   name?: string;
   description?: string | null;
+  color?: string | null;
 };
 
 function toCategory(row: CategoryRow): Category {
@@ -38,6 +42,7 @@ function toCategory(row: CategoryRow): Category {
     id: row.id,
     name: row.name,
     description: row.description,
+    color: row.color,
     sortOrder: row.sort_order,
     isSystem: row.is_system === 1,
     createdAt: row.created_at,
@@ -67,11 +72,12 @@ export class CategoryRepository {
   }
 
   create(input: CreateCategoryInput, now = nowIso()): Category {
+    const sortOrder = this.nextSortOrder();
     const result = this.db
       .prepare(
-        "insert into categories (name, description, sort_order, is_system, created_at, updated_at) values (?, ?, ?, ?, ?, ?)"
+        "insert into categories (name, description, color, sort_order, is_system, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?)"
       )
-      .run(input.name, input.description ?? null, this.nextSortOrder(), input.isSystem ? 1 : 0, now, now);
+      .run(input.name, input.description ?? null, normalizeCategoryColor(input.color) ?? categoryColorForSortOrder(sortOrder), sortOrder, input.isSystem ? 1 : 0, now, now);
 
     return this.findById(Number(result.lastInsertRowid))!;
   }
@@ -84,15 +90,30 @@ export class CategoryRepository {
     }
 
     this.db
-      .prepare("update categories set name = ?, description = ?, updated_at = ? where id = ?")
-      .run(input.name ?? existing.name, input.description ?? existing.description, now, input.id);
+      .prepare("update categories set name = ?, description = ?, color = ?, updated_at = ? where id = ?")
+      .run(
+        input.name ?? existing.name,
+        input.description === undefined ? existing.description : input.description,
+        normalizeCategoryColor(input.color) ?? existing.color,
+        now,
+        input.id
+      );
 
     return this.findById(input.id)!;
   }
 
   ensureSystemCategory(name: string, now = nowIso()): Category {
     const existing = this.findByName(name);
-    return existing ?? this.create({ name, isSystem: true }, now);
+    if (!existing) {
+      return this.create({ name, isSystem: true }, now);
+    }
+
+    if (!existing.isSystem) {
+      this.db.prepare("update categories set is_system = 1, updated_at = ? where id = ?").run(now, existing.id);
+      return this.findById(existing.id)!;
+    }
+
+    return existing;
   }
 
   reorder(categoryIds: number[], now = nowIso()): Category[] {
@@ -109,4 +130,25 @@ export class CategoryRepository {
     const row = this.db.prepare("select coalesce(max(sort_order), 0) + 1000 as next from categories").get() as { next: number };
     return row.next;
   }
+}
+
+const categoryPalette = [
+  "#27806f",
+  "#5577d8",
+  "#d86b35",
+  "#8a64c9",
+  "#c9577a",
+  "#d0a12a",
+  "#3f8fb8",
+  "#6f8f38"
+];
+
+export function categoryColorForSortOrder(sortOrder: number): string {
+  const index = Math.max(0, Math.floor(sortOrder / 1000) - 1) % categoryPalette.length;
+  return categoryPalette[index] ?? categoryPalette[0]!;
+}
+
+export function normalizeCategoryColor(color?: string | null): string | null {
+  const trimmed = color?.trim();
+  return trimmed && /^#[0-9a-f]{6}$/i.test(trimmed) ? trimmed.toLowerCase() : null;
 }

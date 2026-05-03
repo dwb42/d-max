@@ -14,7 +14,65 @@
       "models": {
         "openai-codex/gpt-5.5": {}
       }
-    }
+    },
+    "list": [
+      {
+        "id": "main",
+        "name": "d-max Default Agent",
+        "default": true,
+        "workspace": "/Users/dw/Projects/d-max/openclaw/workspace",
+        "tools": {
+          "allow": [
+            "d-max__listCategories",
+            "d-max__createCategory",
+            "d-max__updateCategory",
+            "d-max__listProjects",
+            "d-max__getProject",
+            "d-max__createProject",
+            "d-max__updateProject",
+            "d-max__archiveProject",
+            "d-max__updateProjectMarkdown",
+            "d-max__listTasks",
+            "d-max__createTask",
+            "d-max__updateTask",
+            "d-max__completeTask",
+            "d-max__deleteTask"
+          ]
+        },
+        "subagents": {
+          "allowAgents": ["dmax-research"],
+          "requireAgentId": true
+        }
+      },
+      {
+        "id": "dmax-research",
+        "name": "d-max Research Agent",
+        "workspace": "/Users/dw/Projects/d-max/openclaw/workspace/dmax-research",
+        "tools": {
+          "allow": [
+            "group:web",
+            "d-max__listCategories",
+            "d-max__listProjects",
+            "d-max__getProject",
+            "d-max__listTasks"
+          ],
+          "deny": [
+            "group:runtime",
+            "group:fs",
+            "group:media",
+            "group:automation",
+            "group:sessions",
+            "browser",
+            "gateway",
+            "cron"
+          ]
+        },
+        "subagents": {
+          "allowAgents": [],
+          "requireAgentId": true
+        }
+      }
+    ]
   },
   "models": {
     "providers": {
@@ -60,24 +118,6 @@
     "order": {
       "openai-codex": ["openai-codex:default"]
     }
-  },
-  "tools": {
-    "allow": [
-      "d-max__listCategories",
-      "d-max__createCategory",
-      "d-max__updateCategory",
-      "d-max__listProjects",
-      "d-max__getProject",
-      "d-max__createProject",
-      "d-max__updateProject",
-      "d-max__archiveProject",
-      "d-max__updateProjectMarkdown",
-      "d-max__listTasks",
-      "d-max__createTask",
-      "d-max__updateTask",
-      "d-max__completeTask",
-      "d-max__deleteTask"
-    ]
   },
   "channels": {
     "telegram": {

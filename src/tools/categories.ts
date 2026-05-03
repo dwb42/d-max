@@ -6,19 +6,29 @@ import { CategoryRepository } from "../repositories/categories.js";
 const listCategoriesInput = z.object({}).passthrough();
 const createCategoryInput = z.object({
   name: z.string().trim().min(1),
-  description: z.string().trim().min(1).nullable().optional(),
+  description: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("Optional Markdown description for this life area/category: scope, current situation, target state, and high-level measures."),
+  color: z.string().trim().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
   isSystem: z.boolean().optional()
 });
 const updateCategoryInput = z.object({
   id: z.number().int().positive(),
   name: z.string().trim().min(1).optional(),
-  description: z.string().trim().min(1).nullable().optional()
+  description: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("Markdown description for this life area/category. Use null or an empty string to clear it."),
+  color: z.string().trim().regex(/^#[0-9a-f]{6}$/i).nullable().optional()
 });
 
 export const categoryTools: ToolDefinition<any>[] = [
   defineTool({
     name: "listCategories",
-    description: "List d-max categories.",
+    description: "List d-max categories/life areas, including their Markdown description when present.",
     inputSchema: listCategoriesInput,
     run: (_input, context) => {
       if (!context.db) {
@@ -33,7 +43,7 @@ export const categoryTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "createCategory",
-    description: "Create a d-max category.",
+    description: "Create a d-max category/life area. The optional description field is Markdown for scope, current situation, target state, and high-level measures.",
     inputSchema: createCategoryInput,
     run: (input, context) => {
       if (!context.db) {
@@ -48,7 +58,7 @@ export const categoryTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "updateCategory",
-    description: "Update a d-max category.",
+    description: "Update a d-max category/life area, including its Markdown description.",
     inputSchema: updateCategoryInput,
     run: (input, context) => {
       if (!context.db) {

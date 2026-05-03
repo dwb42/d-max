@@ -1,16 +1,20 @@
 import type Database from "better-sqlite3";
 import { nowIso } from "../db/time.js";
 
+export type ProjectType = "idea" | "project" | "habit";
 export type ProjectStatus = "active" | "paused" | "completed" | "archived";
 
 export type Project = {
   id: number;
   categoryId: number;
   parentId: number | null;
+  type: ProjectType;
   name: string;
   status: ProjectStatus;
   summary: string | null;
   markdown: string;
+  startDate: string | null;
+  endDate: string | null;
   sortOrder: number;
   isSystem: boolean;
   createdAt: string;
@@ -21,10 +25,13 @@ type ProjectRow = {
   id: number;
   category_id: number;
   parent_id: number | null;
+  type: ProjectType;
   name: string;
   status: ProjectStatus;
   summary: string | null;
   markdown: string;
+  start_date: string | null;
+  end_date: string | null;
   sort_order: number;
   is_system: number;
   created_at: string;
@@ -34,9 +41,12 @@ type ProjectRow = {
 export type CreateProjectInput = {
   categoryId: number;
   parentId?: number | null;
+  type?: ProjectType;
   name: string;
   summary?: string | null;
   markdown?: string;
+  startDate?: string | null;
+  endDate?: string | null;
   isSystem?: boolean;
 };
 
@@ -44,9 +54,12 @@ export type UpdateProjectInput = {
   id: number;
   categoryId?: number;
   parentId?: number | null;
+  type?: ProjectType;
   name?: string;
   status?: ProjectStatus;
   summary?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
 };
 
 function toProject(row: ProjectRow): Project {
@@ -54,10 +67,13 @@ function toProject(row: ProjectRow): Project {
     id: row.id,
     categoryId: row.category_id,
     parentId: row.parent_id,
+    type: row.type,
     name: row.name,
     status: row.status,
     summary: row.summary,
     markdown: row.markdown,
+    startDate: row.start_date,
+    endDate: row.end_date,
     sortOrder: row.sort_order,
     isSystem: row.is_system === 1,
     createdAt: row.created_at,
@@ -68,7 +84,7 @@ function toProject(row: ProjectRow): Project {
 export class ProjectRepository {
   constructor(private readonly db: Database.Database) {}
 
-  list(filters: { categoryId?: number; status?: ProjectStatus } = {}): Project[] {
+  list(filters: { categoryId?: number; status?: ProjectStatus; type?: ProjectType } = {}): Project[] {
     const conditions: string[] = [];
     const params: unknown[] = [];
 
@@ -80,6 +96,11 @@ export class ProjectRepository {
     if (filters.status !== undefined) {
       conditions.push("status = ?");
       params.push(filters.status);
+    }
+
+    if (filters.type !== undefined) {
+      conditions.push("type = ?");
+      params.push(filters.type);
     }
 
     const where = conditions.length > 0 ? `where ${conditions.join(" and ")}` : "";
@@ -96,16 +117,21 @@ export class ProjectRepository {
   }
 
   create(input: CreateProjectInput, now = nowIso()): Project {
+    assertValidProjectDateRange(input.startDate ?? null, input.endDate ?? null);
+
     const result = this.db
       .prepare(
-        "insert into projects (category_id, parent_id, name, status, summary, markdown, sort_order, is_system, created_at, updated_at) values (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)"
+        "insert into projects (category_id, parent_id, type, name, status, summary, markdown, start_date, end_date, sort_order, is_system, created_at, updated_at) values (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)"
       )
       .run(
         input.categoryId,
         input.parentId ?? null,
+        input.type ?? "project",
         input.name,
         input.summary ?? null,
         input.markdown ?? "",
+        input.startDate ?? null,
+        input.endDate ?? null,
         this.nextSortOrder(input.categoryId),
         input.isSystem ? 1 : 0,
         now,
@@ -122,16 +148,23 @@ export class ProjectRepository {
       throw new Error(`Project not found: ${input.id}`);
     }
 
+    const nextStartDate = input.startDate === undefined ? existing.startDate : input.startDate;
+    const nextEndDate = input.endDate === undefined ? existing.endDate : input.endDate;
+    assertValidProjectDateRange(nextStartDate, nextEndDate);
+
     this.db
       .prepare(
-        "update projects set category_id = ?, parent_id = ?, name = ?, status = ?, summary = ?, updated_at = ? where id = ?"
+        "update projects set category_id = ?, parent_id = ?, type = ?, name = ?, status = ?, summary = ?, start_date = ?, end_date = ?, updated_at = ? where id = ?"
       )
       .run(
         input.categoryId ?? existing.categoryId,
         input.parentId === undefined ? existing.parentId : input.parentId,
+        input.type ?? existing.type,
         input.name ?? existing.name,
         input.status ?? existing.status,
         input.summary === undefined ? existing.summary : input.summary,
+        nextStartDate,
+        nextEndDate,
         now,
         input.id
       );
@@ -175,5 +208,11 @@ export class ProjectRepository {
       .prepare("select coalesce(max(sort_order), 0) + 1000 as next from projects where category_id = ?")
       .get(categoryId) as { next: number };
     return row.next;
+  }
+}
+
+function assertValidProjectDateRange(startDate: string | null, endDate: string | null): void {
+  if (startDate && endDate && startDate > endDate) {
+    throw new Error("Project startDate cannot be after endDate");
   }
 }
