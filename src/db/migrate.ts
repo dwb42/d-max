@@ -135,13 +135,13 @@ function migrateExistingAppChatMessages(db: ReturnType<typeof openDatabase>): vo
     create table if not exists app_conversations (
       id integer primary key,
       title text,
-      context_type text not null check (context_type in ('global', 'initiatives', 'category', 'initiative', 'task')),
+      context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'category', 'idea', 'project', 'habit', 'initiative', 'task')),
       context_entity_id integer,
       created_at text not null,
       updated_at text not null,
       check (
-        (context_type in ('global', 'initiatives') and context_entity_id is null)
-        or (context_type in ('category', 'initiative', 'task') and context_entity_id is not null)
+        (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives') and context_entity_id is null)
+        or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task') and context_entity_id is not null)
       )
     )
   `);
@@ -159,7 +159,7 @@ function migratePromptLogs(db: ReturnType<typeof openDatabase>): void {
       conversation_id integer references app_conversations(id),
       user_message_id integer references app_chat_messages(id),
       openclaw_session_id text not null,
-      context_type text not null check (context_type in ('global', 'initiatives', 'category', 'initiative', 'task')),
+      context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'category', 'idea', 'project', 'habit', 'initiative', 'task')),
       context_entity_id integer,
       user_input text not null,
       system_instructions text not null,
@@ -170,8 +170,8 @@ function migratePromptLogs(db: ReturnType<typeof openDatabase>): void {
       turn_trace text,
       created_at text not null,
       check (
-        (context_type in ('global', 'initiatives') and context_entity_id is null)
-        or (context_type in ('category', 'initiative', 'task') and context_entity_id is not null)
+        (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives') and context_entity_id is null)
+        or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task') and context_entity_id is not null)
       )
     );
     create index if not exists idx_app_prompt_logs_created_at on app_prompt_logs(created_at, id);
@@ -366,7 +366,7 @@ function backfillConversationTitles(db: ReturnType<typeof openDatabase>): void {
           limit 1
         ) as firstUserMessage
       from app_conversations c
-      left join initiatives p on c.context_type = 'initiative' and c.context_entity_id = p.id
+      left join initiatives p on c.context_type in ('idea', 'project', 'habit', 'initiative') and c.context_entity_id = p.id
       left join tasks t on c.context_type = 'task' and c.context_entity_id = t.id
       left join categories cat on c.context_type = 'category' and c.context_entity_id = cat.id`
     )
@@ -419,25 +419,25 @@ function rebuildAppConversationsForInitiativeContext(db: ReturnType<typeof openD
     create table app_conversations_next (
       id integer primary key,
       title text,
-      context_type text not null check (context_type in ('global', 'initiatives', 'category', 'initiative', 'task')),
+      context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'category', 'idea', 'project', 'habit', 'initiative', 'task')),
       context_entity_id integer,
       created_at text not null,
       updated_at text not null,
       check (
-        (context_type in ('global', 'initiatives') and context_entity_id is null)
-        or (context_type in ('category', 'initiative', 'task') and context_entity_id is not null)
+        (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives') and context_entity_id is null)
+        or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task') and context_entity_id is not null)
       )
     );
     insert into app_conversations_next (id, title, context_type, context_entity_id, created_at, updated_at)
       select
         id,
         title,
-        case context_type when 'projects' then 'initiatives' when 'project' then 'initiative' else context_type end,
+        context_type,
         context_entity_id,
         created_at,
         updated_at
       from app_conversations
-      where context_type in ('global', 'projects', 'initiatives', 'category', 'project', 'initiative', 'task');
+      where context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'category', 'idea', 'project', 'habit', 'initiative', 'task');
     drop table app_conversations;
     alter table app_conversations_next rename to app_conversations;
   `);
@@ -456,7 +456,7 @@ function rebuildAppPromptLogsForInitiativeContext(db: ReturnType<typeof openData
       conversation_id integer references app_conversations(id),
       user_message_id integer references app_chat_messages(id),
       openclaw_session_id text not null,
-      context_type text not null check (context_type in ('global', 'initiatives', 'category', 'initiative', 'task')),
+      context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'category', 'idea', 'project', 'habit', 'initiative', 'task')),
       context_entity_id integer,
       user_input text not null,
       system_instructions text not null,
@@ -467,8 +467,8 @@ function rebuildAppPromptLogsForInitiativeContext(db: ReturnType<typeof openData
       turn_trace text,
       created_at text not null,
       check (
-        (context_type in ('global', 'initiatives') and context_entity_id is null)
-        or (context_type in ('category', 'initiative', 'task') and context_entity_id is not null)
+        (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives') and context_entity_id is null)
+        or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task') and context_entity_id is not null)
       )
     );
     insert into app_prompt_logs_next (
@@ -480,7 +480,7 @@ function rebuildAppPromptLogsForInitiativeContext(db: ReturnType<typeof openData
         conversation_id,
         user_message_id,
         openclaw_session_id,
-        case context_type when 'projects' then 'initiatives' when 'project' then 'initiative' else context_type end,
+        context_type,
         context_entity_id,
         user_input,
         system_instructions,
@@ -491,7 +491,7 @@ function rebuildAppPromptLogsForInitiativeContext(db: ReturnType<typeof openData
         ${turnTraceSelect},
         created_at
       from app_prompt_logs
-      where context_type in ('global', 'projects', 'initiatives', 'category', 'project', 'initiative', 'task');
+      where context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'category', 'idea', 'project', 'habit', 'initiative', 'task');
     drop table app_prompt_logs;
     alter table app_prompt_logs_next rename to app_prompt_logs;
   `);

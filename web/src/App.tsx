@@ -4,6 +4,7 @@ import {
   Blocks,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Circle,
@@ -31,6 +32,7 @@ import {
   createCategory,
   createChatConversation,
   createInitiative,
+  createTask,
   createVoiceSession,
   fetchChatActivity,
   fetchChatConversations,
@@ -51,6 +53,7 @@ import {
   transcribeVoiceMessage,
   updateCategory,
   updateInitiative,
+  updateTask,
   updateTaskStatus
 } from "./api.js";
 import type {
@@ -110,11 +113,29 @@ type CreateInitiativeInput = {
   startDate?: string | null;
   endDate?: string | null;
 };
+type UpdateInitiativeInput = {
+  categoryId?: number;
+  parentId?: number | null;
+  type?: InitiativeType;
+  name?: string;
+  status?: Initiative["status"];
+  summary?: string | null;
+  markdown?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+};
+type UpdateTaskInput = {
+  title?: string;
+  status?: Task["status"];
+  priority?: Task["priority"];
+  notes?: string | null;
+  dueAt?: string | null;
+};
 
 type NavItem = { id: Exclude<View, "initiative" | "task">; label: string; icon: typeof Mic; path: string };
 
 const primaryNavItems: NavItem[] = [
-  { id: "lifeAreas", label: "Lebensbereiche", icon: LayoutGrid, path: "/lebensbereiche" },
+  { id: "lifeAreas", label: "Lebensbereiche", icon: LayoutGrid, path: "/categories" },
   { id: "ideas", label: "Ideen", icon: Lightbulb, path: "/ideas" },
   { id: "projects", label: "Projekte", icon: Blocks, path: "/projects" },
   { id: "habits", label: "Gewohnheiten", icon: Repeat2, path: "/habits" },
@@ -130,7 +151,7 @@ const secondaryNavItems: NavItem[] = [
 
 function routeFromPath(path: string): RouteState {
   const [pathname] = path.split("?");
-  const lifeAreaMatch = pathname.match(/^\/lebensbereiche\/([^/]+)$/);
+  const lifeAreaMatch = pathname.match(/^\/categories\/([^/]+)$/) ?? pathname.match(/^\/lebensbereiche\/([^/]+)$/);
   if (lifeAreaMatch) {
     return { view: "lifeArea", initiativeId: null, taskId: null, categoryName: decodeURIComponent(lifeAreaMatch[1] ?? "") };
   }
@@ -156,7 +177,7 @@ function routeFromPath(path: string): RouteState {
   }
 
   if (pathname === "/drive") return { view: "drive", initiativeId: null, taskId: null, categoryName: null };
-  if (pathname === "/lebensbereiche") return { view: "lifeAreas", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/categories" || pathname === "/lebensbereiche") return { view: "lifeAreas", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/calendar/timeline") return { view: "timeline", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/chat" || pathname === "/") return { view: "lifeAreas", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/ideas") return { view: "ideas", initiativeId: null, taskId: null, categoryName: null };
@@ -171,14 +192,14 @@ function routeFromPath(path: string): RouteState {
 function pathForRoute(view: View, initiativeId?: number | null): string {
   if (view === "initiative") return `/initiatives/${initiativeId}`;
   if (view === "task") return "/tasks";
-  if (view === "lifeAreas") return "/lebensbereiche";
+  if (view === "lifeAreas") return "/categories";
   if (view === "timeline") return "/calendar/timeline";
   if (view === "promptTemplates") return "/prompt-vorlagen";
   return `/${view}`;
 }
 
 function pathForLifeArea(categoryName: string): string {
-  return `/lebensbereiche/${encodeURIComponent(categoryName)}`;
+  return `/categories/${encodeURIComponent(categoryName)}`;
 }
 
 function pathForCollectionCategory(view: CollectionView, categoryName: string): string {
@@ -203,16 +224,21 @@ function getRouteConversationContext(
   }
 
   if (isCollectionView(route.view)) {
-    return { context: { type: "initiatives" }, label: titleForView(route.view) };
+    return { context: { type: route.view }, label: titleForView(route.view) };
   }
 
-  if (route.view === "lifeAreas" || route.view === "timeline") {
+  if (route.view === "lifeAreas") {
+    return { context: { type: "categories" }, label: titleForView(route.view) };
+  }
+
+  if (route.view === "timeline") {
     return { context: { type: "initiatives" }, label: titleForView(route.view) };
   }
 
   if (route.view === "initiative" && route.initiativeId) {
+    const initiativeContextType = initiativeDetail ? initiativeDetail.initiative.type : "initiative";
     return {
-      context: { type: "initiative", initiativeId: route.initiativeId },
+      context: { type: initiativeContextType, initiativeId: route.initiativeId },
       label: initiativeDetail?.initiative.name ?? `Initiative ${route.initiativeId}`
     };
   }
@@ -232,19 +258,25 @@ function conversationContextKey(context: ConversationContext | null): string {
     return "none";
   }
 
-  if (context.type === "global" || context.type === "initiatives") {
-    return context.type;
+  switch (context.type) {
+    case "global":
+    case "categories":
+    case "ideas":
+    case "projects":
+    case "habits":
+    case "tasks":
+    case "initiatives":
+      return context.type;
+    case "category":
+      return `category:${context.categoryId}`;
+    case "idea":
+    case "project":
+    case "habit":
+    case "initiative":
+      return `${context.type}:${context.initiativeId}`;
+    case "task":
+      return `task:${context.taskId}`;
   }
-
-  if (context.type === "category") {
-    return `category:${context.categoryId}`;
-  }
-
-  if (context.type === "initiative") {
-    return `initiative:${context.initiativeId}`;
-  }
-
-  return `task:${context.taskId}`;
 }
 
 async function loadPersistedChatMessages(conversationId?: number | null): Promise<ChatMessage[]> {
@@ -892,7 +924,7 @@ export default function App() {
         <div className="content-header-title">
           <div className="back-actions">
             <div className="back-action-group">
-              <button className="small-button back-button" onClick={() => navigate("/lebensbereiche")}>
+              <button className="small-button back-button" onClick={() => navigate("/categories")}>
                 Zurueck zu Lebensbereiche
               </button>
             </div>
@@ -931,14 +963,14 @@ export default function App() {
               ) : null}
             </div>
           </div>
-          <div className="section-heading">
-            <div className="initiative-title-line">
-              <h1>{initiative ? displayInitiativeName(initiative) : "Eintrag"}</h1>
-              {initiative ? <InitiativeTypeBadge type={initiative.type} /> : null}
-              {initiative?.isSystem ? <span className="system-badge">System</span> : null}
-            </div>
-            {initiative ? <p>{initiative.summary ?? firstMarkdownLine(initiative.markdown)}</p> : null}
-          </div>
+          <InitiativeDetailHeader
+            initiative={initiative}
+            onUpdateInitiative={async (initiativeId, input) => {
+              await updateInitiative(initiativeId, input);
+              await refresh();
+              setInitiativeDetail(await fetchInitiativeDetail(initiativeId));
+            }}
+          />
         </div>
       );
     }
@@ -951,32 +983,23 @@ export default function App() {
           <div className="back-actions">
             <div className="back-action-group">
               <button className="small-button back-button" onClick={() => navigate("/tasks")}>
-                Zurueck zu Massnahmen
+                Zurück zu Maßnahmen
               </button>
               {initiative ? (
-                <button className="small-button back-button" onClick={() => navigate(`/initiatives/${initiative.id}`)}>
-                  Zurueck zum Eintrag
+                <button className="small-button back-button truncate" onClick={() => navigate(`/initiatives/${initiative.id}`)} title={initiative.name}>
+                  Zurück zu {initiative.name}
                 </button>
               ) : null}
             </div>
           </div>
-          <div className="section-heading task-detail-heading">
-            <div>
-              <h1>{task?.title ?? "Massnahme"}</h1>
-              {task ? <p>{initiative?.name ?? `Initiative ${task.initiativeId}`}</p> : null}
-            </div>
-            {task ? (
-              <button
-                className="small-button"
-                onClick={() => void completeTask(task.id).then(async () => {
-                  await refresh();
-                  setTaskDetail(await fetchTaskDetail(task.id));
-                })}
-              >
-                Erledigt
-              </button>
-            ) : null}
-          </div>
+          <TaskDetailHeader
+            task={task}
+            onUpdateTask={async (taskId, input) => {
+              await updateTask(taskId, input);
+              await refresh();
+              setTaskDetail(await fetchTaskDetail(taskId));
+            }}
+          />
         </div>
       );
     }
@@ -1121,6 +1144,11 @@ export default function App() {
             initiatives={lifeAreaInitiatives ?? overview?.initiatives ?? []}
             onOpenLifeArea={(categoryName) => navigate(pathForLifeArea(categoryName))}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+            onReorderInitiatives={async (categoryId, initiativeIds) => {
+              await reorderInitiatives(categoryId, initiativeIds);
+              await refresh();
+              setLifeAreaInitiatives(await fetchInitiatives());
+            }}
             onCreateInitiative={async (input) => {
               try {
                 setError(null);
@@ -1138,7 +1166,7 @@ export default function App() {
           <LifeAreaDetailView
             category={overview?.categories.find((category) => category.name.toLowerCase() === route.categoryName?.toLowerCase()) ?? null}
             initiatives={lifeAreaInitiatives ?? overview?.initiatives ?? []}
-            onBack={() => navigate("/lebensbereiche")}
+            onBack={() => navigate("/categories")}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
             onCreateInitiative={async (input) => {
               try {
@@ -1199,11 +1227,6 @@ export default function App() {
           {!isEmptyState && view === "initiative" && (
           <InitiativeDetailView
             detail={initiativeDetail}
-            categories={overview?.categories ?? []}
-            onBack={() => navigate(`/${collectionViewForInitiativeType(initiativeDetail?.initiative.type ?? "project")}`)}
-            onBackToCategory={(categoryName) =>
-              navigate(pathForCollectionCategory(collectionViewForInitiativeType(initiativeDetail?.initiative.type ?? "project"), categoryName))
-            }
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
             onComplete={async (taskId) => {
               await completeTask(taskId);
@@ -1220,6 +1243,11 @@ export default function App() {
               await refresh();
               if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
             }}
+            onCreateTask={async (initiativeId, title) => {
+              await createTask({ initiativeId, title });
+              await refresh();
+              if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
+            }}
             onUpdateInitiative={async (initiativeId, input) => {
               await updateInitiative(initiativeId, input);
               await refresh();
@@ -1232,13 +1260,8 @@ export default function App() {
             detail={taskDetail}
             onBack={() => navigate("/tasks")}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
-            onComplete={async (taskId) => {
-              await completeTask(taskId);
-              await refresh();
-              setTaskDetail(await fetchTaskDetail(taskId));
-            }}
-            onStatus={async (taskId, status) => {
-              await updateTaskStatus(taskId, status);
+            onUpdateTask={async (taskId, input) => {
+              await updateTask(taskId, input);
               await refresh();
               setTaskDetail(await fetchTaskDetail(taskId));
             }}
@@ -1483,7 +1506,7 @@ function ChatView(props: {
       </div>
 
       <form
-        className="chat-composer"
+        className={`chat-composer ${isVoiceActive ? "voice-active" : ""}`}
         onSubmit={(event) => {
           event.preventDefault();
           props.onSubmit(props.draft);
@@ -1505,11 +1528,7 @@ function ChatView(props: {
         ) : null}
         {props.voicePhase === "recording" ? (
           <div className="voice-message-recorder">
-            <SoundWave level={props.voiceLevel} active />
-            <div className="voice-message-copy">
-              <strong>Voice Message aufnehmen</strong>
-              <p>Sprich deine Nachricht. Der Text wird erst nach deiner Bestätigung erzeugt.</p>
-            </div>
+            <VoiceMessageWaveform level={props.voiceLevel} active />
             <div className="voice-message-controls">
               <button type="button" className="icon-button danger" onClick={props.onDiscardVoiceMessage} title="Aufnahme verwerfen">
                 <X size={18} />
@@ -1522,32 +1541,21 @@ function ChatView(props: {
         ) : null}
         {props.voicePhase === "transcribing" ? (
           <div className="voice-message-recorder transcribing">
-            <span className="loading-dots">
-              <i />
-              <i />
-              <i />
-            </span>
-            <div className="voice-message-copy">
-              <strong>Transkription läuft</strong>
-              <p>Die bestätigte Aufnahme wird in bearbeitbaren Text umgewandelt.</p>
-            </div>
+            <VoiceProcessingIndicator />
           </div>
         ) : null}
-        <div className="chat-actions">
-          <button
-            type="button"
-            className="secondary-action compact"
-            onClick={props.onStartVoiceMessage}
-            disabled={props.busy || isVoiceActive}
-          >
-            <Mic2 size={18} />
-            Voice Message
-          </button>
-          <button type="submit" className="primary-action compact" disabled={props.busy || isVoiceActive || !props.draft.trim()}>
-            <Send size={18} />
-            {props.busy ? "Sending" : "Send"}
-          </button>
-        </div>
+        {!isVoiceActive ? (
+          <div className="chat-actions">
+            <button type="button" className="secondary-action compact" onClick={props.onStartVoiceMessage} disabled={props.busy}>
+              <Mic2 size={18} />
+              Voice Message
+            </button>
+            <button type="submit" className="primary-action compact" disabled={props.busy || !props.draft.trim()}>
+              <Send size={18} />
+              {props.busy ? "Sending" : "Send"}
+            </button>
+          </div>
+        ) : null}
       </form>
     </section>
   );
@@ -1715,6 +1723,70 @@ function SoundWave({ level, active }: { level: number; active: boolean }) {
   );
 }
 
+function VoiceMessageWaveform({ level, active }: { level: number; active: boolean }) {
+  const sampleCount = 64;
+  const levelRef = useRef(level);
+  const tickRef = useRef(0);
+  const [samples, setSamples] = useState(() => Array.from({ length: sampleCount }, () => 0));
+
+  useEffect(() => {
+    levelRef.current = Math.min(Math.max(level, 0), 1);
+  }, [level]);
+
+  useEffect(() => {
+    if (!active) {
+      setSamples(Array.from({ length: sampleCount }, () => 0));
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      tickRef.current += 1;
+      const currentLevel = levelRef.current;
+      const shapedLevel = currentLevel < 0.035 ? 0 : Math.pow(currentLevel, 0.55);
+      const texture = 0.48 + 0.52 * Math.abs(Math.sin(tickRef.current * 0.77));
+      const contour = 0.82 + 0.18 * Math.sin(tickRef.current * 0.19);
+      const nextSample = Math.min(1, shapedLevel * texture * contour);
+      setSamples((current) => [...current.slice(1), nextSample]);
+    }, 156);
+
+    return () => window.clearInterval(interval);
+  }, [active]);
+
+  const bars = samples.map((sample, index) => {
+    const height = 3 + sample * 39;
+    const opacity = 0.36 + sample * 0.58;
+    return (
+      <span
+        key={index}
+        style={{
+          "--bar": String(index),
+          "--bar-height": `${Math.max(3, Math.min(42, height))}px`,
+          "--bar-opacity": String(opacity)
+        } as CSSProperties}
+      />
+    );
+  });
+
+  return (
+    <div
+      className={`voice-message-waveform ${active ? "active" : ""}`}
+      aria-hidden="true"
+    >
+      <div className="voice-message-waveform-track">{bars}</div>
+    </div>
+  );
+}
+
+function VoiceProcessingIndicator() {
+  return (
+    <div className="voice-processing-indicator" aria-hidden="true">
+      <span />
+      <span />
+      <span />
+    </div>
+  );
+}
+
 function isCollectionView(view: View): view is CollectionView {
   return view === "ideas" || view === "projects" || view === "habits";
 }
@@ -1735,6 +1807,28 @@ const initiativeTypeOptions: Array<{ value: InitiativeType; label: string }> = [
   { value: "idea", label: "Idee" },
   { value: "project", label: "Projekt" },
   { value: "habit", label: "Gewohnheit" }
+];
+
+const initiativeStatusOptions: Array<{ value: Initiative["status"]; label: string }> = [
+  { value: "active", label: "Aktiv" },
+  { value: "paused", label: "Pausiert" },
+  { value: "completed", label: "Abgeschlossen" },
+  { value: "archived", label: "Archiviert" }
+];
+
+const taskStatusOptions: Array<{ value: Task["status"]; label: string }> = [
+  { value: "open", label: "Offen" },
+  { value: "in_progress", label: "In Arbeit" },
+  { value: "blocked", label: "Blockiert" },
+  { value: "done", label: "Erledigt" },
+  { value: "cancelled", label: "Abgebrochen" }
+];
+
+const taskPriorityOptions: Array<{ value: Task["priority"]; label: string }> = [
+  { value: "low", label: "Niedrig" },
+  { value: "normal", label: "Normal" },
+  { value: "high", label: "Hoch" },
+  { value: "urgent", label: "Dringend" }
 ];
 
 function initiativeTypeLabel(type: InitiativeType): string {
@@ -1783,6 +1877,7 @@ function LifeAreasView(props: {
   initiatives: Initiative[];
   onOpenLifeArea: (categoryName: string) => void;
   onOpenInitiative: (initiativeId: number) => void;
+  onReorderInitiatives: (categoryId: number, initiativeIds: number[]) => Promise<void>;
   onCreateInitiative: (input: CreateInitiativeInput) => Promise<void>;
 }) {
   const groups = props.categories.map((category) => {
@@ -1817,6 +1912,7 @@ function LifeAreasView(props: {
           <LifeAreaInitiativeGroups
             groups={group.byType}
             onOpenInitiative={props.onOpenInitiative}
+            onReorderInitiatives={props.onReorderInitiatives}
             onCreateInitiative={props.onCreateInitiative}
           />
         </section>
@@ -1910,11 +2006,14 @@ function LifeAreaDetailView(props: {
 function LifeAreaInitiativeGroups(props: {
   groups: Array<{ value: InitiativeType; label: string; categoryId: number; initiatives: Initiative[] }>;
   onOpenInitiative: (initiativeId: number) => void;
+  onReorderInitiatives?: (categoryId: number, initiativeIds: number[]) => Promise<void>;
   onCreateInitiative: (input: CreateInitiativeInput) => Promise<void>;
 }) {
   const [openCreateKey, setOpenCreateKey] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [creatingKey, setCreatingKey] = useState<string | null>(null);
+  const [draggedInitiative, setDraggedInitiative] = useState<{ categoryId: number; type: InitiativeType; initiativeId: number } | null>(null);
+  const [initiativeDropId, setInitiativeDropId] = useState<number | null>(null);
 
   return (
     <div className="life-area-type-grid">
@@ -1923,6 +2022,7 @@ function LifeAreaInitiativeGroups(props: {
         const createOpen = openCreateKey === createKey;
         const creating = creatingKey === createKey;
         const pluralLabel = pluralLabelForInitiativeType(typeGroup.value);
+        const canReorder = Boolean(props.onReorderInitiatives) && typeGroup.initiatives.length > 1;
         return (
         <section className="life-area-type-section" key={createKey}>
           <div className="life-area-type-heading">
@@ -1984,7 +2084,35 @@ function LifeAreaInitiativeGroups(props: {
           ) : (
             <div className="life-area-initiative-list">
               {typeGroup.initiatives.map((initiative) => (
-                <button className="life-area-initiative-row" key={initiative.id} onClick={() => props.onOpenInitiative(initiative.id)}>
+                <button
+                  className={`life-area-initiative-row ${canReorder ? "draggable-row" : ""} ${draggedInitiative?.initiativeId === initiative.id ? "dragging" : ""} ${initiativeDropId === initiative.id ? "drag-over" : ""}`}
+                  key={initiative.id}
+                  draggable={canReorder}
+                  onClick={() => props.onOpenInitiative(initiative.id)}
+                  onDragStart={(event) => {
+                    if (!canReorder) return;
+                    event.dataTransfer.effectAllowed = "move";
+                    setDraggedInitiative({ categoryId: typeGroup.categoryId, type: typeGroup.value, initiativeId: initiative.id });
+                  }}
+                  onDragOver={(event) => {
+                    if (!draggedInitiative || draggedInitiative.categoryId !== typeGroup.categoryId || draggedInitiative.type !== typeGroup.value) return;
+                    event.preventDefault();
+                    setInitiativeDropId(initiative.id);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    if (!draggedInitiative || draggedInitiative.categoryId !== typeGroup.categoryId || draggedInitiative.type !== typeGroup.value) return;
+                    const initiativeIds = typeGroup.initiatives.map((candidate) => candidate.id);
+                    const nextIds = moveIdToDropPosition(initiativeIds, draggedInitiative.initiativeId, initiative.id, dropAfter(event));
+                    setDraggedInitiative(null);
+                    setInitiativeDropId(null);
+                    void props.onReorderInitiatives?.(typeGroup.categoryId, nextIds);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedInitiative(null);
+                    setInitiativeDropId(null);
+                  }}
+                >
                   <span>{displayInitiativeName(initiative)}</span>
                   <small>
                     {initiative.type === "project" && formatInitiativeDateRangeForUi(initiative) ? `${formatInitiativeDateRangeForUi(initiative)} · ` : ""}
@@ -2409,39 +2537,22 @@ function TimelineGrid(props: {
 
 function InitiativeDetailView(props: {
   detail: InitiativeDetail | null;
-  categories: AppOverview["categories"];
-  onBack: () => void;
-  onBackToCategory: (categoryName: string) => void;
   onOpenTask: (taskId: number) => void;
   onComplete: (taskId: number) => Promise<void>;
   onStatus: (taskId: number, status: string) => Promise<void>;
   onReorderTasks?: (initiativeId: number, taskIds: number[]) => Promise<void>;
-  onUpdateInitiative: (
-    initiativeId: number,
-    input: {
-      categoryId?: number;
-      parentId?: number | null;
-      name?: string;
-      status?: Initiative["status"];
-      summary?: string | null;
-      startDate?: string | null;
-      endDate?: string | null;
-    }
-  ) => Promise<void>;
+  onCreateTask: (initiativeId: number, title: string) => Promise<void>;
+  onUpdateInitiative: (initiativeId: number, input: UpdateInitiativeInput) => Promise<void>;
 }) {
   if (!props.detail) {
     return <EmptyState title="Loading initiative..." />;
   }
 
-  const category = props.categories.find((candidate) => candidate.id === props.detail?.initiative.categoryId);
   const initiativeId = props.detail.initiative.id;
   const initiative = props.detail.initiative;
   return (
     <section className="initiative-detail">
-      <InitiativeBasicsForm initiative={initiative} categories={props.categories} onUpdateInitiative={props.onUpdateInitiative} />
-      <section className="panel">
-        <RichText text={initiative.markdown || "No initiative markdown yet."} />
-      </section>
+      <InitiativeMarkdownPanel initiative={initiative} onUpdateInitiative={props.onUpdateInitiative} />
       <Panel title="Massnahmen">
         {props.detail.tasks.length === 0 ? (
           <EmptyState title="Noch keine Massnahmen" />
@@ -2452,11 +2563,324 @@ function InitiativeDetailView(props: {
             onComplete={props.onComplete}
             onStatus={props.onStatus}
             onOpenTask={props.onOpenTask}
+            showInitiativeName={false}
+            groupByCompletionStatus
             onReorderTasks={(taskIds) => void props.onReorderTasks?.(initiativeId, taskIds)}
           />
         )}
+        <TaskCreateInlineForm
+          onCreateTask={(title) => props.onCreateTask(initiativeId, title)}
+        />
       </Panel>
     </section>
+  );
+}
+
+function InitiativeDetailHeader(props: {
+  initiative: Initiative | null;
+  onUpdateInitiative: (initiativeId: number, input: UpdateInitiativeInput) => Promise<void>;
+}) {
+  const [editingName, setEditingName] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setName(props.initiative?.name ?? "");
+    setEditingName(false);
+    setBusy(false);
+  }, [props.initiative?.id, props.initiative?.name]);
+
+  if (!props.initiative) {
+    return (
+      <div className="section-heading">
+        <div className="initiative-title-line">
+          <h1>Eintrag</h1>
+        </div>
+      </div>
+    );
+  }
+
+  const initiative = props.initiative;
+  const saveName = async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName || busy) return;
+    if (trimmedName === initiative.name) {
+      setEditingName(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await props.onUpdateInitiative(initiative.id, { name: trimmedName });
+      setEditingName(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="section-heading initiative-header-inline">
+      <div className="initiative-title-line">
+        {editingName ? (
+          <form
+            className="initiative-title-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveName();
+            }}
+          >
+            <input
+              autoFocus
+              value={name}
+              disabled={busy}
+              onChange={(event) => setName(event.target.value)}
+              onBlur={() => void saveName()}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setName(initiative.name);
+                  setEditingName(false);
+                }
+              }}
+            />
+          </form>
+        ) : (
+          <button type="button" className="initiative-title-edit" onClick={() => setEditingName(true)} title="Titel bearbeiten">
+            <h1>{displayInitiativeName(initiative)}</h1>
+          </button>
+        )}
+        {!editingName ? (
+          <>
+            <label className={`detail-pill-select type ${initiative.type}`} title="Typ ändern">
+              <select
+                value={initiative.type}
+                disabled={busy}
+                aria-label="Initiative-Typ"
+                onChange={(event) => void props.onUpdateInitiative(initiative.id, { type: event.target.value as InitiativeType })}
+              >
+                {initiativeTypeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={`detail-pill-select status ${initiative.status}`} title="Status ändern">
+              <select
+                value={initiative.status}
+                disabled={busy}
+                aria-label="Initiative-Status"
+                onChange={(event) => void props.onUpdateInitiative(initiative.id, { status: event.target.value as Initiative["status"] })}
+              >
+                {initiativeStatusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {initiative.isSystem ? <span className="system-badge">System</span> : null}
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function TaskDetailHeader(props: {
+  task: Task | null;
+  onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void>;
+}) {
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setTitle(props.task?.title ?? "");
+    setEditingTitle(false);
+    setBusy(false);
+  }, [props.task?.id, props.task?.title]);
+
+  if (!props.task) {
+    return (
+      <div className="section-heading task-detail-heading">
+        <div className="initiative-title-line">
+          <h1>Maßnahme</h1>
+        </div>
+      </div>
+    );
+  }
+
+  const task = props.task;
+  const saveTitle = async () => {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle || busy) return;
+    if (trimmedTitle === task.title) {
+      setEditingTitle(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await props.onUpdateTask(task.id, { title: trimmedTitle });
+      setEditingTitle(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="section-heading task-detail-heading">
+      <div className="initiative-title-line">
+        {editingTitle ? (
+          <form
+            className="initiative-title-form task-title-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveTitle();
+            }}
+          >
+            <input
+              autoFocus
+              value={title}
+              disabled={busy}
+              onChange={(event) => setTitle(event.target.value)}
+              onBlur={() => void saveTitle()}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setTitle(task.title);
+                  setEditingTitle(false);
+                }
+              }}
+            />
+          </form>
+        ) : (
+          <button type="button" className="initiative-title-edit" onClick={() => setEditingTitle(true)} title="Titel bearbeiten">
+            <h1>{task.title}</h1>
+          </button>
+        )}
+        {!editingTitle ? (
+          <>
+            <label className={`detail-pill-select task-status ${task.status}`} title="Status ändern">
+              <select
+                value={task.status}
+                disabled={busy}
+                aria-label="Task-Status"
+                onChange={(event) => void props.onUpdateTask(task.id, { status: event.target.value as Task["status"] })}
+              >
+                {taskStatusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={`detail-pill-select priority ${task.priority}`} title="Priorität ändern">
+              <select
+                value={task.priority}
+                disabled={busy}
+                aria-label="Task-Priorität"
+                onChange={(event) => void props.onUpdateTask(task.id, { priority: event.target.value as Task["priority"] })}
+              >
+                {taskPriorityOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function InitiativeMarkdownPanel(props: {
+  initiative: Initiative;
+  onUpdateInitiative: (initiativeId: number, input: UpdateInitiativeInput) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [markdown, setMarkdown] = useState(props.initiative.markdown);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setMarkdown(props.initiative.markdown);
+    setEditing(false);
+    setBusy(false);
+  }, [props.initiative.id, props.initiative.markdown]);
+
+  const saveMarkdown = async () => {
+    if (busy) return;
+    if (markdown === props.initiative.markdown) {
+      setEditing(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await props.onUpdateInitiative(props.initiative.id, { markdown });
+      setEditing(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <form
+        className="panel initiative-markdown-panel editing"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveMarkdown();
+        }}
+      >
+        <textarea
+          autoFocus
+          className="initiative-markdown-editor"
+          value={markdown}
+          disabled={busy}
+          rows={18}
+          onChange={(event) => setMarkdown(event.target.value)}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+              event.preventDefault();
+              void saveMarkdown();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setMarkdown(props.initiative.markdown);
+              setEditing(false);
+            }
+          }}
+        />
+        <div className="form-actions">
+          <button
+            type="button"
+            className="small-button"
+            onClick={() => {
+              setMarkdown(props.initiative.markdown);
+              setEditing(false);
+            }}
+            disabled={busy}
+          >
+            Abbrechen
+          </button>
+          <button className="primary-action compact" type="submit" disabled={busy}>
+            Speichern
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="panel initiative-markdown-panel"
+      onClick={() => setEditing(true)}
+      title="Markdown bearbeiten"
+    >
+      <RichText text={props.initiative.markdown || "Noch kein Markdown."} />
+    </button>
   );
 }
 
@@ -2464,8 +2888,7 @@ function TaskDetailView(props: {
   detail: TaskDetail | null;
   onBack: () => void;
   onOpenInitiative: (initiativeId: number) => void;
-  onComplete: (taskId: number) => Promise<void>;
-  onStatus: (taskId: number, status: string) => Promise<void>;
+  onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void>;
 }) {
   if (!props.detail) {
     return <EmptyState title="Loading task..." />;
@@ -2477,211 +2900,156 @@ function TaskDetailView(props: {
       <section className="panel task-detail-panel">
         <dl className="detail-list">
           <div>
-            <dt>Status</dt>
+            <dt>Due Date</dt>
             <dd>
-              <select value={task.status} onChange={(event) => void props.onStatus(task.id, event.target.value)}>
-                <option value="open">open</option>
-                <option value="in_progress">in progress</option>
-                <option value="blocked">blocked</option>
-                <option value="done">done</option>
-                <option value="cancelled">cancelled</option>
-              </select>
+              <TaskDueDateEditor task={task} onUpdateTask={props.onUpdateTask} />
             </dd>
           </div>
-          <div>
-            <dt>Priority</dt>
-            <dd>
-              <span className={`priority ${task.priority}`}>{task.priority}</span>
-            </dd>
-          </div>
-          <div>
-            <dt>Due</dt>
-            <dd>{task.dueAt ?? "No due date"}</dd>
-          </div>
+          {task.status === "done" && task.completedAt ? (
           <div>
             <dt>Completed</dt>
-            <dd>{task.completedAt ?? "Not completed"}</dd>
+            <dd>{task.completedAt}</dd>
           </div>
-          <div>
-            <dt>Updated</dt>
-            <dd>{task.updatedAt ?? "Unknown"}</dd>
-          </div>
+          ) : null}
         </dl>
       </section>
 
-      <Panel title="Notizen">
-        <p className="notes-text">{task.notes ?? "Noch keine Notizen."}</p>
-      </Panel>
+      <TaskNotesPanel task={task} onUpdateTask={props.onUpdateTask} />
     </section>
   );
 }
 
-function InitiativeBasicsForm(props: {
-  initiative: Initiative;
-  categories: AppOverview["categories"];
-  onUpdateInitiative: (
-    initiativeId: number,
-    input: {
-      categoryId?: number;
-      parentId?: number | null;
-      name?: string;
-      status?: Initiative["status"];
-      summary?: string | null;
-      startDate?: string | null;
-      endDate?: string | null;
-    }
-  ) => Promise<void>;
-}) {
+function TaskDueDateEditor(props: { task: Task; onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void> }) {
   const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(props.initiative.name);
-  const [summary, setSummary] = useState(props.initiative.summary ?? "");
-  const [categoryId, setCategoryId] = useState(props.initiative.categoryId);
-  const [status, setStatus] = useState<Initiative["status"]>(props.initiative.status);
-  const [startDate, setStartDate] = useState(props.initiative.startDate ?? "");
-  const [endDate, setEndDate] = useState(props.initiative.endDate ?? "");
+  const [dueAt, setDueAt] = useState(props.task.dueAt ?? "");
   const [busy, setBusy] = useState(false);
-  const hasDateFields = props.initiative.type === "project";
-  const hasInvalidDateRange = hasDateFields && initiativeDateRangeInvalid(startDate, endDate);
 
   useEffect(() => {
-    setName(props.initiative.name);
-    setSummary(props.initiative.summary ?? "");
-    setCategoryId(props.initiative.categoryId);
-    setStatus(props.initiative.status);
-    setStartDate(props.initiative.startDate ?? "");
-    setEndDate(props.initiative.endDate ?? "");
-  }, [props.initiative]);
+    setDueAt(props.task.dueAt ?? "");
+    setEditing(false);
+    setBusy(false);
+  }, [props.task.id, props.task.dueAt]);
+
+  const saveDueDate = async (nextDueAt: string | null) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await props.onUpdateTask(props.task.id, { dueAt: nextDueAt });
+      setEditing(false);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (!editing) {
-    const category = props.categories.find((candidate) => candidate.id === props.initiative.categoryId);
     return (
-      <section className="panel basics-panel">
-        <div className="panel-heading-row">
-          <h3>Basisdaten</h3>
-          <button className="small-button" onClick={() => setEditing(true)}>
-            Bearbeiten
-          </button>
-        </div>
-        <dl className="detail-list compact">
-          <div>
-            <dt>Typ</dt>
-            <dd>
-              <InitiativeTypeBadge type={props.initiative.type} />
-            </dd>
-          </div>
-          <div>
-            <dt>Kategorie</dt>
-            <dd>{category?.name ?? `Category ${props.initiative.categoryId}`}</dd>
-          </div>
-          <div>
-            <dt>Status</dt>
-            <dd>{props.initiative.status}</dd>
-          </div>
-          {hasDateFields ? (
-            <>
-              <div>
-                <dt>Start</dt>
-                <dd>{props.initiative.startDate ?? "Offen"}</dd>
-              </div>
-              <div>
-                <dt>Ende</dt>
-                <dd>{props.initiative.endDate ?? "Offen"}</dd>
-              </div>
-            </>
-          ) : null}
-        </dl>
-      </section>
+      <button type="button" className="task-date-button" onClick={() => setEditing(true)} title="Due Date bearbeiten">
+        {props.task.dueAt ?? "No Due Date"}
+      </button>
     );
   }
 
   return (
-    <form
-      className="panel basics-panel"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        const trimmedName = name.trim();
-        if (!trimmedName || busy || hasInvalidDateRange) return;
-        setBusy(true);
-        try {
-          await props.onUpdateInitiative(props.initiative.id, {
-            name: trimmedName,
-            summary: summary.trim() || null,
-            categoryId,
-            status,
-            startDate: hasDateFields ? startDate || null : undefined,
-            endDate: hasDateFields ? endDate || null : undefined
-          });
-          setEditing(false);
-        } finally {
-          setBusy(false);
-        }
-      }}
-    >
-      <div className="panel-heading-row">
-        <h3>Basisdaten bearbeiten</h3>
-        <button
-          type="button"
-          className="small-button"
-          onClick={() => {
-            setName(props.initiative.name);
-            setSummary(props.initiative.summary ?? "");
-            setCategoryId(props.initiative.categoryId);
-            setStatus(props.initiative.status);
-            setStartDate(props.initiative.startDate ?? "");
-            setEndDate(props.initiative.endDate ?? "");
-            setEditing(false);
+    <div className="task-date-editor">
+      <input
+        autoFocus
+        type="date"
+        value={dueAt}
+        disabled={busy}
+        onChange={(event) => {
+          const value = event.target.value;
+          setDueAt(value);
+          void saveDueDate(value || null);
+        }}
+      />
+      {props.task.dueAt ? (
+        <button type="button" className="icon-button danger" disabled={busy} onClick={() => void saveDueDate(null)} title="Due Date entfernen">
+          <X size={16} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function TaskNotesPanel(props: { task: Task; onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [notes, setNotes] = useState(props.task.notes ?? "");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setNotes(props.task.notes ?? "");
+    setEditing(false);
+    setBusy(false);
+  }, [props.task.id, props.task.notes]);
+
+  const saveNotes = async () => {
+    if (busy) return;
+    const nextNotes = notes.trim() ? notes : null;
+    if (nextNotes === props.task.notes) {
+      setEditing(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await props.onUpdateTask(props.task.id, { notes: nextNotes });
+      setEditing(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <form
+        className="panel task-notes-panel editing"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveNotes();
+        }}
+      >
+        <textarea
+          autoFocus
+          className="initiative-markdown-editor"
+          value={notes}
+          disabled={busy}
+          rows={10}
+          onChange={(event) => setNotes(event.target.value)}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+              event.preventDefault();
+              void saveNotes();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setNotes(props.task.notes ?? "");
+              setEditing(false);
+            }
           }}
-        >
-          Abbrechen
-        </button>
-      </div>
-      <div className="basics-form-grid">
-        <label>
-          Name
-          <input value={name} onChange={(event) => setName(event.target.value)} />
-        </label>
-        <label>
-          Kategorie
-          <select value={categoryId} onChange={(event) => setCategoryId(Number(event.target.value))}>
-            {props.categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Status
-          <select value={status} onChange={(event) => setStatus(event.target.value as Initiative["status"])}>
-            <option value="active">active</option>
-            <option value="paused">paused</option>
-            <option value="completed">completed</option>
-            <option value="archived">archived</option>
-          </select>
-        </label>
-        {hasDateFields ? (
-          <>
-            <label>
-              Start
-              <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
-            </label>
-            <label>
-              Ende
-              <input type="date" value={endDate} min={startDate || undefined} onChange={(event) => setEndDate(event.target.value)} />
-            </label>
-          </>
-        ) : null}
-        <label className="basics-summary-field">
-          Summary
-          <textarea value={summary} onChange={(event) => setSummary(event.target.value)} rows={3} />
-        </label>
-      </div>
-      <div className="form-actions">
-        <button className="primary-action compact" type="submit" disabled={!name.trim() || busy || hasInvalidDateRange}>
-          Speichern
-        </button>
-      </div>
-    </form>
+        />
+        <div className="form-actions">
+          <button
+            type="button"
+            className="small-button"
+            onClick={() => {
+              setNotes(props.task.notes ?? "");
+              setEditing(false);
+            }}
+            disabled={busy}
+          >
+            Abbrechen
+          </button>
+          <button className="primary-action compact" type="submit" disabled={busy}>
+            Speichern
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <button type="button" className="panel task-notes-panel" onClick={() => setEditing(true)} title="Notizen bearbeiten">
+      {props.task.notes ? <RichText text={props.task.notes} /> : null}
+    </button>
   );
 }
 
@@ -2692,14 +3060,18 @@ function TasksView(props: {
   onStatus: (taskId: number, status: string) => Promise<void>;
   onOpenTask?: (taskId: number) => void;
   onReorderTasks?: (taskIds: number[]) => void;
+  showInitiativeName?: boolean;
+  groupByCompletionStatus?: boolean;
 }) {
   const [draggedTaskId, setDraggedTaskId] = useState<number | null>(null);
   const [taskDropId, setTaskDropId] = useState<number | null>(null);
   const initiativeById = new Map(props.initiatives.map((project) => [project.id, project]));
-  const taskIds = props.tasks.map((task) => task.id);
+  const visibleTasks = props.groupByCompletionStatus ? sortTasksByCompletionAndRank(props.tasks) : props.tasks;
+  const taskIds = visibleTasks.map((task) => task.id);
+  const showInitiativeName = props.showInitiativeName ?? true;
   return (
     <section className="task-list">
-      {props.tasks.map((task) => (
+      {visibleTasks.map((task) => (
         <article
           className={`task-row ${task.status} ${props.onOpenTask ? "clickable" : ""} ${props.onReorderTasks ? "draggable-row" : ""} ${draggedTaskId === task.id ? "dragging" : ""} ${taskDropId === task.id ? "drag-over" : ""}`}
           key={task.id}
@@ -2739,7 +3111,9 @@ function TasksView(props: {
           </button>
           <div>
             <h2>{task.title}</h2>
-            <p>{initiativeById.get(task.initiativeId) ? displayInitiativeName(initiativeById.get(task.initiativeId)!) : `Initiative ${task.initiativeId}`}</p>
+            {showInitiativeName ? (
+              <p>{initiativeById.get(task.initiativeId) ? displayInitiativeName(initiativeById.get(task.initiativeId)!) : `Initiative ${task.initiativeId}`}</p>
+            ) : null}
           </div>
           <select
             value={task.status}
@@ -2759,10 +3133,97 @@ function TasksView(props: {
   );
 }
 
+function sortTasksByCompletionAndRank(tasks: Task[]): Task[] {
+  return [...tasks].sort((a, b) => {
+    const statusCompare = taskCompletionRank(a.status) - taskCompletionRank(b.status);
+    return statusCompare || a.sortOrder - b.sortOrder || a.id - b.id;
+  });
+}
+
+function taskCompletionRank(status: Task["status"]): number {
+  return status === "done" ? 1 : 0;
+}
+
+function TaskCreateInlineForm(props: { onCreateTask: (title: string) => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="task-create-inline-button"
+        onClick={() => {
+          setOpen(true);
+          setTitle("");
+        }}
+        title="Massnahme hinzufuegen"
+        aria-label="Massnahme hinzufuegen"
+      >
+        <Plus size={17} />
+      </button>
+    );
+  }
+
+  return (
+    <form
+      className="task-create-inline-form"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const trimmedTitle = title.trim();
+        if (!trimmedTitle || creating) return;
+        setCreating(true);
+        try {
+          await props.onCreateTask(trimmedTitle);
+          setTitle("");
+          setOpen(false);
+        } finally {
+          setCreating(false);
+        }
+      }}
+    >
+      <input
+        autoFocus
+        value={title}
+        disabled={creating}
+        onChange={(event) => setTitle(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setTitle("");
+            setOpen(false);
+          }
+        }}
+        placeholder="Neue Massnahme"
+        aria-label="Neue Massnahme"
+      />
+      <button type="submit" className="icon-button confirm" disabled={!title.trim() || creating} title="Anlegen" aria-label="Anlegen">
+        <Plus size={17} />
+      </button>
+      <button
+        type="button"
+        className="icon-button danger"
+        disabled={creating}
+        onClick={() => {
+          setTitle("");
+          setOpen(false);
+        }}
+        title="Abbrechen"
+        aria-label="Abbrechen"
+      >
+        <X size={17} />
+      </button>
+    </form>
+  );
+}
+
 function PromptTemplatesView(props: {
   templates: PromptTemplateDefinition[];
   onRefresh: () => void;
 }) {
+  const [openTemplateId, setOpenTemplateId] = useState<string | null>(null);
+
   return (
     <section className="prompt-template-view">
       <div className="prompt-toolbar">
@@ -2776,20 +3237,35 @@ function PromptTemplatesView(props: {
       </div>
 
       <div className="prompt-template-list">
-        {props.templates.map((template) => (
-          <section className="prompt-template-card panel" key={template.id}>
-            <div className="prompt-template-card-heading">
-              <div>
-                <h3>{template.name}</h3>
-                <p>{template.route}</p>
+        {props.templates.map((template) => {
+          const open = openTemplateId === template.id;
+          return (
+            <section className={`prompt-template-row panel ${open ? "open" : ""}`} key={template.id}>
+              <button
+                type="button"
+                className="prompt-template-trigger"
+                aria-expanded={open}
+                onClick={() => setOpenTemplateId((current) => current === template.id ? null : template.id)}
+              >
+                <div>
+                  <h3>{template.name}</h3>
+                  <p>{template.route}</p>
               </div>
-              <span>{template.effectiveContext}</span>
-            </div>
-            <PromptSection title="System / Instructions" text={template.systemInstructions} />
-            <PromptSection title="Kontextdaten Template" text={template.contextDataTemplate} />
-            <PromptSection title="Finaler Prompt Template" text={template.finalPromptTemplate} emphasis />
-          </section>
-        ))}
+              <div className="prompt-template-row-meta">
+                <span>{template.displayContext ?? template.effectiveContext}</span>
+                <ChevronDown className="prompt-template-chevron" size={18} aria-hidden="true" />
+              </div>
+              </button>
+              {open ? (
+                <div className="prompt-template-detail">
+                  <PromptSection title="System / Instructions" text={template.systemInstructions} />
+                  <PromptSection title="Kontextdaten Template" text={template.contextDataTemplate} />
+                  <PromptSection title="Finaler Prompt Template" text={template.finalPromptTemplate} emphasis />
+                </div>
+              ) : null}
+            </section>
+          );
+        })}
         {props.templates.length === 0 ? <EmptyState title="Keine Prompt-Vorlagen geladen." /> : null}
       </div>
     </section>
@@ -3102,17 +3578,29 @@ function renderInlineMarkup(text: string): ReactNode[] {
 function ActivityTrail({ activities }: { activities: ChatActivity[] }) {
   return (
     <div className="activity-trail">
-      {activities.map((activity) => (
-        <div key={activity.id} className={`activity-item ${activity.status}`}>
-          <span className="activity-dot" />
-          <div>
-            <strong>{activity.title}</strong>
-            {activity.detail ? <p>{renderInlineMarkup(activity.detail)}</p> : null}
+      {activities.map((activity) => {
+        const detail = activity.detail ? formatActivityDetail(activity.detail) : null;
+        return (
+          <div key={activity.id} className={`activity-item ${activity.status}`}>
+            <span className="activity-dot" />
+            <div>
+              <strong>{activity.title}</strong>
+              {detail ? <p>{renderInlineMarkup(detail)}</p> : null}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
+}
+
+function formatActivityDetail(detail: string): string {
+  const compact = detail.replace(/\s+/g, " ").trim();
+  if (compact.length <= 220) {
+    return compact;
+  }
+
+  return `${compact.slice(0, 217).trimEnd()}...`;
 }
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {

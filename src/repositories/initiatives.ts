@@ -58,6 +58,7 @@ export type UpdateInitiativeInput = {
   name?: string;
   status?: InitiativeStatus;
   summary?: string | null;
+  markdown?: string;
   startDate?: string | null;
   endDate?: string | null;
 };
@@ -154,7 +155,7 @@ export class InitiativeRepository {
 
     this.db
       .prepare(
-        "update initiatives set category_id = ?, parent_id = ?, type = ?, name = ?, status = ?, summary = ?, start_date = ?, end_date = ?, updated_at = ? where id = ?"
+        "update initiatives set category_id = ?, parent_id = ?, type = ?, name = ?, status = ?, summary = ?, markdown = ?, start_date = ?, end_date = ?, updated_at = ? where id = ?"
       )
       .run(
         input.categoryId ?? existing.categoryId,
@@ -163,6 +164,7 @@ export class InitiativeRepository {
         input.name ?? existing.name,
         input.status ?? existing.status,
         input.summary === undefined ? existing.summary : input.summary,
+        input.markdown === undefined ? existing.markdown : input.markdown,
         nextStartDate,
         nextEndDate,
         now,

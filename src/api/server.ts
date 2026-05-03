@@ -184,6 +184,14 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/tasks") {
+      const body = createTaskBody.parse(await readJson(req));
+      const task = tasks.create(body);
+      emitApiStateEvent({ operation: "createTask", entityType: "task", entityId: task.id, taskId: task.id, initiativeId: task.initiativeId });
+      sendJson(res, 200, { task });
+      return;
+    }
+
     if (req.method === "PATCH" && url.pathname === "/api/tasks/order") {
       const body = reorderTasksBody.parse(await readJson(req));
       const nextTasks = tasks.reorderWithinInitiative(body.initiativeId, body.taskIds);
@@ -393,7 +401,13 @@ const server = http.createServer(async (req, res) => {
       }
 
       const openClawSession = await chat.prepareOpenClawConversationSession(conversationId).catch(() => null);
-      sendJson(res, 200, { activities: openClawSession?.sessionId ? listOpenClawSessionActivities(openClawSession.sessionId) : [] });
+      const latestPromptCreatedAt = latestPromptLogCreatedAt(conversationId);
+      const activities = openClawSession?.sessionId
+        ? listOpenClawSessionActivities(openClawSession.sessionId).filter((activity) =>
+            !latestPromptCreatedAt || !activity.timestamp || activity.timestamp >= latestPromptCreatedAt
+          )
+        : [];
+      sendJson(res, 200, { activities });
       return;
     }
 
@@ -475,9 +489,11 @@ const createInitiativeBody = z.object({
 const updateInitiativeBody = z.object({
   categoryId: z.number().int().positive().optional(),
   parentId: z.number().int().positive().nullable().optional(),
+  type: z.enum(["idea", "project", "habit"]).optional(),
   name: z.string().trim().min(1).optional(),
   status: z.enum(["active", "paused", "completed", "archived"]).optional(),
   summary: z.string().trim().min(1).nullable().optional(),
+  markdown: z.string().optional(),
   startDate: initiativeDateBody.optional(),
   endDate: initiativeDateBody.optional()
 });
@@ -512,6 +528,14 @@ const reorderTasksBody = z.union([
     .transform((body) => ({ initiativeId: body.projectId, taskIds: body.taskIds }))
 ]);
 
+const createTaskBody = z.object({
+  initiativeId: z.number().int().positive(),
+  title: z.string().trim().min(1),
+  priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
+  notes: z.string().trim().min(1).nullable().optional(),
+  dueAt: initiativeDateBody.optional()
+});
+
 const voiceSessionBody = z.object({
   mode: z.literal("drive")
 });
@@ -541,7 +565,21 @@ const createConversationBody = z.object({
 
 function parseConversationContextQuery(url: URL) {
   const contextType = z
-    .enum(["global", "initiatives", "projects", "category", "initiative", "project", "task"])
+    .enum([
+      "global",
+      "categories",
+      "ideas",
+      "projects",
+      "habits",
+      "tasks",
+      "initiatives",
+      "category",
+      "idea",
+      "project",
+      "habit",
+      "initiative",
+      "task"
+    ])
     .parse(url.searchParams.get("contextType"));
   const entityId = parseOptionalPositiveInt(url.searchParams.get("contextEntityId"));
 
@@ -549,8 +587,14 @@ function parseConversationContextQuery(url: URL) {
     return { type: "global" as const };
   }
 
-  if (contextType === "initiatives" || contextType === "projects") {
-    return { type: "initiatives" as const };
+  if (["categories", "ideas", "projects", "habits", "tasks", "initiatives"].includes(contextType)) {
+    return { type: contextType } as
+      | { type: "categories" }
+      | { type: "ideas" }
+      | { type: "projects" }
+      | { type: "habits" }
+      | { type: "tasks" }
+      | { type: "initiatives" };
   }
 
   if (!entityId) {
@@ -558,7 +602,13 @@ function parseConversationContextQuery(url: URL) {
   }
 
   if (contextType === "category") return { type: "category" as const, categoryId: entityId };
-  if (contextType === "initiative" || contextType === "project") return { type: "initiative" as const, initiativeId: entityId };
+  if (contextType === "idea" || contextType === "project" || contextType === "habit" || contextType === "initiative") {
+    return { type: contextType, initiativeId: entityId } as
+      | { type: "idea"; initiativeId: number }
+      | { type: "project"; initiativeId: number }
+      | { type: "habit"; initiativeId: number }
+      | { type: "initiative"; initiativeId: number };
+  }
   return { type: "task" as const, taskId: entityId };
 }
 
@@ -576,6 +626,13 @@ function parseOptionalInitiativeType(type: string | null): InitiativeType | unde
   }
 
   return undefined;
+}
+
+function latestPromptLogCreatedAt(conversationId: number): string | null {
+  const row = db
+    .prepare("select created_at from app_prompt_logs where conversation_id = ? order by created_at desc, id desc limit 1")
+    .get(conversationId) as { created_at: string } | undefined;
+  return row?.created_at ?? null;
 }
 
 function parseOptionalPositiveInt(value: string | null): number | null {

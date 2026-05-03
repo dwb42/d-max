@@ -70,6 +70,20 @@ describe("migrate", () => {
       expect(inbox.is_system).toBe(1);
       expect(inbox.color).toMatch(/^#[0-9a-f]{6}$/);
       expect(inbox.emoji).toBe("📥");
+      expect(() =>
+        db
+          .prepare(
+            "insert into app_conversations (context_type, context_entity_id, created_at, updated_at) values ('ideas', null, '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z')"
+          )
+          .run()
+      ).not.toThrow();
+      expect(() =>
+        db
+          .prepare(
+            "insert into app_conversations (context_type, context_entity_id, created_at, updated_at) values ('project', 1, '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z')"
+          )
+          .run()
+      ).not.toThrow();
     } finally {
       db.close();
     }

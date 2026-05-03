@@ -47,8 +47,7 @@ const archiveInitiativeInput = z.object({
 });
 const updateInitiativeMarkdownInput = z.object({
   id: z.number().int().positive(),
-  markdown: z.string(),
-  confirmed: z.boolean().optional()
+  markdown: z.string()
 });
 
 export const initiativeTools: ToolDefinition<any>[] = [
@@ -144,7 +143,8 @@ export const initiativeTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "updateInitiativeMarkdown",
-    description: "Replace an initiative's markdown memory. Large rewrites require confirmation.",
+    description:
+      "Replace an initiative's markdown memory. In an active initiative/idea/project/habit conversation, save useful intermediate markdown directly when Dietrich asks for it or has granted permission; do not require repeated confirmation for normal markdown refinement.",
     inputSchema: updateInitiativeMarkdownInput,
     run: (input, context) => {
       if (!context.db) {

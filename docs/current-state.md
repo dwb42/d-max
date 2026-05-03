@@ -13,7 +13,7 @@ d-max is Dietrich's agentic initiative, task, and initiative-memory system.
 Active interfaces:
 
 - Telegram bot for daily text and voice use.
-- Browser app for `/drive`, `/lebensbereiche`, `/lebensbereiche/:categoryName`,
+- Browser app for `/drive`, `/categories`, `/categories/:categoryName`,
   `/calendar/timeline`, `/ideas`, `/ideas/:categoryName`, `/projects`,
   `/projects/:categoryName`, `/habits`, `/habits/:categoryName`,
   `/initiatives/:id`, `/tasks`, `/tasks/:id`, `/prompt-vorlagen`, and `/prompts`.
@@ -107,12 +107,12 @@ Implemented behavior:
   not require manual reload.
 - Agent/tool state writes emit `app_state_events`; the browser subscribes via
   SSE and refetches visible state without a manual page reload.
-- `/lebensbereiche`: first main navigation item. Shows all categories as
+- `/categories`: first main navigation item. Shows all categories as
   life areas and groups their initiatives by `idea`, `project`, and `habit`.
   Category rows show the category emoji instead of the color dot.
   There is intentionally no category creation UI in this view; new life areas
   are created through DMAX/agent flows.
-- `/lebensbereiche/:categoryName`: life-area detail page with category name,
+- `/categories/:categoryName`: life-area detail page with category name,
   editable Markdown description, and grouped initiatives (`idea`, `project`,
   `habit`).
 - `/ideas`, `/projects`, and `/habits`: separate grouped-by-category pages.
@@ -133,9 +133,11 @@ Implemented behavior:
 - `/drive`: LiveKit room creation, browser mic publishing, audio meter,
   start/end controls.
 - `/prompts`: debug view for prompts sent to OpenClaw.
-- `/prompt-vorlagen`: read-only overview of the effective prompt templates for
-  navigation/context levels such as global, life-area list/detail,
-  idea/initiative/habit list/detail, and task list/detail.
+- `/prompt-vorlagen`: accordion overview of the conversation contexts defined in
+  `src/chat/conversation-context.ts`, with route and prompt template per context.
+  Current route contexts include `categories`, `category`, `ideas`, `idea`,
+  `projects`, `project`, `habits`, `habit`, `tasks`, and `task`; legacy
+  `initiatives`/`initiative` remains accepted for compatibility.
 
 ## API Server
 

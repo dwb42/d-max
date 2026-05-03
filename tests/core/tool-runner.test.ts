@@ -175,7 +175,7 @@ describe("ToolRunner", () => {
       })
     });
 
-    await runner.run("updateInitiativeMarkdown", { id: 5, markdown: "# New", confirmed: true }, { db, allowConfirmedActions: true });
+    await runner.run("updateInitiativeMarkdown", { id: 5, markdown: "# New" }, { db });
 
     expect(new StateEventRepository(db).listAfter(0)).toMatchObject([
       {
@@ -187,5 +187,27 @@ describe("ToolRunner", () => {
         categoryId: 2
       }
     ]);
+  });
+
+  it("updates initiative markdown without confirmation", async () => {
+    const runner = new ToolRunner();
+
+    runner.register({
+      name: "updateInitiativeMarkdown",
+      description: "Update initiative markdown",
+      inputSchema: z.object({
+        id: z.number().int().positive(),
+        markdown: z.string()
+      }),
+      run: (input) => ({
+        ok: true,
+        data: { id: input.id, markdown: input.markdown }
+      })
+    });
+
+    await expect(runner.run("updateInitiativeMarkdown", { id: 5, markdown: "# Zwischenstand" })).resolves.toMatchObject({
+      ok: true,
+      data: { id: 5, markdown: "# Zwischenstand" }
+    });
   });
 });

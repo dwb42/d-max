@@ -2,7 +2,6 @@ import type { ConfirmationRequest, ToolName } from "./tool-definitions.js";
 
 const CONFIRMATION_REQUIRED_TOOLS = new Set<ToolName>([
   "archiveInitiative",
-  "updateInitiativeMarkdown",
   "deleteTask"
 ]);
 

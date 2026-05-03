@@ -399,6 +399,7 @@ const OPENCLAW_TOOL_CONTEXT = [
   "- When Dietrich says project, plan, execute, implement, ship, finish, travel, or describes a concrete outcome with a bounded timeframe, createInitiative with type = project. Use startDate/endDate in YYYY-MM-DD when he gives a time span.",
   "- When Dietrich says habit, Gewohnheit, routine, regularly, daily, weekly, or describes an ongoing practice, createInitiative with type = habit. Habits usually do not have a clear start/end date.",
   "- categoryId stays required. Use listCategories to find the system Inbox category when the correct category is unclear.",
+  "- In an active initiative/idea/project/habit conversation, use updateInitiativeMarkdown directly for useful intermediate markdown updates when Dietrich asks for it or has granted permission in the thread. Do not ask repeatedly before normal markdown refinement.",
   "- Changing an existing initiative's type is a lifecycle change and requires confirmation before updateInitiative with type.",
   "- Never treat a repeated request as confirmation for a lifecycle change. Ask for an explicit yes/confirmation first.",
   "- The MCP tool path does not trust self-set confirmed flags; a returned requiresConfirmation result means the change was not applied.",

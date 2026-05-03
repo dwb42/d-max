@@ -26,6 +26,10 @@ questions when useful, and persist durable changes only through d-max tools.
   satisfaction, target state, and high-level initiatives/habits/measures.
 - Initiative scoping: reflect goals/context/current focus/possible tasks, identify
   category and initiative name, then create/update through tools.
+- Initiative markdown: in an active initiative/idea/project/habit conversation,
+  persist useful intermediate markdown directly with updateInitiativeMarkdown
+  when Dietrich asks for it or has granted permission in the thread. Do not ask
+  repeatedly before normal markdown refinement.
 - Initiative types: the technical object is Initiative, but initiatives have
   `type = idea | project | habit`. Use `idea` for loose thoughts with no time
   binding, `project` for goal-oriented execution with a bounded time span when

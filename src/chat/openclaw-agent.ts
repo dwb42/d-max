@@ -2066,24 +2066,31 @@ function summarizeToolArguments(toolName: string, args: Record<string, unknown> 
     return undefined;
   }
 
+  if (isToolNamed(toolName, "updateInitiativeMarkdown")) {
+    const id = typeof args.id === "number" || typeof args.id === "string" ? String(args.id) : null;
+    const markdown = typeof args.markdown === "string" ? args.markdown : null;
+    const length = markdown ? ` (${markdown.length} Zeichen)` : "";
+    return `${id ? `Initiative ${id}: ` : ""}Markdown wird gespeichert${length}.`;
+  }
+
   if (toolName === "web_search" && typeof args.query === "string") {
-    return args.query;
+    return truncateActivityDetail(args.query);
   }
 
   if (toolName === "web_fetch" && typeof args.url === "string") {
-    return args.url;
+    return truncateActivityDetail(args.url);
   }
 
   if (toolName === "update_plan" && Array.isArray(args.plan)) {
-    return args.plan
+    return truncateActivityDetail(args.plan
       .filter(isRecord)
       .map((item) => (typeof item.step === "string" ? item.step : ""))
       .filter(Boolean)
-      .join(" · ");
+      .join(" · "));
   }
 
   const firstString = Object.values(args).find((value) => typeof value === "string");
-  return typeof firstString === "string" ? firstString : undefined;
+  return typeof firstString === "string" ? truncateActivityDetail(firstString) : undefined;
 }
 
 function summarizeToolResult(toolName: string, details: Record<string, unknown> | null): string | undefined {
@@ -2093,13 +2100,13 @@ function summarizeToolResult(toolName: string, details: Record<string, unknown> 
 
   const tookMs = typeof details.tookMs === "number" ? ` · ${Math.round(details.tookMs / 100) / 10}s` : "";
   if (toolName === "web_search" && typeof details.query === "string") {
-    return `${details.query}${tookMs}`;
+    return `${truncateActivityDetail(details.query)}${tookMs}`;
   }
 
   if (toolName === "web_fetch") {
     const status = typeof details.status === "number" ? `HTTP ${details.status}` : "fetch";
     const url = typeof details.finalUrl === "string" ? details.finalUrl : typeof details.url === "string" ? details.url : "";
-    return `${status}${url ? ` · ${url}` : ""}${tookMs}`;
+    return truncateActivityDetail(`${status}${url ? ` · ${url}` : ""}${tookMs}`);
   }
 
   return tookMs ? tookMs.slice(3) : undefined;
@@ -2109,9 +2116,37 @@ function formatToolName(name: string): string {
   const labels: Record<string, string> = {
     web_search: "Websuche",
     web_fetch: "Webseite lesen",
-    update_plan: "Plan"
+    update_plan: "Plan",
+    getInitiative: "Beschreibung lesen",
+    updateInitiativeMarkdown: "Beschreibung aktualisieren",
+    updateInitiative: "Eintrag aktualisieren",
+    createInitiative: "Eintrag erstellen",
+    archiveInitiative: "Eintrag archivieren",
+    listInitiatives: "Eintraege laden",
+    listCategories: "Lebensbereiche laden",
+    createCategory: "Lebensbereich erstellen",
+    updateCategory: "Lebensbereich aktualisieren",
+    listTasks: "Aufgaben laden",
+    createTask: "Aufgabe erstellen",
+    updateTask: "Aufgabe aktualisieren",
+    completeTask: "Aufgabe abschliessen",
+    deleteTask: "Aufgabe loeschen"
   };
-  return labels[name] ?? name.replaceAll("_", " ");
+  const normalizedName = name.replace(/^d-max__/, "");
+  return labels[name] ?? labels[normalizedName] ?? `DMAX ${normalizedName.replaceAll("_", " ")}`;
+}
+
+function isToolNamed(toolName: string, expectedName: string): boolean {
+  return toolName === expectedName || toolName.endsWith(`__${expectedName}`) || toolName.endsWith(` ${expectedName}`);
+}
+
+function truncateActivityDetail(value: string, maxLength = 220): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxLength) {
+    return compact;
+  }
+
+  return `${compact.slice(0, maxLength - 3).trimEnd()}...`;
 }
 
 function cryptoRandomId(): string {

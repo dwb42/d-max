@@ -14,6 +14,7 @@ import type {
   InitiativeType,
   PromptTemplateDefinition,
   StateEvent,
+  Task,
   TaskDetail
 } from "./types.js";
 
@@ -96,9 +97,11 @@ export async function updateInitiative(
   input: {
     categoryId?: number;
     parentId?: number | null;
+    type?: InitiativeType;
     name?: string;
     status?: Initiative["status"];
     summary?: string | null;
+    markdown?: string;
     startDate?: string | null;
     endDate?: string | null;
   }
@@ -119,6 +122,15 @@ export async function reorderTasks(initiativeId: number, taskIds: number[]): Pro
   });
 }
 
+export async function createTask(input: { initiativeId: number; title: string; priority?: Task["priority"]; notes?: string | null; dueAt?: string | null }): Promise<Task> {
+  const response = await request<{ task: Task }>("/api/tasks", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.task;
+}
+
 export async function fetchInitiativeDetail(initiativeId: number): Promise<InitiativeDetail> {
   return request<InitiativeDetail>(`/api/initiatives/${initiativeId}`);
 }
@@ -137,6 +149,24 @@ export async function updateTaskStatus(id: number, status: string) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ status })
   });
+}
+
+export async function updateTask(
+  id: number,
+  input: {
+    title?: string;
+    status?: Task["status"];
+    priority?: Task["priority"];
+    notes?: string | null;
+    dueAt?: string | null;
+  }
+): Promise<Task> {
+  const response = await request<{ task: Task }>(`/api/tasks/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.task;
 }
 
 export async function createVoiceSession(input: { mode: "drive" }): Promise<LiveKitVoiceSession> {
@@ -353,7 +383,7 @@ function conversationContextSearchParams(context: ConversationContext): URLSearc
   const params = new URLSearchParams({ contextType: context.type });
   if (context.type === "category") {
     params.set("contextEntityId", String(context.categoryId));
-  } else if (context.type === "initiative") {
+  } else if (context.type === "idea" || context.type === "project" || context.type === "habit" || context.type === "initiative") {
     params.set("contextEntityId", String(context.initiativeId));
   } else if (context.type === "task") {
     params.set("contextEntityId", String(context.taskId));

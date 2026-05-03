@@ -55,13 +55,13 @@ create table if not exists app_chat_messages (
 create table if not exists app_conversations (
   id integer primary key,
   title text,
-  context_type text not null check (context_type in ('global', 'initiatives', 'category', 'initiative', 'task')),
+  context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'category', 'idea', 'project', 'habit', 'initiative', 'task')),
   context_entity_id integer,
   created_at text not null,
   updated_at text not null,
   check (
-    (context_type in ('global', 'initiatives') and context_entity_id is null)
-    or (context_type in ('category', 'initiative', 'task') and context_entity_id is not null)
+    (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives') and context_entity_id is null)
+    or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task') and context_entity_id is not null)
   )
 );
 
@@ -70,7 +70,7 @@ create table if not exists app_prompt_logs (
   conversation_id integer references app_conversations(id),
   user_message_id integer references app_chat_messages(id),
   openclaw_session_id text not null,
-  context_type text not null check (context_type in ('global', 'initiatives', 'category', 'initiative', 'task')),
+  context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'category', 'idea', 'project', 'habit', 'initiative', 'task')),
   context_entity_id integer,
   user_input text not null,
   system_instructions text not null,
@@ -81,8 +81,8 @@ create table if not exists app_prompt_logs (
   turn_trace text,
   created_at text not null,
   check (
-    (context_type in ('global', 'initiatives') and context_entity_id is null)
-    or (context_type in ('category', 'initiative', 'task') and context_entity_id is not null)
+    (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives') and context_entity_id is null)
+    or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task') and context_entity_id is not null)
   )
 );
 

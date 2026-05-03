@@ -49,7 +49,7 @@ describe("AppChatService", () => {
     expect(agentMessages[0]).toContain("Projekt einwöchige Fahrradtour im Juni");
   });
 
-  it("passes project context into the agent turn", async () => {
+  it("passes project detail context into the agent turn", async () => {
     const category = new CategoryRepository(db).create({ name: "Health" });
     const project = new InitiativeRepository(db).create({
       categoryId: category.id,
@@ -61,12 +61,12 @@ describe("AppChatService", () => {
 
     const result = await service.handleMessage({
       message: "Fasse mir dieses Projekt zusammen.",
-      context: { type: "initiative", initiativeId: project.id }
+      context: { type: "project", initiativeId: project.id }
     });
 
-    expect(result.context).toEqual({ type: "initiative", initiativeId: project.id });
+    expect(result.context).toEqual({ type: "project", initiativeId: project.id });
     expect(result.conversationId).toBeTypeOf("number");
-    expect(agentMessages[0]).toContain("Type: initiative");
+    expect(agentMessages[0]).toContain("Type: project");
     expect(agentMessages[0]).toContain("Health Rhythm");
     expect(agentMessages[0]).toContain("Plan next training week");
   });
@@ -81,13 +81,13 @@ describe("AppChatService", () => {
 
     const result = await service.handleMessage({
       message: "Fasse mir dieses Projekt zusammen.",
-      context: { type: "initiative", initiativeId: project.id }
+      context: { type: "project", initiativeId: project.id }
     });
     const promptLog = service.listPromptLogs()[0];
 
     expect(promptLog).toMatchObject({
       conversationId: result.conversationId,
-      contextType: "initiative",
+      contextType: "project",
       contextEntityId: project.id,
       userInput: "Fasse mir dieses Projekt zusammen.",
       openClawSessionId: `explicit:dmax-web-chat-${result.conversationId}`

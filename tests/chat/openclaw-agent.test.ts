@@ -2,7 +2,12 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readOpenClawTrajectorySummary, resetOpenClawGatewayClientForTests, runOpenClawAgentTurn } from "../../src/chat/openclaw-agent.js";
+import {
+  listOpenClawSessionActivities,
+  readOpenClawTrajectorySummary,
+  resetOpenClawGatewayClientForTests,
+  runOpenClawAgentTurn
+} from "../../src/chat/openclaw-agent.js";
 
 describe("runOpenClawAgentTurn", () => {
   const originalPath = process.env.PATH;
@@ -105,6 +110,44 @@ describe("runOpenClawAgentTurn", () => {
         usage: { input: 100, output: 10, total: 110 }
       })
     ]);
+  });
+
+  it("does not expose full markdown in updateInitiativeMarkdown activity details", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "d-max-openclaw-activity-test-"));
+    const stateDir = path.join(tempDir, "state");
+    const sessionDir = path.join(stateDir, "agents", "main", "sessions");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      path.join(sessionDir, "activity-session.jsonl"),
+      JSON.stringify({
+        type: "message",
+        id: "assistant-activity-1",
+        timestamp: new Date().toISOString(),
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "tool-call-1",
+              name: "d-max__updateInitiativeMarkdown",
+              arguments: {
+                id: 9,
+                markdown: "# Neuer Stand\n\nDieser lange Markdown-Inhalt sollte nicht im Aktivitaetsfeedback sichtbar sein."
+              }
+            }
+          ]
+        }
+      }) + "\n"
+    );
+
+    const activities = listOpenClawSessionActivities("activity-session", { stateDir });
+
+    expect(activities[0]).toMatchObject({
+      kind: "tool_call",
+      title: "Beschreibung aktualisieren gestartet",
+      detail: expect.stringMatching(/^Initiative 9: Markdown wird gespeichert \(\d+ Zeichen\)\.$/)
+    });
+    expect(activities[0]?.detail).not.toContain("Dieser lange Markdown-Inhalt");
   });
 
   function installFakeGatewayClientModule(options: { requestBody?: string } = {}): { configPath: string; stateDir: string } {

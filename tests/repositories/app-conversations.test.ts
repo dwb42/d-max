@@ -18,11 +18,16 @@ describe("AppConversationRepository", () => {
 
   it("creates global and entity-scoped conversations", () => {
     const global = conversations.create({ contextType: "global", title: "Global Chat" });
+    const ideas = conversations.create({ contextType: "ideas", title: "Ideas" });
     const project = conversations.create({ contextType: "initiative", contextEntityId: 42, title: "Health Rhythm" });
+    const idea = conversations.create({ contextType: "idea", contextEntityId: 7, title: "Route Idea" });
 
     expect(global.contextEntityId).toBeNull();
+    expect(ideas.contextEntityId).toBeNull();
     expect(project.contextEntityId).toBe(42);
+    expect(idea.contextEntityId).toBe(7);
     expect(conversations.findById(project.id)?.contextType).toBe("initiative");
+    expect(conversations.findById(idea.id)?.contextType).toBe("idea");
   });
 
   it("finds the latest conversation for a context", () => {

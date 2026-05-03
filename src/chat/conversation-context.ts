@@ -9,8 +9,16 @@ import type { ConversationContextType } from "../repositories/app-conversations.
 
 export const conversationContextSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("global") }),
+  z.object({ type: z.literal("categories") }),
+  z.object({ type: z.literal("ideas") }),
+  z.object({ type: z.literal("projects") }),
+  z.object({ type: z.literal("habits") }),
+  z.object({ type: z.literal("tasks") }),
   z.object({ type: z.literal("initiatives") }),
   z.object({ type: z.literal("category"), categoryId: z.number().int().positive() }),
+  z.object({ type: z.literal("idea"), initiativeId: z.number().int().positive() }),
+  z.object({ type: z.literal("project"), initiativeId: z.number().int().positive() }),
+  z.object({ type: z.literal("habit"), initiativeId: z.number().int().positive() }),
   z.object({ type: z.literal("initiative"), initiativeId: z.number().int().positive() }),
   z.object({ type: z.literal("task"), taskId: z.number().int().positive() })
 ]);
@@ -36,6 +44,7 @@ export type PromptTemplateDefinition = {
   name: string;
   route: string;
   effectiveContext: ConversationContext["type"];
+  displayContext: string;
   systemInstructions: string;
   contextDataTemplate: string;
   finalPromptTemplate: string;
@@ -46,6 +55,7 @@ const promptTemplateSpecs: Array<{
   name: string;
   route: string;
   type: ConversationContext["type"];
+  displayContext?: string;
   meaning: string;
   contextDataLines: string[];
 }> = [
@@ -63,8 +73,8 @@ const promptTemplateSpecs: Array<{
   {
     id: "categories-list",
     name: "Categories List View",
-    route: "/lebensbereiche",
-    type: "initiatives",
+    route: "/categories",
+    type: "categories",
     meaning: "Focused on the overall initiatives and life-areas overview.",
     contextDataLines: [
       "Life areas / categories ({{category_count}}):",
@@ -81,17 +91,26 @@ const promptTemplateSpecs: Array<{
   {
     id: "category-detail",
     name: "Category Detail View",
-    route: "/lebensbereiche/:categoryName",
+    route: "/categories/:categoryName",
     type: "category",
-    meaning: "Focused on one life area/category, its Markdown description, and its initiatives/tasks.",
+    meaning: "Fokussiert auf einen Lebensbereich, seine Markdown-Beschreibung und zugehoerigen Ideen, Projekten und Gewohnheiten (Initiativen).",
     contextDataLines: [
-      "Category: #{{category_id}} {{category_name}}",
-      "Color: {{category_color}}",
-      "Description markdown:",
+      "Lebensbereich: #{{category_id}} {{category_name}}",
+      "Markdown-Beschreibung:",
       "{{category_description_markdown}}",
-      "Initiatives in this life area ({{initiative_count}}):",
-      "- #{{initiative_id}} [{{initiative_type}}] {{initiative_name}}; status: {{initiative_status}}: {{initiative_summary_or_memory}}",
-      "Open tasks in category ({{open_task_count}}, showing highest-signal first):",
+      "Ideen in diesem Lebensbereich ({{idea_count}}):",
+      "- #{{idea_id}} {{idea_name}}; status: {{idea_status}}",
+      "  Markdown:",
+      "  {{idea_markdown}}",
+      "Projekte in diesem Lebensbereich ({{project_count}}):",
+      "- #{{project_id}} {{project_name}}; status: {{project_status}}; Zeitraum: {{project_date_range}}",
+      "  Markdown:",
+      "  {{project_markdown}}",
+      "Gewohnheiten in diesem Lebensbereich ({{habit_count}}):",
+      "- #{{habit_id}} {{habit_name}}; status: {{habit_status}}",
+      "  Markdown:",
+      "  {{habit_markdown}}",
+      "Offene Aufgaben in diesem Lebensbereich ({{open_task_count}}, wichtigste zuerst):",
       "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
     ]
   },
@@ -99,19 +118,21 @@ const promptTemplateSpecs: Array<{
     id: "ideas-list",
     name: "Ideen List View",
     route: "/ideas",
-    type: "initiatives",
-    meaning: "Focused on the overall initiatives and life-areas overview.",
+    type: "ideas",
+    meaning: "Focused on ideas across life areas.",
     contextDataLines: [
-      "Same effective prompt template as Categories List View.",
-      "The UI route is type-focused, but OpenClaw receives the broad initiatives/life-areas context."
+      "Ideas grouped by life area ({{idea_count}}):",
+      "- #{{initiative_id}} {{initiative_name}}; status: {{initiative_status}}: {{initiative_summary_or_memory}}",
+      "Open tasks connected to ideas ({{open_task_count}}, showing highest-signal first):",
+      "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
     ]
   },
   {
     id: "ideas-detail",
     name: "Ideen Detail View",
     route: "/initiatives/:id where type=idea",
-    type: "initiative",
-    meaning: "Focused on one initiative. Use the initiative markdown as durable initiative memory.",
+    type: "idea",
+    meaning: "Focused on one idea. Use the initiative markdown as durable idea memory.",
     contextDataLines: [
       "Initiative: #{{initiative_id}} {{initiative_name}}; type: idea (Idea); status: {{initiative_status}}; time span: none; summary: {{initiative_summary}}",
       "Category: #{{category_id}} {{category_name}} ({{category_color}})",
@@ -125,19 +146,21 @@ const promptTemplateSpecs: Array<{
     id: "projects-list",
     name: "Projekte List View",
     route: "/projects",
-    type: "initiatives",
-    meaning: "Focused on the overall initiatives and life-areas overview.",
+    type: "projects",
+    meaning: "Focused on projects across life areas.",
     contextDataLines: [
-      "Same effective prompt template as Categories List View.",
-      "The UI route is type-focused, but OpenClaw receives the broad initiatives/life-areas context."
+      "Projects grouped by life area ({{project_count}}):",
+      "- #{{initiative_id}} {{initiative_name}}; status: {{initiative_status}}; time span: {{date_range}}: {{initiative_summary_or_memory}}",
+      "Open tasks connected to projects ({{open_task_count}}, showing highest-signal first):",
+      "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
     ]
   },
   {
     id: "projects-detail",
     name: "Projekte Detail View",
     route: "/initiatives/:id where type=project",
-    type: "initiative",
-    meaning: "Focused on one initiative. Use the initiative markdown as durable initiative memory.",
+    type: "project",
+    meaning: "Focused on one project. Use the initiative markdown as durable project memory.",
     contextDataLines: [
       "Initiative: #{{initiative_id}} {{initiative_name}}; type: project (Project); status: {{initiative_status}}; time span: {{startDate}} to {{endDate}}; summary: {{initiative_summary}}",
       "Category: #{{category_id}} {{category_name}} ({{category_color}})",
@@ -151,19 +174,21 @@ const promptTemplateSpecs: Array<{
     id: "habits-list",
     name: "Gewohnheiten List View",
     route: "/habits",
-    type: "initiatives",
-    meaning: "Focused on the overall initiatives and life-areas overview.",
+    type: "habits",
+    meaning: "Focused on habits across life areas.",
     contextDataLines: [
-      "Same effective prompt template as Categories List View.",
-      "The UI route is type-focused, but OpenClaw receives the broad initiatives/life-areas context."
+      "Habits grouped by life area ({{habit_count}}):",
+      "- #{{initiative_id}} {{initiative_name}}; status: {{initiative_status}}: {{initiative_summary_or_memory}}",
+      "Open tasks connected to habits ({{open_task_count}}, showing highest-signal first):",
+      "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
     ]
   },
   {
     id: "habits-detail",
     name: "Gewohnheiten Detail View",
     route: "/initiatives/:id where type=habit",
-    type: "initiative",
-    meaning: "Focused on one initiative. Use the initiative markdown as durable initiative memory.",
+    type: "habit",
+    meaning: "Focused on one habit. Use the initiative markdown as durable habit memory.",
     contextDataLines: [
       "Initiative: #{{initiative_id}} {{initiative_name}}; type: habit (Habit); status: {{initiative_status}}; time span: none; summary: {{initiative_summary}}",
       "Category: #{{category_id}} {{category_name}} ({{category_color}})",
@@ -177,11 +202,11 @@ const promptTemplateSpecs: Array<{
     id: "tasks-list",
     name: "Tasks List View",
     route: "/tasks",
-    type: "global",
-    meaning: "Global d-max chat without a focused UI entity.",
+    type: "tasks",
+    meaning: "Focused on the cross-initiative task execution surface.",
     contextDataLines: [
-      "Currently the tasks list does not bind a route-specific conversation context.",
-      "DMAX falls back to Global Chat and can use tools to inspect tasks/initiatives when asked."
+      "Open tasks across d-max ({{open_task_count}}, showing highest-signal first):",
+      "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}; initiative: #{{initiative_id}} {{initiative_name}}; category: #{{category_id}} {{category_name}}"
     ]
   },
   {
@@ -212,6 +237,7 @@ export function listPromptTemplates(): PromptTemplateDefinition[] {
       name: spec.name,
       route: spec.route,
       effectiveContext: spec.type,
+      displayContext: spec.displayContext ?? spec.type,
       systemInstructions: sections.promptSections.systemInstructions,
       contextDataTemplate: sections.promptSections.contextData,
       finalPromptTemplate: `${sections.agentContextBlock}\n\nUser message:\n{{user_message}}`
@@ -220,15 +246,22 @@ export function listPromptTemplates(): PromptTemplateDefinition[] {
 }
 
 export function conversationContextFromStorage(contextType: ConversationContextType, contextEntityId: number | null): ConversationContext {
-  if (contextType === "global" || contextType === "initiatives") {
-    return { type: contextType };
+  switch (contextType) {
+    case "global":
+    case "categories":
+    case "ideas":
+    case "projects":
+    case "habits":
+    case "tasks":
+    case "initiatives":
+      return { type: contextType };
   }
 
-  if (!contextEntityId) {
-    throw new Error(`Stored ${contextType} conversation is missing context_entity_id`);
-  }
-
+  if (!contextEntityId) throw new Error(`Stored ${contextType} conversation is missing context_entity_id`);
   if (contextType === "category") return { type: "category", categoryId: contextEntityId };
+  if (contextType === "idea" || contextType === "project" || contextType === "habit") {
+    return { type: contextType, initiativeId: contextEntityId };
+  }
   if (contextType === "initiative") return { type: "initiative", initiativeId: contextEntityId };
   return { type: "task", taskId: contextEntityId };
 }
@@ -237,13 +270,26 @@ export function storageForConversationContext(context: ConversationContext): {
   contextType: ConversationContextType;
   contextEntityId: number | null;
 } {
-  if (context.type === "global" || context.type === "initiatives") {
-    return { contextType: context.type, contextEntityId: null };
+  switch (context.type) {
+    case "global":
+    case "categories":
+    case "ideas":
+    case "projects":
+    case "habits":
+    case "tasks":
+    case "initiatives":
+      return { contextType: context.type, contextEntityId: null };
+    case "category":
+      return { contextType: "category", contextEntityId: context.categoryId };
+    case "idea":
+    case "project":
+    case "habit":
+      return { contextType: context.type, contextEntityId: context.initiativeId };
+    case "initiative":
+      return { contextType: "initiative", contextEntityId: context.initiativeId };
+    case "task":
+      return { contextType: "task", contextEntityId: context.taskId };
   }
-
-  if (context.type === "category") return { contextType: "category", contextEntityId: context.categoryId };
-  if (context.type === "initiative") return { contextType: "initiative", contextEntityId: context.initiativeId };
-  return { contextType: "task", contextEntityId: context.taskId };
 }
 
 export function resolveConversationContext(db: Database.Database, input?: ConversationContext | null): ResolvedConversationContext {
@@ -265,7 +311,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     };
   }
 
-  if (context.type === "initiatives") {
+  if (context.type === "categories" || context.type === "initiatives") {
     const categoryList = categories.list();
     const allInitiatives = initiatives.list();
     const activeInitiatives = allInitiatives.filter((initiative) => initiative.status === "active");
@@ -300,8 +346,66 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     return {
       context,
       ...storage,
-      title: "Initiatives",
-      ...buildPromptSections("initiatives", "Focused on the overall initiatives and life-areas overview.", lines)
+      title: context.type === "categories" ? "Categories" : "Initiatives",
+      ...buildPromptSections(context.type, "Focused on the overall initiatives and life-areas overview.", lines)
+    };
+  }
+
+  if (context.type === "ideas" || context.type === "projects" || context.type === "habits") {
+    const initiativeType = singularCollectionContextType(context.type);
+    const categoryList = categories.list();
+    const typedInitiatives = initiatives.list().filter((initiative) => initiative.type === initiativeType);
+    const initiativeIds = new Set(typedInitiatives.map((initiative) => initiative.id));
+    const typedTasks = tasks.list().filter((task) => initiativeIds.has(task.initiativeId) && task.status !== "done" && task.status !== "cancelled");
+    const lines = [
+      `${formatInitiativeType(initiativeType)}s grouped by life area (${typedInitiatives.length}):`,
+      ...categoryList.flatMap((category) => {
+        const categoryInitiatives = typedInitiatives.filter((initiative) => initiative.categoryId === category.id);
+        if (categoryInitiatives.length === 0) {
+          return [];
+        }
+        return [
+          `- #${category.id} ${category.name} (${category.color})`,
+          ...categoryInitiatives.map(
+            (initiative) =>
+              `  - #${initiative.id} ${initiative.name}; status: ${initiative.status}${formatInitiativeDateRange(initiative)}: ${initiative.summary ?? firstMarkdownLine(initiative.markdown)}`
+          )
+        ];
+      }),
+      `Open tasks connected to ${context.type} (${typedTasks.length}, showing highest-signal first):`,
+      ...rankTasks(typedTasks).slice(0, 25).map(formatTask)
+    ];
+
+    return {
+      context,
+      ...storage,
+      title: formatCollectionTitle(context.type),
+      ...buildPromptSections(context.type, `Focused on ${context.type} across life areas.`, lines)
+    };
+  }
+
+  if (context.type === "tasks") {
+    const allTasks = tasks.list().filter((task) => task.status !== "done" && task.status !== "cancelled");
+    const allInitiatives = initiatives.list();
+    const allCategories = categories.list();
+    const lines = [
+      `Open tasks across d-max (${allTasks.length}, showing highest-signal first):`,
+      ...rankTasks(allTasks)
+        .slice(0, 40)
+        .map((task) => {
+          const initiative = allInitiatives.find((candidate) => candidate.id === task.initiativeId);
+          const category = initiative ? allCategories.find((candidate) => candidate.id === initiative.categoryId) : null;
+          return `${formatTask(task)}; initiative: ${
+            initiative ? `#${initiative.id} ${initiative.name} [${formatInitiativeType(initiative.type)}]` : `#${task.initiativeId} not found`
+          }; category: ${category ? `#${category.id} ${category.name}` : "unknown"}`;
+        })
+    ];
+
+    return {
+      context,
+      ...storage,
+      title: "Tasks",
+      ...buildPromptSections("tasks", "Focused on the cross-initiative task execution surface.", lines)
     };
   }
 
@@ -314,16 +418,19 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     const categoryInitiatives = initiatives.list({ categoryId: category.id });
     const initiativeIds = new Set(categoryInitiatives.map((initiative) => initiative.id));
     const categoryTasks = tasks.list().filter((task) => initiativeIds.has(task.initiativeId) && task.status !== "done" && task.status !== "cancelled");
+    const categoryIdeas = categoryInitiatives.filter((initiative) => initiative.type === "idea");
+    const categoryProjects = categoryInitiatives.filter((initiative) => initiative.type === "project");
+    const categoryHabits = categoryInitiatives.filter((initiative) => initiative.type === "habit");
     const lines = [
-      `Category: #${category.id} ${category.name}`,
-      `Color: ${category.color}`,
-      `Description markdown:\n${truncate(category.description || "No life-area description yet.", 7000)}`,
-      `Initiatives in this life area (${categoryInitiatives.length}):`,
-      ...categoryInitiatives.map(
-        (initiative) =>
-          `- #${initiative.id} [${formatInitiativeType(initiative.type)}] ${initiative.name}; status: ${initiative.status}${formatInitiativeDateRange(initiative)}: ${initiative.summary ?? firstMarkdownLine(initiative.markdown)}`
-      ),
-      `Open tasks in category (${categoryTasks.length}, showing highest-signal first):`,
+      `Lebensbereich: #${category.id} ${category.name}`,
+      `Markdown-Beschreibung:\n${truncate(category.description || "Noch keine Lebensbereich-Beschreibung vorhanden.", 7000)}`,
+      `Ideen in diesem Lebensbereich (${categoryIdeas.length}):`,
+      ...categoryIdeas.flatMap(formatInitiativeMarkdownContext),
+      `Projekte in diesem Lebensbereich (${categoryProjects.length}):`,
+      ...categoryProjects.flatMap(formatInitiativeMarkdownContext),
+      `Gewohnheiten in diesem Lebensbereich (${categoryHabits.length}):`,
+      ...categoryHabits.flatMap(formatInitiativeMarkdownContext),
+      `Offene Aufgaben in diesem Lebensbereich (${categoryTasks.length}, wichtigste zuerst):`,
       ...rankTasks(categoryTasks).slice(0, 25).map(formatTask)
     ];
 
@@ -331,11 +438,15 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       context,
       ...storage,
       title: category.name,
-      ...buildPromptSections("category", "Focused on one life area/category, its Markdown description, and its initiatives/tasks.", lines)
+      ...buildPromptSections(
+        "category",
+        "Fokussiert auf einen Lebensbereich, seine Markdown-Beschreibung und zugehoerigen Ideen, Projekten und Gewohnheiten (Initiativen).",
+        lines
+      )
     };
   }
 
-  if (context.type === "initiative") {
+  if (context.type === "idea" || context.type === "project" || context.type === "habit" || context.type === "initiative") {
     const initiative = initiatives.findById(context.initiativeId);
     if (!initiative) {
       throw new Error(`Initiative not found: ${context.initiativeId}`);
@@ -355,7 +466,11 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       context,
       ...storage,
       title: initiative.name,
-      ...buildPromptSections("initiative", "Focused on one initiative. Use the initiative markdown as durable initiative memory.", lines)
+      ...buildPromptSections(
+        context.type,
+        `Focused on one ${formatContextEntityName(context.type)}. Use the initiative markdown as durable ${formatContextEntityName(context.type)} memory.`,
+        lines
+      )
     };
   }
 
@@ -397,7 +512,12 @@ function buildPromptSections(type: string, description: string, lines: string[])
   agentContextBlock: string;
   promptSections: ConversationPromptSections;
 } {
+  if (type === "category") {
+    return buildGermanCategoryPromptSections(type, description, lines);
+  }
+
   const contextData = ["Context data:", ...lines.filter(Boolean)].join("\n");
+  const contextSpecificInstructions = instructionsForContextType(type);
   const systemInstructions = [
     "Current d-max conversation context:",
     `Type: ${type}`,
@@ -424,7 +544,8 @@ function buildPromptSections(type: string, description: string, lines: string[])
     "- Categories are life areas and have a Markdown description field named description.",
     "- Help Dietrich develop category descriptions iteratively through structured and open questions.",
     "- Useful category description sections: Scope, Aktuelle Situation, Zielbild / Zielzustand, Massnahmen auf hoher Ebene.",
-    "- Use updateCategory to persist category description changes."
+    "- Use updateCategory to persist category description changes.",
+    ...contextSpecificInstructions
   ].join("\n");
   const agentContextBlock = [
     "Current d-max conversation context:",
@@ -454,9 +575,90 @@ function buildPromptSections(type: string, description: string, lines: string[])
     "- Categories are life areas and have a Markdown description field named description.",
     "- Help Dietrich develop category descriptions iteratively through structured and open questions.",
     "- Useful category description sections: Scope, Aktuelle Situation, Zielbild / Zielzustand, Massnahmen auf hoher Ebene.",
-    "- Use updateCategory to persist category description changes."
+    "- Use updateCategory to persist category description changes.",
+    ...contextSpecificInstructions
   ].join("\n");
   return { agentContextBlock, promptSections: { systemInstructions, contextData } };
+}
+
+function buildGermanCategoryPromptSections(type: string, description: string, lines: string[]): {
+  agentContextBlock: string;
+  promptSections: ConversationPromptSections;
+} {
+  const contextData = ["Kontextdaten:", ...lines.filter(Boolean)].join("\n");
+  const contextSpecificInstructions = instructionsForContextType(type);
+  const sharedInstructions = [
+    "Aktueller d-max Conversation Context:",
+    `Typ: ${type}`,
+    `Bedeutung: ${description}`,
+    "",
+    "Kontextvertrag:",
+    "- Aktiver Fokus fuer diesen Turn; kein automatischer Auftrag zu dauerhaften Aenderungen.",
+    "- Dauerhafte Aenderungen nur ueber d-max Tools und bestehende Bestaetigungsregeln.",
+    "- Bei mehrdeutigem Aenderungsziel nachfragen, bevor du Initiativen/Aufgaben erstellst oder aenderst.",
+    "- Fehlende Details per Tools abrufen.",
+    "",
+    "Initiative-Typen:",
+    "- Typen: idea, project, habit; categoryId ist Pflicht, bei unklarer Zuordnung Inbox nutzen.",
+    "- idea = lose Gedanken, Impulse, Moeglichkeiten, Brainstorming; nicht zeitgebunden.",
+    "- project = konkrete zielorientierte Arbeit mit Ergebnis; kann startDate/endDate (YYYY-MM-DD) haben.",
+    "- habit = laufende Praktik/wiederkehrende Lebens- oder Business-Pflege; meist ohne klares Start-/Enddatum.",
+    "- Typwechsel bestehender Initiativen ist eine Lifecycle-Entscheidung: Bestaetigung erforderlich; Wiederholung reicht nicht.",
+    "- requiresConfirmation bedeutet: Aenderung wurde nicht angewendet.",
+    "",
+    "Regeln fuer Lebensbereich-/Category-Beschreibungen:",
+    "- Categories sind Lebensbereiche; ihr Markdown-Beschreibungsfeld heisst description.",
+    "- Entwickle Category-Beschreibungen iterativ mit strukturierten offenen Fragen.",
+    "- Pflichtstruktur: Scope, Aktuelle Situation, Bewertung, Zielbild, Ideen, Gewohnheiten, Projekte, Verbindung zwischen Ist-Zustand und Zielbild.",
+    "- updateCategory speichert Aenderungen an der Category-Beschreibung.",
+    ...contextSpecificInstructions
+  ];
+  const systemInstructions = sharedInstructions.join("\n");
+  const agentContextBlock = [
+    "Aktueller d-max Conversation Context:",
+    `Typ: ${type}`,
+    `Bedeutung: ${description}`,
+    "",
+    contextData,
+    "",
+    ...sharedInstructions.slice(4)
+  ].join("\n");
+  return { agentContextBlock, promptSections: { systemInstructions, contextData } };
+}
+
+function instructionsForContextType(type: string): string[] {
+  if (type !== "category") {
+    return [];
+  }
+
+  return [
+    "",
+    "Category-Detail-Facilitation-Modus:",
+    "- Ziel: Dietrich schrittweise zu einer vollstaendigen, hochwertigen, strukturierten Markdown-Beschreibung fuehren.",
+    "- Proaktiv fuehren: offene Fragen, Zusammenfassungen, gezielte Nachfragen; nicht nur reagieren.",
+    "- Abschnittsweise arbeiten: Fragengruppe stellen, Antwort spiegeln, Luecken erkennen, naechster Abschnitt.",
+    "- Bestehende Beschreibung, Ideen, Projekte, Gewohnheiten und offene Tasks als pruef-/erweiterbares Material nutzen.",
+    "- Ideen als Bruecke vom Zielzustand zur Umsetzung durch Gewohnheiten und Projekte nutzen.",
+    "",
+    "Arbeite auf diese Markdown-Struktur hin:",
+    "1. Scope / Abgrenzung: Was gehoert dazu/nicht dazu? Grenzen zu anderen Lebensbereichen?",
+    "2. Aktuelle Situation: aktueller Zustand, Erleben, was funktioniert/unklar/vernachlaessigt/ueberladen/energievoll/wichtig ist.",
+    "3. Bewertung: Zufriedenheit, optional 1-10; warum nicht niedriger, was wuerde sie erhoehen?",
+    "4. Gewuenschter Zielzustand: Idealbild mit Anzeichen, Rhythmen, Standards, Ergebnissen, gefuehlten Qualitaeten.",
+    "5. Ideen: vorhandene und moegliche Ideen zum Zielzustand; lose/explorativ/nicht terminiert erlaubt.",
+    "6. Gewohnheiten: bestehende und sinnvolle moegliche Gewohnheiten zur Unterstuetzung des Zielzustands.",
+    "7. Projekte: laufende, geplante und denkbare Projekte zur Weiterentwicklung des Lebensbereichs.",
+    "8. Verbindung zwischen Ist-Zustand und Zielbild: Welche Ideen, Gewohnheiten und Projekte verbinden Ist-Zustand und Zielbild plausibel?",
+    "",
+    "Arbeitsweise:",
+    "- Zuerst pruefen, welche der acht Abschnitte bereits abgedeckt sind; bei duennen Beschreibungen mit Scope/Ist beginnen.",
+    "- Verbesserungen bei Bedarf als Idee, Gewohnheit oder Projekt einordnen.",
+    "- Genug Material zu kohaerenter Beschreibung verdichten, nicht als lose Notizliste belassen.",
+    "",
+    "Persistenzverhalten:",
+    "- Bei genug Material kompakten, strukturierten Markdown-Entwurf vorschlagen; vor Speicherung zeigen und Bestaetigung einholen.",
+    "- Nutze updateCategory erst, nachdem Dietrich der Formulierung zugestimmt hat."
+  ];
 }
 
 function formatInitiativeHeader(initiative: Initiative): string {
@@ -485,6 +687,32 @@ function formatInitiativeType(type: Initiative["type"]): string {
   if (type === "idea") return "Idea";
   if (type === "habit") return "Habit";
   return "Project";
+}
+
+function singularCollectionContextType(type: "ideas" | "projects" | "habits"): Initiative["type"] {
+  if (type === "ideas") return "idea";
+  if (type === "habits") return "habit";
+  return "project";
+}
+
+function formatCollectionTitle(type: "ideas" | "projects" | "habits"): string {
+  if (type === "ideas") return "Ideas";
+  if (type === "habits") return "Habits";
+  return "Projects";
+}
+
+function formatContextEntityName(type: "idea" | "project" | "habit" | "initiative"): string {
+  if (type === "idea") return "idea";
+  if (type === "project") return "project";
+  if (type === "habit") return "habit";
+  return "initiative";
+}
+
+function formatInitiativeMarkdownContext(initiative: Initiative): string[] {
+  return [
+    `- #${initiative.id} ${initiative.name}; status: ${initiative.status}${formatInitiativeDateRange(initiative)}`,
+    `  Markdown:\n${indentMultiline(truncate(initiative.markdown || "Noch kein Markdown vorhanden.", 3000), "  ")}`
+  ];
 }
 
 function formatTask(task: Task): string {
@@ -516,4 +744,11 @@ function truncate(value: string, maxLength: number): string {
   }
 
   return `${value.slice(0, maxLength - 15).trimEnd()}\n[truncated]`;
+}
+
+function indentMultiline(value: string, prefix: string): string {
+  return value
+    .split("\n")
+    .map((line) => `${prefix}${line}`)
+    .join("\n");
 }

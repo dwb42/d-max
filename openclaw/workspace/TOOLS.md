@@ -8,8 +8,12 @@ Do not write directly to the database outside tools.
 
 Use adaptive structure, not a hard template. Common sections: `# Overview`,
 `# Goals`, `# Context`, `# Current Focus`, `# Open Questions`, `# Next Steps`,
-`# Notes`. Do not add empty sections just to satisfy a template. Large rewrites
-require confirmation.
+`# Notes`. Do not add empty sections just to satisfy a template. In an active
+initiative/idea/project/habit conversation, save useful intermediate markdown
+directly when Dietrich asks for it or has granted permission in the thread. Do
+not ask repeatedly for confirmation before normal markdown refinement. If a
+change would remove substantial existing content or radically reframe the
+initiative, briefly summarize the overwrite before applying it.
 
 ## Category Descriptions
 
@@ -43,7 +47,6 @@ confirmation. A repeated request is not confirmation. If a tool returns
 Require confirmation for:
 - deleting tasks
 - archiving or completing initiatives
-- large initiative markdown rewrites
 - batch/mass changes
 
 Small risky actions get a short confirmation question. Larger changes get a

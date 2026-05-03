@@ -56,8 +56,16 @@ export type TaskDetail = {
 
 export type ConversationContext =
   | { type: "global" }
+  | { type: "categories" }
+  | { type: "ideas" }
+  | { type: "projects" }
+  | { type: "habits" }
+  | { type: "tasks" }
   | { type: "initiatives" }
   | { type: "category"; categoryId: number }
+  | { type: "idea"; initiativeId: number }
+  | { type: "project"; initiativeId: number }
+  | { type: "habit"; initiativeId: number }
   | { type: "initiative"; initiativeId: number }
   | { type: "task"; taskId: number };
 
@@ -119,6 +127,7 @@ export type PromptTemplateDefinition = {
   name: string;
   route: string;
   effectiveContext: ConversationContext["type"];
+  displayContext?: string;
   systemInstructions: string;
   contextDataTemplate: string;
   finalPromptTemplate: string;
