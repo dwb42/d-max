@@ -38,12 +38,12 @@ Current repo state has Default-Agent restored to `mcp-only-fast-path`:
     - `d-max__listCategories`
     - `d-max__createCategory`
     - `d-max__updateCategory`
-    - `d-max__listProjects`
-    - `d-max__getProject`
-    - `d-max__createProject`
-    - `d-max__updateProject`
-    - `d-max__archiveProject`
-    - `d-max__updateProjectMarkdown`
+    - `d-max__listInitiatives`
+    - `d-max__getInitiative`
+    - `d-max__createInitiative`
+    - `d-max__updateInitiative`
+    - `d-max__archiveInitiative`
+    - `d-max__updateInitiativeMarkdown`
     - `d-max__listTasks`
     - `d-max__createTask`
     - `d-max__updateTask`
@@ -170,9 +170,9 @@ Research agent tool build from that run:
   - `web_search`
   - `web_fetch`
   - `x_search`
-  - `d-max__getProject`
+  - `d-max__getInitiative`
   - `d-max__listCategories`
-  - `d-max__listProjects`
+  - `d-max__listInitiatives`
   - `d-max__listTasks`
 - No browser/runtime/fs/media/session tools in the child.
 

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { deriveConversationTitle } from "../chat/conversation-title.js";
-import { categoryColorForSortOrder } from "../repositories/categories.js";
+import { categoryColorForSortOrder, categoryEmojiForName } from "../repositories/categories.js";
 import { nowIso } from "./time.js";
 import { openDatabase } from "./connection.js";
 
@@ -11,12 +11,14 @@ export function migrate(databasePath?: string): void {
   const db = openDatabase(databasePath);
 
   try {
+    migrateInitiativeStorage(db);
     migrateExistingAppChatMessages(db);
     migrateRemovedThinkingDomain(db);
     migrateSortOrder(db);
     migrateCategoryColors(db);
-    migrateProjectTypes(db);
-    migrateProjectDates(db);
+    migrateCategoryEmojis(db);
+    migrateInitiativeTypes(db);
+    migrateInitiativeDates(db);
     db.exec(schema);
     ensureInboxCategory(db);
     migratePromptLogs(db);
@@ -24,6 +26,23 @@ export function migrate(databasePath?: string): void {
     backfillConversationTitles(db);
   } finally {
     db.close();
+  }
+}
+
+function migrateInitiativeStorage(db: ReturnType<typeof openDatabase>): void {
+  db.pragma("foreign_keys = OFF");
+  try {
+    if (tableExists(db, "projects") && !tableExists(db, "initiatives")) {
+      db.exec("alter table projects rename to initiatives");
+    }
+
+    renameColumnIfPresent(db, "tasks", "project_id", "initiative_id");
+    renameColumnIfPresent(db, "app_state_events", "project_id", "initiative_id");
+    rebuildAppConversationsForInitiativeContext(db);
+    rebuildAppPromptLogsForInitiativeContext(db);
+    rebuildStateEventsForInitiativeContext(db);
+  } finally {
+    db.pragma("foreign_keys = ON");
   }
 }
 
@@ -87,17 +106,17 @@ function removeThinkingStateEvents(db: ReturnType<typeof openDatabase>): void {
       id integer primary key,
       source text not null check (source in ('api', 'tool')),
       operation text not null,
-      entity_type text not null check (entity_type in ('overview', 'category', 'project', 'task')),
+      entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'task')),
       entity_id integer,
       category_id integer,
-      project_id integer,
+      initiative_id integer,
       task_id integer,
       created_at text not null
     );
-    insert into app_state_events_next (id, source, operation, entity_type, entity_id, category_id, project_id, task_id, created_at)
-      select id, source, operation, entity_type, entity_id, category_id, project_id, task_id, created_at
+    insert into app_state_events_next (id, source, operation, entity_type, entity_id, category_id, initiative_id, task_id, created_at)
+      select id, source, operation, entity_type, entity_id, category_id, initiative_id, task_id, created_at
       from app_state_events
-      where entity_type in ('overview', 'category', 'project', 'task');
+      where entity_type in ('overview', 'category', 'initiative', 'task');
     drop table app_state_events;
     alter table app_state_events_next rename to app_state_events;
   `);
@@ -116,13 +135,13 @@ function migrateExistingAppChatMessages(db: ReturnType<typeof openDatabase>): vo
     create table if not exists app_conversations (
       id integer primary key,
       title text,
-      context_type text not null check (context_type in ('global', 'projects', 'category', 'project', 'task')),
+      context_type text not null check (context_type in ('global', 'initiatives', 'category', 'initiative', 'task')),
       context_entity_id integer,
       created_at text not null,
       updated_at text not null,
       check (
-        (context_type in ('global', 'projects') and context_entity_id is null)
-        or (context_type in ('category', 'project', 'task') and context_entity_id is not null)
+        (context_type in ('global', 'initiatives') and context_entity_id is null)
+        or (context_type in ('category', 'initiative', 'task') and context_entity_id is not null)
       )
     )
   `);
@@ -140,7 +159,7 @@ function migratePromptLogs(db: ReturnType<typeof openDatabase>): void {
       conversation_id integer references app_conversations(id),
       user_message_id integer references app_chat_messages(id),
       openclaw_session_id text not null,
-      context_type text not null check (context_type in ('global', 'projects', 'category', 'project', 'task')),
+      context_type text not null check (context_type in ('global', 'initiatives', 'category', 'initiative', 'task')),
       context_entity_id integer,
       user_input text not null,
       system_instructions text not null,
@@ -151,8 +170,8 @@ function migratePromptLogs(db: ReturnType<typeof openDatabase>): void {
       turn_trace text,
       created_at text not null,
       check (
-        (context_type in ('global', 'projects') and context_entity_id is null)
-        or (context_type in ('category', 'project', 'task') and context_entity_id is not null)
+        (context_type in ('global', 'initiatives') and context_entity_id is null)
+        or (context_type in ('category', 'initiative', 'task') and context_entity_id is not null)
       )
     );
     create index if not exists idx_app_prompt_logs_created_at on app_prompt_logs(created_at, id);
@@ -172,23 +191,23 @@ function migrateStateEvents(db: ReturnType<typeof openDatabase>): void {
       id integer primary key,
       source text not null check (source in ('api', 'tool')),
       operation text not null,
-      entity_type text not null check (entity_type in ('overview', 'category', 'project', 'task')),
+      entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'task')),
       entity_id integer,
       category_id integer,
-      project_id integer,
+      initiative_id integer,
       task_id integer,
       created_at text not null
     );
     create index if not exists idx_app_state_events_id on app_state_events(id);
     create index if not exists idx_app_state_events_created_at on app_state_events(created_at, id);
-    create index if not exists idx_app_state_events_scope on app_state_events(entity_type, entity_id, project_id, task_id, category_id);
+    create index if not exists idx_app_state_events_scope on app_state_events(entity_type, entity_id, initiative_id, task_id, category_id);
   `);
 }
 
 function migrateSortOrder(db: ReturnType<typeof openDatabase>): void {
   ensureSortOrderColumn(db, "categories", "is_system desc, lower(name) asc, id asc");
-  ensureSortOrderColumn(db, "projects", "category_id asc, is_system desc, lower(name) asc, id asc");
-  ensureSortOrderColumn(db, "tasks", "project_id asc, due_at is null, due_at asc, updated_at desc, id asc");
+  ensureSortOrderColumn(db, "initiatives", "category_id asc, is_system desc, lower(name) asc, id asc");
+  ensureSortOrderColumn(db, "tasks", "initiative_id asc, due_at is null, due_at asc, updated_at desc, id asc");
 }
 
 function migrateCategoryColors(db: ReturnType<typeof openDatabase>): void {
@@ -215,41 +234,65 @@ function migrateCategoryColors(db: ReturnType<typeof openDatabase>): void {
   transaction();
 }
 
-function migrateProjectTypes(db: ReturnType<typeof openDatabase>): void {
+function migrateCategoryEmojis(db: ReturnType<typeof openDatabase>): void {
   const existing = db
-    .prepare("select name from sqlite_master where type = 'table' and name = 'projects'")
+    .prepare("select name from sqlite_master where type = 'table' and name = 'categories'")
     .get() as { name: string } | undefined;
   if (!existing) {
     return;
   }
 
-  const columns = db.prepare("pragma table_info(projects)").all() as Array<{ name: string }>;
-  if (!columns.some((column) => column.name === "type")) {
-    db.exec("alter table projects add column type text not null default 'project' check (type in ('idea', 'project', 'habit'))");
+  const columns = db.prepare("pragma table_info(categories)").all() as Array<{ name: string }>;
+  const addedEmojiColumn = !columns.some((column) => column.name === "emoji");
+  if (addedEmojiColumn) {
+    db.exec("alter table categories add column emoji text not null default '📁'");
   }
 
-  db.exec("create index if not exists idx_projects_type on projects(type)");
+  const rows = db
+    .prepare(addedEmojiColumn ? "select id, name from categories" : "select id, name from categories where emoji = '' or emoji = '📁'")
+    .all() as Array<{ id: number; name: string }>;
+  const update = db.prepare("update categories set emoji = ? where id = ?");
+  const transaction = db.transaction(() => {
+    rows.forEach((row) => update.run(categoryEmojiForName(row.name), row.id));
+  });
+  transaction();
 }
 
-function migrateProjectDates(db: ReturnType<typeof openDatabase>): void {
+function migrateInitiativeTypes(db: ReturnType<typeof openDatabase>): void {
   const existing = db
-    .prepare("select name from sqlite_master where type = 'table' and name = 'projects'")
+    .prepare("select name from sqlite_master where type = 'table' and name = 'initiatives'")
     .get() as { name: string } | undefined;
   if (!existing) {
     return;
   }
 
-  const columns = db.prepare("pragma table_info(projects)").all() as Array<{ name: string }>;
+  const columns = db.prepare("pragma table_info(initiatives)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "type")) {
+    db.exec("alter table initiatives add column type text not null default 'project' check (type in ('idea', 'project', 'habit'))");
+  }
+
+  db.exec("create index if not exists idx_initiatives_type on initiatives(type)");
+}
+
+function migrateInitiativeDates(db: ReturnType<typeof openDatabase>): void {
+  const existing = db
+    .prepare("select name from sqlite_master where type = 'table' and name = 'initiatives'")
+    .get() as { name: string } | undefined;
+  if (!existing) {
+    return;
+  }
+
+  const columns = db.prepare("pragma table_info(initiatives)").all() as Array<{ name: string }>;
   if (!columns.some((column) => column.name === "start_date")) {
-    db.exec("alter table projects add column start_date text");
+    db.exec("alter table initiatives add column start_date text");
   }
   if (!columns.some((column) => column.name === "end_date")) {
-    db.exec("alter table projects add column end_date text");
+    db.exec("alter table initiatives add column end_date text");
   }
 
   db.exec(`
-    create index if not exists idx_projects_start_date on projects(start_date);
-    create index if not exists idx_projects_end_date on projects(end_date);
+    create index if not exists idx_initiatives_start_date on initiatives(start_date);
+    create index if not exists idx_initiatives_end_date on initiatives(end_date);
   `);
 }
 
@@ -262,8 +305,15 @@ function ensureInboxCategory(db: ReturnType<typeof openDatabase>): void {
   if (!existing) {
     const row = db.prepare("select coalesce(max(sort_order), 0) + 1000 as next from categories").get() as { next: number };
     db.prepare(
-      "insert into categories (name, description, color, sort_order, is_system, created_at, updated_at) values ('Inbox', ?, ?, ?, 1, ?, ?)"
-    ).run("System fallback for uncategorized initiatives and concrete tasks without project context.", categoryColorForSortOrder(row.next), row.next, now, now);
+      "insert into categories (name, description, color, emoji, sort_order, is_system, created_at, updated_at) values ('Inbox', ?, ?, ?, ?, 1, ?, ?)"
+    ).run(
+      "System fallback for uncategorized initiatives and concrete tasks without initiative context.",
+      categoryColorForSortOrder(row.next),
+      categoryEmojiForName("Inbox"),
+      row.next,
+      now,
+      now
+    );
     return;
   }
 
@@ -316,7 +366,7 @@ function backfillConversationTitles(db: ReturnType<typeof openDatabase>): void {
           limit 1
         ) as firstUserMessage
       from app_conversations c
-      left join projects p on c.context_type = 'project' and c.context_entity_id = p.id
+      left join initiatives p on c.context_type = 'initiative' and c.context_entity_id = p.id
       left join tasks t on c.context_type = 'task' and c.context_entity_id = t.id
       left join categories cat on c.context_type = 'category' and c.context_entity_id = cat.id`
     )
@@ -356,6 +406,156 @@ function shouldBackfillConversationTitle(row: {
 
   return (
     (row.contextType === "global" && title === "Global Chat") ||
-    (row.contextType === "projects" && title === "Projects")
+    (row.contextType === "initiatives" && title === "Initiatives")
   );
+}
+
+function rebuildAppConversationsForInitiativeContext(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "app_conversations")) {
+    return;
+  }
+
+  db.exec(`
+    create table app_conversations_next (
+      id integer primary key,
+      title text,
+      context_type text not null check (context_type in ('global', 'initiatives', 'category', 'initiative', 'task')),
+      context_entity_id integer,
+      created_at text not null,
+      updated_at text not null,
+      check (
+        (context_type in ('global', 'initiatives') and context_entity_id is null)
+        or (context_type in ('category', 'initiative', 'task') and context_entity_id is not null)
+      )
+    );
+    insert into app_conversations_next (id, title, context_type, context_entity_id, created_at, updated_at)
+      select
+        id,
+        title,
+        case context_type when 'projects' then 'initiatives' when 'project' then 'initiative' else context_type end,
+        context_entity_id,
+        created_at,
+        updated_at
+      from app_conversations
+      where context_type in ('global', 'projects', 'initiatives', 'category', 'project', 'initiative', 'task');
+    drop table app_conversations;
+    alter table app_conversations_next rename to app_conversations;
+  `);
+}
+
+function rebuildAppPromptLogsForInitiativeContext(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "app_prompt_logs")) {
+    return;
+  }
+
+  const hasTurnTrace = tableColumns(db, "app_prompt_logs").some((column) => column.name === "turn_trace");
+  const turnTraceSelect = hasTurnTrace ? "turn_trace" : "null as turn_trace";
+  db.exec(`
+    create table app_prompt_logs_next (
+      id integer primary key,
+      conversation_id integer references app_conversations(id),
+      user_message_id integer references app_chat_messages(id),
+      openclaw_session_id text not null,
+      context_type text not null check (context_type in ('global', 'initiatives', 'category', 'initiative', 'task')),
+      context_entity_id integer,
+      user_input text not null,
+      system_instructions text not null,
+      context_data text not null,
+      memory_history text not null,
+      tools text not null,
+      final_prompt text not null,
+      turn_trace text,
+      created_at text not null,
+      check (
+        (context_type in ('global', 'initiatives') and context_entity_id is null)
+        or (context_type in ('category', 'initiative', 'task') and context_entity_id is not null)
+      )
+    );
+    insert into app_prompt_logs_next (
+      id, conversation_id, user_message_id, openclaw_session_id, context_type, context_entity_id,
+      user_input, system_instructions, context_data, memory_history, tools, final_prompt, turn_trace, created_at
+    )
+      select
+        id,
+        conversation_id,
+        user_message_id,
+        openclaw_session_id,
+        case context_type when 'projects' then 'initiatives' when 'project' then 'initiative' else context_type end,
+        context_entity_id,
+        user_input,
+        system_instructions,
+        context_data,
+        memory_history,
+        tools,
+        final_prompt,
+        ${turnTraceSelect},
+        created_at
+      from app_prompt_logs
+      where context_type in ('global', 'projects', 'initiatives', 'category', 'project', 'initiative', 'task');
+    drop table app_prompt_logs;
+    alter table app_prompt_logs_next rename to app_prompt_logs;
+  `);
+}
+
+function rebuildStateEventsForInitiativeContext(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "app_state_events")) {
+    return;
+  }
+
+  const columns = tableColumns(db, "app_state_events");
+  const initiativeColumn = columns.some((column) => column.name === "initiative_id") ? "initiative_id" : "null as initiative_id";
+  db.exec(`
+    create table app_state_events_next (
+      id integer primary key,
+      source text not null check (source in ('api', 'tool')),
+      operation text not null,
+      entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'task')),
+      entity_id integer,
+      category_id integer,
+      initiative_id integer,
+      task_id integer,
+      created_at text not null
+    );
+    insert into app_state_events_next (id, source, operation, entity_type, entity_id, category_id, initiative_id, task_id, created_at)
+      select
+        id,
+        source,
+        case operation
+          when 'createProject' then 'createInitiative'
+          when 'updateProject' then 'updateInitiative'
+          when 'reorderProjects' then 'reorderInitiatives'
+          when 'updateProjectMarkdown' then 'updateInitiativeMarkdown'
+          when 'archiveProject' then 'archiveInitiative'
+          else operation
+        end,
+        case entity_type when 'project' then 'initiative' else entity_type end,
+        entity_id,
+        category_id,
+        ${initiativeColumn},
+        task_id,
+        created_at
+      from app_state_events
+      where entity_type in ('overview', 'category', 'project', 'initiative', 'task');
+    drop table app_state_events;
+    alter table app_state_events_next rename to app_state_events;
+  `);
+}
+
+function tableExists(db: ReturnType<typeof openDatabase>, name: string): boolean {
+  return Boolean(db.prepare("select name from sqlite_master where type = 'table' and name = ?").get(name));
+}
+
+function tableColumns(db: ReturnType<typeof openDatabase>, table: string): Array<{ name: string }> {
+  return db.prepare(`pragma table_info(${table})`).all() as Array<{ name: string }>;
+}
+
+function renameColumnIfPresent(db: ReturnType<typeof openDatabase>, table: string, from: string, to: string): void {
+  if (!tableExists(db, table)) {
+    return;
+  }
+
+  const columns = tableColumns(db, table);
+  if (columns.some((column) => column.name === from) && !columns.some((column) => column.name === to)) {
+    db.exec(`alter table ${table} rename column ${from} to ${to}`);
+  }
 }

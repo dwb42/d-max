@@ -20,7 +20,7 @@ Browser Drive Mode -> LiveKit room -> d-max LiveKit agent
 ## Hardening
 
 - Measure latency and interruption behavior.
-- Add robust realtime provider tool-calling for confirmed category/project/task
+- Add robust realtime provider tool-calling for confirmed category/initiative/task
   operations.
 - Improve event observability and latency metrics.
 - Make pending action ledger durable before production voice commits.

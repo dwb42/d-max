@@ -5,8 +5,8 @@ import { env } from "../config/env.js";
 import { openDatabase } from "../db/connection.js";
 import { migrate } from "../db/migrate.js";
 import { CategoryRepository } from "../repositories/categories.js";
-import { ProjectRepository } from "../repositories/projects.js";
-import type { ProjectType } from "../repositories/projects.js";
+import { InitiativeRepository } from "../repositories/initiatives.js";
+import type { InitiativeType } from "../repositories/initiatives.js";
 import type { TaskStatus } from "../repositories/tasks.js";
 import { TaskRepository } from "../repositories/tasks.js";
 import { StateEventRepository } from "../repositories/state-events.js";
@@ -31,7 +31,7 @@ migrate(env.databasePath);
 
 const db = openDatabase();
 const categories = new CategoryRepository(db);
-const projects = new ProjectRepository(db);
+const initiatives = new InitiativeRepository(db);
 const tasks = new TaskRepository(db);
 const stateEvents = new StateEventRepository(db);
 const chat = new AppChatService(db);
@@ -88,12 +88,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/api/app/overview") {
-      const activeProjects = projects.list({ status: "active" });
+      const activeInitiatives = initiatives.list({ status: "active" });
       const openTasks = tasks.list().filter((task) => task.status !== "done" && task.status !== "cancelled");
 
       sendJson(res, 200, {
         categories: categories.list(),
-        projects: activeProjects,
+        initiatives: activeInitiatives,
         tasks: openTasks
       });
       return;
@@ -129,52 +129,52 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/api/projects") {
+    if (req.method === "GET" && (url.pathname === "/api/initiatives" || url.pathname === "/api/projects")) {
       sendJson(res, 200, {
-        projects: projects.list({
+        initiatives: initiatives.list({
           status: parseOptionalStatus(url.searchParams.get("status")),
-          type: parseOptionalProjectType(url.searchParams.get("type"))
+          type: parseOptionalInitiativeType(url.searchParams.get("type"))
         })
       });
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/projects") {
-      const body = createProjectBody.parse(await readJson(req));
-      const project = projects.create(body);
-      emitApiStateEvent({ operation: "createProject", entityType: "project", entityId: project.id, projectId: project.id, categoryId: project.categoryId });
-      sendJson(res, 200, { project });
+    if (req.method === "POST" && (url.pathname === "/api/initiatives" || url.pathname === "/api/projects")) {
+      const body = createInitiativeBody.parse(await readJson(req));
+      const initiative = initiatives.create(body);
+      emitApiStateEvent({ operation: "createInitiative", entityType: "initiative", entityId: initiative.id, initiativeId: initiative.id, categoryId: initiative.categoryId });
+      sendJson(res, 200, { initiative });
       return;
     }
 
-    if (req.method === "PATCH" && url.pathname === "/api/projects/order") {
-      const body = reorderProjectsBody.parse(await readJson(req));
-      const nextProjects = projects.reorderWithinCategory(body.categoryId, body.projectIds);
-      emitApiStateEvent({ operation: "reorderProjects", entityType: "project", categoryId: body.categoryId });
-      sendJson(res, 200, { projects: nextProjects });
+    if (req.method === "PATCH" && (url.pathname === "/api/initiatives/order" || url.pathname === "/api/projects/order")) {
+      const body = reorderInitiativesBody.parse(await readJson(req));
+      const nextInitiatives = initiatives.reorderWithinCategory(body.categoryId, body.initiativeIds);
+      emitApiStateEvent({ operation: "reorderInitiatives", entityType: "initiative", categoryId: body.categoryId });
+      sendJson(res, 200, { initiatives: nextInitiatives });
       return;
     }
 
-    const projectMatch = url.pathname.match(/^\/api\/projects\/(\d+)$/);
-    if (req.method === "GET" && projectMatch) {
-      const project = projects.findById(Number(projectMatch[1]));
-      if (!project) {
-        sendJson(res, 404, { error: "Project not found" });
+    const initiativeMatch = url.pathname.match(/^\/api\/(?:initiatives|projects)\/(\d+)$/);
+    if (req.method === "GET" && initiativeMatch) {
+      const initiative = initiatives.findById(Number(initiativeMatch[1]));
+      if (!initiative) {
+        sendJson(res, 404, { error: "Initiative not found" });
         return;
       }
 
       sendJson(res, 200, {
-        project,
-        tasks: tasks.list({ projectId: project.id })
+        initiative,
+        tasks: tasks.list({ initiativeId: initiative.id })
       });
       return;
     }
 
-    if (req.method === "PATCH" && projectMatch) {
-      const body = updateProjectBody.parse(await readJson(req));
-      const project = projects.update({ id: Number(projectMatch[1]), ...body });
-      emitApiStateEvent({ operation: "updateProject", entityType: "project", entityId: project.id, projectId: project.id, categoryId: project.categoryId });
-      sendJson(res, 200, { project });
+    if (req.method === "PATCH" && initiativeMatch) {
+      const body = updateInitiativeBody.parse(await readJson(req));
+      const initiative = initiatives.update({ id: Number(initiativeMatch[1]), ...body });
+      emitApiStateEvent({ operation: "updateInitiative", entityType: "initiative", entityId: initiative.id, initiativeId: initiative.id, categoryId: initiative.categoryId });
+      sendJson(res, 200, { initiative });
       return;
     }
 
@@ -186,8 +186,8 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "PATCH" && url.pathname === "/api/tasks/order") {
       const body = reorderTasksBody.parse(await readJson(req));
-      const nextTasks = tasks.reorderWithinProject(body.projectId, body.taskIds);
-      emitApiStateEvent({ operation: "reorderTasks", entityType: "task", projectId: body.projectId });
+      const nextTasks = tasks.reorderWithinInitiative(body.initiativeId, body.taskIds);
+      emitApiStateEvent({ operation: "reorderTasks", entityType: "task", initiativeId: body.initiativeId });
       sendJson(res, 200, { tasks: nextTasks });
       return;
     }
@@ -200,16 +200,16 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const project = projects.findById(task.projectId);
-      const category = project ? categories.findById(project.categoryId) : null;
-      sendJson(res, 200, { task, project, category });
+      const initiative = initiatives.findById(task.initiativeId);
+      const category = initiative ? categories.findById(initiative.categoryId) : null;
+      sendJson(res, 200, { task, initiative, category });
       return;
     }
 
     if (req.method === "PATCH" && taskMatch) {
       const body = updateTaskBody.parse(await readJson(req));
       const task = tasks.update({ id: Number(taskMatch[1]), ...body });
-      emitApiStateEvent({ operation: "updateTask", entityType: "task", entityId: task.id, taskId: task.id, projectId: task.projectId });
+      emitApiStateEvent({ operation: "updateTask", entityType: "task", entityId: task.id, taskId: task.id, initiativeId: task.initiativeId });
       sendJson(res, 200, { task });
       return;
     }
@@ -217,7 +217,7 @@ const server = http.createServer(async (req, res) => {
     const completeTaskMatch = url.pathname.match(/^\/api\/tasks\/(\d+)\/complete$/);
     if (req.method === "POST" && completeTaskMatch) {
       const task = tasks.complete(Number(completeTaskMatch[1]));
-      emitApiStateEvent({ operation: "completeTask", entityType: "task", entityId: task.id, taskId: task.id, projectId: task.projectId });
+      emitApiStateEvent({ operation: "completeTask", entityType: "task", entityId: task.id, taskId: task.id, initiativeId: task.initiativeId });
       sendJson(res, 200, { task });
       return;
     }
@@ -459,42 +459,58 @@ const updateCategoryBody = z.object({
   color: z.string().trim().regex(/^#[0-9a-f]{6}$/i).nullable().optional()
 });
 
-const projectDateBody = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable();
+const initiativeDateBody = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable();
 
-const createProjectBody = z.object({
+const createInitiativeBody = z.object({
   categoryId: z.number().int().positive(),
   parentId: z.number().int().positive().nullable().optional(),
   type: z.enum(["idea", "project", "habit"]).optional(),
   name: z.string().trim().min(1),
   summary: z.string().trim().min(1).nullable().optional(),
   markdown: z.string().optional(),
-  startDate: projectDateBody.optional(),
-  endDate: projectDateBody.optional()
+  startDate: initiativeDateBody.optional(),
+  endDate: initiativeDateBody.optional()
 });
 
-const updateProjectBody = z.object({
+const updateInitiativeBody = z.object({
   categoryId: z.number().int().positive().optional(),
   parentId: z.number().int().positive().nullable().optional(),
   name: z.string().trim().min(1).optional(),
   status: z.enum(["active", "paused", "completed", "archived"]).optional(),
   summary: z.string().trim().min(1).nullable().optional(),
-  startDate: projectDateBody.optional(),
-  endDate: projectDateBody.optional()
+  startDate: initiativeDateBody.optional(),
+  endDate: initiativeDateBody.optional()
 });
 
 const reorderCategoriesBody = z.object({
   categoryIds: z.array(z.number().int().positive()).min(1)
 });
 
-const reorderProjectsBody = z.object({
-  categoryId: z.number().int().positive(),
-  projectIds: z.array(z.number().int().positive()).min(1)
-});
+const reorderInitiativesBody = z.union([
+  z.object({
+    categoryId: z.number().int().positive(),
+    initiativeIds: z.array(z.number().int().positive()).min(1)
+  }),
+  z
+    .object({
+      categoryId: z.number().int().positive(),
+      projectIds: z.array(z.number().int().positive()).min(1)
+    })
+    .transform((body) => ({ categoryId: body.categoryId, initiativeIds: body.projectIds }))
+]);
 
-const reorderTasksBody = z.object({
-  projectId: z.number().int().positive(),
-  taskIds: z.array(z.number().int().positive()).min(1)
-});
+const reorderTasksBody = z.union([
+  z.object({
+    initiativeId: z.number().int().positive(),
+    taskIds: z.array(z.number().int().positive()).min(1)
+  }),
+  z
+    .object({
+      projectId: z.number().int().positive(),
+      taskIds: z.array(z.number().int().positive()).min(1)
+    })
+    .transform((body) => ({ initiativeId: body.projectId, taskIds: body.taskIds }))
+]);
 
 const voiceSessionBody = z.object({
   mode: z.literal("drive")
@@ -525,12 +541,16 @@ const createConversationBody = z.object({
 
 function parseConversationContextQuery(url: URL) {
   const contextType = z
-    .enum(["global", "projects", "category", "project", "task"])
+    .enum(["global", "initiatives", "projects", "category", "initiative", "project", "task"])
     .parse(url.searchParams.get("contextType"));
   const entityId = parseOptionalPositiveInt(url.searchParams.get("contextEntityId"));
 
-  if (contextType === "global" || contextType === "projects") {
-    return { type: contextType };
+  if (contextType === "global") {
+    return { type: "global" as const };
+  }
+
+  if (contextType === "initiatives" || contextType === "projects") {
+    return { type: "initiatives" as const };
   }
 
   if (!entityId) {
@@ -538,7 +558,7 @@ function parseConversationContextQuery(url: URL) {
   }
 
   if (contextType === "category") return { type: "category" as const, categoryId: entityId };
-  if (contextType === "project") return { type: "project" as const, projectId: entityId };
+  if (contextType === "initiative" || contextType === "project") return { type: "initiative" as const, initiativeId: entityId };
   return { type: "task" as const, taskId: entityId };
 }
 
@@ -550,7 +570,7 @@ function parseOptionalStatus(status: string | null) {
   return undefined;
 }
 
-function parseOptionalProjectType(type: string | null): ProjectType | undefined {
+function parseOptionalInitiativeType(type: string | null): InitiativeType | undefined {
   if (type === "idea" || type === "project" || type === "habit") {
     return type;
   }

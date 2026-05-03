@@ -18,8 +18,8 @@ This file defines where Markdown-based memory and configuration belongs.
 
 | File | Role | Store Here | Do Not Store Here |
 | --- | --- | --- | --- |
-| `openclaw/workspace/AGENTS.md` | Runtime behavior for d-max agent | Conversation behavior, project/task workflow, app/voice behavior | Repo engineering rules, setup docs |
-| `openclaw/workspace/TOOLS.md` | Runtime tool-use policy | Durable state rules, confirmation rules, project markdown guidance | Architecture history, implementation details |
+| `openclaw/workspace/AGENTS.md` | Runtime behavior for d-max agent | Conversation behavior, initiative/task workflow, app/voice behavior | Repo engineering rules, setup docs |
+| `openclaw/workspace/TOOLS.md` | Runtime tool-use policy | Durable state rules, confirmation rules, initiative markdown guidance | Architecture history, implementation details |
 | `openclaw/workspace/USER.md` | Minimal user context | Stable facts about Dietrich | Sensitive dossier-like notes |
 | `openclaw/workspace/SOUL.md` | Minimal product tone | Short desired feel of d-max | Detailed prompts or product plans |
 | `openclaw/workspace/IDENTITY.md` | Optional agent identity | Empty or very short identity metadata | Product architecture |

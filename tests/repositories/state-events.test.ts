@@ -13,8 +13,8 @@ describe("StateEventRepository", () => {
   });
 
   it("persists and lists state events after a cursor", () => {
-    const first = events.create({ source: "tool", operation: "updateProjectMarkdown", entityType: "project", entityId: 5, projectId: 5 });
-    const second = events.create({ source: "api", operation: "reorderTasks", entityType: "task", projectId: 5 });
+    const first = events.create({ source: "tool", operation: "updateInitiativeMarkdown", entityType: "initiative", entityId: 5, initiativeId: 5 });
+    const second = events.create({ source: "api", operation: "reorderTasks", entityType: "task", initiativeId: 5 });
 
     expect(events.latestId()).toBe(second.id);
     expect(events.listAfter(first.id)).toEqual([second]);

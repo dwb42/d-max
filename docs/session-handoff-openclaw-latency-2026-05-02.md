@@ -295,12 +295,12 @@ Known actually registered d-max MCP tool names:
 d-max__listCategories
 d-max__createCategory
 d-max__updateCategory
-d-max__listProjects
-d-max__getProject
-d-max__createProject
-d-max__updateProject
-d-max__archiveProject
-d-max__updateProjectMarkdown
+d-max__listInitiatives
+d-max__getInitiative
+d-max__createInitiative
+d-max__updateInitiative
+d-max__archiveInitiative
+d-max__updateInitiativeMarkdown
 d-max__listTasks
 d-max__createTask
 d-max__updateTask
@@ -401,12 +401,12 @@ The final effective OpenClaw tools for the d-max browser-chat turn are the
 d-max__listCategories
 d-max__createCategory
 d-max__updateCategory
-d-max__listProjects
-d-max__getProject
-d-max__createProject
-d-max__updateProject
-d-max__archiveProject
-d-max__updateProjectMarkdown
+d-max__listInitiatives
+d-max__getInitiative
+d-max__createInitiative
+d-max__updateInitiative
+d-max__archiveInitiative
+d-max__updateInitiativeMarkdown
 d-max__listTasks
 d-max__createTask
 d-max__updateTask
@@ -415,7 +415,7 @@ d-max__deleteTask
 ```
 
 These map to local d-max capabilities over SQLite-backed project, task,
-category, and project-memory operations.
+category, and initiative-memory operations.
 
 ### Local OpenClaw Tools Built Then Filtered
 
@@ -477,7 +477,7 @@ d-max__listtasks
 The actual MCP names are CamelCase, for example:
 
 ```text
-d-max__createProject
+d-max__createInitiative
 d-max__listTasks
 ```
 
@@ -571,12 +571,12 @@ MCP tools with their CamelCase OpenClaw names:
 d-max__listCategories
 d-max__createCategory
 d-max__updateCategory
-d-max__listProjects
-d-max__getProject
-d-max__createProject
-d-max__updateProject
-d-max__archiveProject
-d-max__updateProjectMarkdown
+d-max__listInitiatives
+d-max__getInitiative
+d-max__createInitiative
+d-max__updateInitiative
+d-max__archiveInitiative
+d-max__updateInitiativeMarkdown
 d-max__listTasks
 d-max__createTask
 d-max__updateTask
@@ -679,7 +679,7 @@ Browser UI test on project 7:
 
 ```text
 traceId=browser-chat-20260502211205-816a1066
-context: project:7
+context: initiative:7
 Browser/API end-to-end: 6.7s
 sessions.send finished: 121ms
 openclaw.selection.tools_raw_created: 0.073ms
@@ -693,7 +693,7 @@ Read-only MCP smoke:
 ```text
 traceId=mcp-only-tool-smoke-1777755877
 prompt: Liste meine offenen Aufgaben kurz.
-MCP calls: listTasks, listProjects
+MCP calls: listTasks, listInitiatives
 openclaw.selection.tools_raw_created: 0.061ms
 final effective tool count: 14
 ```
@@ -712,7 +712,7 @@ tools only for that delegated run.
 ## Current Goal
 
 Reduce latency for browser DMAX chat via OpenClaw, especially contextual chats such
-as `http://localhost:5173/projects/1`.
+as `http://localhost:5173/initiatives/1`.
 
 The user wants low latency and asked to measure precisely before making further
 changes. The latest direction was to keep optimizing end to end, but this handoff
@@ -809,7 +809,7 @@ session.
 
 ## Measured Improvements
 
-After restarting the API, prewarm for an existing project context became
+After restarting the API, prewarm for an existing initiative context became
 effectively instant:
 
 ```text
@@ -818,7 +818,7 @@ status: ready
 total: about 0.032s
 
 POST /api/openclaw/prewarm
-body: {"context":{"type":"project","projectId":1}}
+body: {"context":{"type":"initiative","initiativeId":1}}
 total: about 0.0037s
 openClawSessionId: 2176023a-14ba-4b7d-8654-ce15a75da831
 ```
@@ -994,13 +994,13 @@ Check OpenClaw status:
 curl -sS http://localhost:3088/api/openclaw/status
 ```
 
-Prewarm project context:
+Prewarm initiative context:
 
 ```bash
 curl -sS -w '\nHTTP %{http_code} total=%{time_total}s\n' \
   -X POST http://localhost:3088/api/openclaw/prewarm \
   -H 'content-type: application/json' \
-  -d '{"context":{"type":"project","projectId":1}}'
+  -d '{"context":{"type":"initiative","initiativeId":1}}'
 ```
 
 Fast browser-chat smoke turn:
@@ -1011,7 +1011,7 @@ curl -sS -N -w "\nHTTP %{http_code} total=%{time_total}s trace=$trace\n" \
   -X POST http://localhost:3088/api/chat/message/stream \
   -H 'content-type: application/json' \
   -H "x-dmax-trace-id: $trace" \
-  -d '{"message":"Antworte nur mit: ok","conversationId":1,"context":{"type":"project","projectId":1},"source":"app_text"}'
+  -d '{"message":"Antworte nur mit: ok","conversationId":1,"context":{"type":"initiative","initiativeId":1},"source":"app_text"}'
 ```
 
 ## Caution For Next Session

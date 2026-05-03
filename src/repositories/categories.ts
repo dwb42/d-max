@@ -6,6 +6,7 @@ export type Category = {
   name: string;
   description: string | null;
   color: string;
+  emoji: string;
   sortOrder: number;
   isSystem: boolean;
   createdAt: string;
@@ -17,6 +18,7 @@ type CategoryRow = {
   name: string;
   description: string | null;
   color: string;
+  emoji: string;
   sort_order: number;
   is_system: number;
   created_at: string;
@@ -43,6 +45,7 @@ function toCategory(row: CategoryRow): Category {
     name: row.name,
     description: row.description,
     color: row.color,
+    emoji: row.emoji,
     sortOrder: row.sort_order,
     isSystem: row.is_system === 1,
     createdAt: row.created_at,
@@ -75,9 +78,18 @@ export class CategoryRepository {
     const sortOrder = this.nextSortOrder();
     const result = this.db
       .prepare(
-        "insert into categories (name, description, color, sort_order, is_system, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?)"
+        "insert into categories (name, description, color, emoji, sort_order, is_system, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?)"
       )
-      .run(input.name, input.description ?? null, normalizeCategoryColor(input.color) ?? categoryColorForSortOrder(sortOrder), sortOrder, input.isSystem ? 1 : 0, now, now);
+      .run(
+        input.name,
+        input.description ?? null,
+        normalizeCategoryColor(input.color) ?? categoryColorForSortOrder(sortOrder),
+        categoryEmojiForName(input.name),
+        sortOrder,
+        input.isSystem ? 1 : 0,
+        now,
+        now
+      );
 
     return this.findById(Number(result.lastInsertRowid))!;
   }
@@ -151,4 +163,31 @@ export function categoryColorForSortOrder(sortOrder: number): string {
 export function normalizeCategoryColor(color?: string | null): string | null {
   const trimmed = color?.trim();
   return trimmed && /^#[0-9a-f]{6}$/i.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+
+export function categoryEmojiForName(name: string): string {
+  const normalized = normalizeCategoryName(name);
+  if (normalized.includes("business")) return "💼";
+  if (normalized.includes("vermoegensverwaltung") || normalized.includes("vermogensverwaltung") || normalized.includes("finanzen")) return "💰";
+  if (normalized.includes("haus") || normalized.includes("hof")) return "🏡";
+  if (normalized.includes("reisen")) return "🚲";
+  if (normalized.includes("inbox")) return "📥";
+  if (normalized.includes("freunde")) return "🤝";
+  if (normalized.includes("familie")) return "👨‍👩‍👧‍👦";
+  if (normalized.includes("koerper") || normalized.includes("korper") || normalized.includes("geist")) return "🧘";
+  if (normalized.includes("herz") || normalized.includes("seele")) return "❤️";
+  if (normalized.includes("health") || normalized.includes("gesundheit")) return "🌿";
+  return "📁";
+}
+
+function normalizeCategoryName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/ö/g, "oe")
+    .replace(/ä/g, "ae")
+    .replace(/ü/g, "ue")
+    .replace(/ß/g, "ss");
 }

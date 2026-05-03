@@ -38,7 +38,7 @@ describe("migrate", () => {
       insert into categories (id, name, description, sort_order, is_system, created_at, updated_at)
         values (1, 'Inbox', null, 1000, 0, '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z');
       insert into projects (id, category_id, parent_id, name, status, summary, markdown, sort_order, is_system, created_at, updated_at)
-        values (1, 1, null, 'Legacy Project', 'active', null, '', 1000, 0, '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z');
+        values (1, 1, null, 'Legacy Initiative', 'active', null, '', 1000, 0, '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z');
     `);
     legacy.close();
 
@@ -46,24 +46,30 @@ describe("migrate", () => {
     const db = openDatabase(databasePath);
 
     try {
-      const projectColumns = db.prepare("pragma table_info(projects)").all() as Array<{ name: string }>;
-      const project = db.prepare("select type, start_date, end_date from projects where id = 1").get() as {
+      const initiativeColumns = db.prepare("pragma table_info(initiatives)").all() as Array<{ name: string }>;
+      const initiative = db.prepare("select type, start_date, end_date from initiatives where id = 1").get() as {
         type: string;
         start_date: string | null;
         end_date: string | null;
       };
       const categoryColumns = db.prepare("pragma table_info(categories)").all() as Array<{ name: string }>;
-      const inbox = db.prepare("select is_system, color from categories where name = 'Inbox'").get() as { is_system: number; color: string };
+      const inbox = db.prepare("select is_system, color, emoji from categories where name = 'Inbox'").get() as {
+        is_system: number;
+        color: string;
+        emoji: string;
+      };
 
       expect(categoryColumns.some((column) => column.name === "color")).toBe(true);
-      expect(projectColumns.some((column) => column.name === "type")).toBe(true);
-      expect(projectColumns.some((column) => column.name === "start_date")).toBe(true);
-      expect(projectColumns.some((column) => column.name === "end_date")).toBe(true);
-      expect(project.type).toBe("project");
-      expect(project.start_date).toBeNull();
-      expect(project.end_date).toBeNull();
+      expect(categoryColumns.some((column) => column.name === "emoji")).toBe(true);
+      expect(initiativeColumns.some((column) => column.name === "type")).toBe(true);
+      expect(initiativeColumns.some((column) => column.name === "start_date")).toBe(true);
+      expect(initiativeColumns.some((column) => column.name === "end_date")).toBe(true);
+      expect(initiative.type).toBe("project");
+      expect(initiative.start_date).toBeNull();
+      expect(initiative.end_date).toBeNull();
       expect(inbox.is_system).toBe(1);
       expect(inbox.color).toMatch(/^#[0-9a-f]{6}$/);
+      expect(inbox.emoji).toBe("📥");
     } finally {
       db.close();
     }

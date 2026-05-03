@@ -6,7 +6,7 @@ export type TaskPriority = "low" | "normal" | "high" | "urgent";
 
 export type Task = {
   id: number;
-  projectId: number;
+  initiativeId: number;
   title: string;
   status: TaskStatus;
   priority: TaskPriority;
@@ -20,7 +20,7 @@ export type Task = {
 
 type TaskRow = {
   id: number;
-  project_id: number;
+  initiative_id: number;
   title: string;
   status: TaskStatus;
   priority: TaskPriority;
@@ -33,7 +33,7 @@ type TaskRow = {
 };
 
 export type CreateTaskInput = {
-  projectId: number;
+  initiativeId: number;
   title: string;
   priority?: TaskPriority;
   notes?: string | null;
@@ -42,7 +42,7 @@ export type CreateTaskInput = {
 
 export type UpdateTaskInput = {
   id: number;
-  projectId?: number;
+  initiativeId?: number;
   title?: string;
   status?: TaskStatus;
   priority?: TaskPriority;
@@ -53,7 +53,7 @@ export type UpdateTaskInput = {
 function toTask(row: TaskRow): Task {
   return {
     id: row.id,
-    projectId: row.project_id,
+    initiativeId: row.initiative_id,
     title: row.title,
     status: row.status,
     priority: row.priority,
@@ -69,13 +69,13 @@ function toTask(row: TaskRow): Task {
 export class TaskRepository {
   constructor(private readonly db: Database.Database) {}
 
-  list(filters: { projectId?: number; status?: TaskStatus; priority?: TaskPriority } = {}): Task[] {
+  list(filters: { initiativeId?: number; status?: TaskStatus; priority?: TaskPriority } = {}): Task[] {
     const conditions: string[] = [];
     const params: unknown[] = [];
 
-    if (filters.projectId !== undefined) {
-      conditions.push("project_id = ?");
-      params.push(filters.projectId);
+    if (filters.initiativeId !== undefined) {
+      conditions.push("initiative_id = ?");
+      params.push(filters.initiativeId);
     }
 
     if (filters.status !== undefined) {
@@ -90,7 +90,7 @@ export class TaskRepository {
 
     const where = conditions.length > 0 ? `where ${conditions.join(" and ")}` : "";
     const rows = this.db
-      .prepare(`select * from tasks ${where} order by project_id asc, sort_order asc, due_at is null, due_at asc, updated_at desc, id asc`)
+      .prepare(`select * from tasks ${where} order by initiative_id asc, sort_order asc, due_at is null, due_at asc, updated_at desc, id asc`)
       .all(...params) as TaskRow[];
 
     return rows.map(toTask);
@@ -104,9 +104,9 @@ export class TaskRepository {
   create(input: CreateTaskInput, now = nowIso()): Task {
     const result = this.db
       .prepare(
-        "insert into tasks (project_id, title, status, priority, notes, due_at, sort_order, created_at, updated_at) values (?, ?, 'open', ?, ?, ?, ?, ?, ?)"
+        "insert into tasks (initiative_id, title, status, priority, notes, due_at, sort_order, created_at, updated_at) values (?, ?, 'open', ?, ?, ?, ?, ?, ?)"
       )
-      .run(input.projectId, input.title, input.priority ?? "normal", input.notes ?? null, input.dueAt ?? null, this.nextSortOrder(input.projectId), now, now);
+      .run(input.initiativeId, input.title, input.priority ?? "normal", input.notes ?? null, input.dueAt ?? null, this.nextSortOrder(input.initiativeId), now, now);
 
     return this.findById(Number(result.lastInsertRowid))!;
   }
@@ -123,10 +123,10 @@ export class TaskRepository {
 
     this.db
       .prepare(
-        "update tasks set project_id = ?, title = ?, status = ?, priority = ?, notes = ?, due_at = ?, updated_at = ?, completed_at = ? where id = ?"
+        "update tasks set initiative_id = ?, title = ?, status = ?, priority = ?, notes = ?, due_at = ?, updated_at = ?, completed_at = ? where id = ?"
       )
       .run(
-        input.projectId ?? existing.projectId,
+        input.initiativeId ?? existing.initiativeId,
         input.title ?? existing.title,
         status,
         input.priority ?? existing.priority,
@@ -148,26 +148,26 @@ export class TaskRepository {
     this.db.prepare("delete from tasks where id = ?").run(id);
   }
 
-  reorderWithinProject(projectId: number, taskIds: number[], now = nowIso()): Task[] {
+  reorderWithinInitiative(initiativeId: number, taskIds: number[], now = nowIso()): Task[] {
     const uniqueIds = [...new Set(taskIds)];
-    const existing = this.list({ projectId });
+    const existing = this.list({ initiativeId });
     const existingIds = new Set(existing.map((task) => task.id));
     if (uniqueIds.some((id) => !existingIds.has(id))) {
-      throw new Error("Task reorder can only include tasks from the same project");
+      throw new Error("Task reorder can only include tasks from the same initiative");
     }
 
-    const update = this.db.prepare("update tasks set sort_order = ?, updated_at = ? where id = ? and project_id = ?");
+    const update = this.db.prepare("update tasks set sort_order = ?, updated_at = ? where id = ? and initiative_id = ?");
     const transaction = this.db.transaction(() => {
-      uniqueIds.forEach((id, index) => update.run((index + 1) * 1000, now, id, projectId));
+      uniqueIds.forEach((id, index) => update.run((index + 1) * 1000, now, id, initiativeId));
     });
     transaction();
-    return this.list({ projectId });
+    return this.list({ initiativeId });
   }
 
-  private nextSortOrder(projectId: number): number {
+  private nextSortOrder(initiativeId: number): number {
     const row = this.db
-      .prepare("select coalesce(max(sort_order), 0) + 1000 as next from tasks where project_id = ?")
-      .get(projectId) as { next: number };
+      .prepare("select coalesce(max(sort_order), 0) + 1000 as next from tasks where initiative_id = ?")
+      .get(initiativeId) as { next: number };
     return row.next;
   }
 }

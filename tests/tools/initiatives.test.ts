@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 import { createToolRunner } from "../../src/mcp/tool-registry.js";
 import { CategoryRepository } from "../../src/repositories/categories.js";
 import { createTestDatabase } from "../helpers/test-db.js";
-import { projectTools } from "../../src/tools/projects.js";
+import { initiativeTools } from "../../src/tools/initiatives.js";
 
 describe("project tools", () => {
   let db: Database.Database;
@@ -21,7 +21,7 @@ describe("project tools", () => {
     const category = new CategoryRepository(db).create({ name: "Business" });
 
     const created = await runner.run(
-      "createProject",
+      "createInitiative",
       {
         categoryId: category.id,
         type: "project",
@@ -31,8 +31,8 @@ describe("project tools", () => {
       },
       { db }
     );
-    const projectList = await runner.run("listProjects", { type: "project" }, { db });
-    const habits = await runner.run("listProjects", { type: "habit" }, { db });
+    const initiativeList = await runner.run("listInitiatives", { type: "project" }, { db });
+    const habits = await runner.run("listInitiatives", { type: "habit" }, { db });
 
     expect(created).toMatchObject({
       ok: true,
@@ -43,7 +43,7 @@ describe("project tools", () => {
         endDate: "2026-06-30"
       })
     });
-    expect(projectList).toMatchObject({
+    expect(initiativeList).toMatchObject({
       ok: true,
       data: [expect.objectContaining({ type: "project", name: "New positioning angle", startDate: "2026-06-01", endDate: "2026-06-30" })]
     });
@@ -51,23 +51,23 @@ describe("project tools", () => {
   });
 
   it("exposes initiative type guidance in tool descriptions", () => {
-    const createProject = projectTools.find((tool) => tool.name === "createProject");
-    const updateProject = projectTools.find((tool) => tool.name === "updateProject");
+    const createInitiative = initiativeTools.find((tool) => tool.name === "createInitiative");
+    const updateInitiative = initiativeTools.find((tool) => tool.name === "updateInitiative");
 
-    expect(createProject?.description).toContain("idea");
-    expect(createProject?.description).toContain("habit");
-    expect(createProject?.description).toContain("start/end");
-    expect(createProject?.description).toContain("system Inbox category");
-    expect(updateProject?.description).toContain("startDate");
-    expect(updateProject?.description).toContain("lifecycle decision");
-    expect(updateProject?.description).toContain("requires Dietrich's confirmation");
+    expect(createInitiative?.description).toContain("idea");
+    expect(createInitiative?.description).toContain("habit");
+    expect(createInitiative?.description).toContain("start/end");
+    expect(createInitiative?.description).toContain("system Inbox category");
+    expect(updateInitiative?.description).toContain("startDate");
+    expect(updateInitiative?.description).toContain("lifecycle decision");
+    expect(updateInitiative?.description).toContain("requires Dietrich's confirmation");
   });
 
   it("does not allow the agent tool path to self-confirm project type changes", async () => {
     const runner = createToolRunner();
     const category = new CategoryRepository(db).create({ name: "Haus und Hof" });
     const created = await runner.run(
-      "createProject",
+      "createInitiative",
       {
         categoryId: category.id,
         type: "project",
@@ -75,19 +75,19 @@ describe("project tools", () => {
       },
       { db }
     );
-    const projectId = created.ok ? (created.data as { id: number }).id : 0;
+    const initiativeId = created.ok ? (created.data as { id: number }).id : 0;
 
-    const result = await runner.run("updateProject", { id: projectId, type: "habit", confirmed: true }, { db });
-    const projects = await runner.run("listProjects", {}, { db });
+    const result = await runner.run("updateInitiative", { id: initiativeId, type: "habit", confirmed: true }, { db });
+    const projects = await runner.run("listInitiatives", {}, { db });
 
     expect(result).toMatchObject({
       ok: false,
       requiresConfirmation: true,
-      confirmationKind: "updateProject"
+      confirmationKind: "updateInitiative"
     });
     expect(projects).toMatchObject({
       ok: true,
-      data: [expect.objectContaining({ id: projectId, type: "project" })]
+      data: [expect.objectContaining({ id: initiativeId, type: "project" })]
     });
   });
 });

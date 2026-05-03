@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { CategoryRepository } from "../../src/repositories/categories.js";
-import { ProjectRepository } from "../../src/repositories/projects.js";
+import { InitiativeRepository } from "../../src/repositories/initiatives.js";
 import { TaskRepository } from "../../src/repositories/tasks.js";
 import { createTestDatabase } from "../helpers/test-db.js";
 
@@ -16,13 +16,13 @@ describe("repositories", () => {
     db.close();
   });
 
-  it("creates categories, projects, and tasks", () => {
+  it("creates categories, initiatives, and tasks", () => {
     const categories = new CategoryRepository(db);
-    const projects = new ProjectRepository(db);
+    const initiatives = new InitiativeRepository(db);
     const tasks = new TaskRepository(db);
 
     const category = categories.create({ name: "Business" });
-    const project = projects.create({
+    const project = initiatives.create({
       categoryId: category.id,
       name: "d-max",
       markdown: "# Overview\n\nBuild d-max.\n",
@@ -30,52 +30,53 @@ describe("repositories", () => {
       endDate: "2026-06-15"
     });
     const task = tasks.create({
-      projectId: project.id,
+      initiativeId: project.id,
       title: "Implement repositories",
       priority: "high"
     });
 
     expect(categories.list()).toEqual(expect.arrayContaining([expect.objectContaining({ name: "Inbox", isSystem: true })]));
     expect(category.color).toMatch(/^#[0-9a-f]{6}$/);
-    expect(projects.list({ categoryId: category.id })).toHaveLength(1);
+    expect(category.emoji).toBe("💼");
+    expect(initiatives.list({ categoryId: category.id })).toHaveLength(1);
     expect(project.type).toBe("project");
     expect(project.startDate).toBe("2026-05-02");
     expect(project.endDate).toBe("2026-06-15");
     expect(task.priority).toBe("high");
-    expect(tasks.list({ projectId: project.id })).toHaveLength(1);
+    expect(tasks.list({ initiativeId: project.id })).toHaveLength(1);
   });
 
-  it("updates project date ranges", () => {
+  it("updates initiative date ranges", () => {
     const category = new CategoryRepository(db).create({ name: "Reisen" });
-    const projects = new ProjectRepository(db);
-    const project = projects.create({ categoryId: category.id, name: "Portugal Trip", startDate: "2026-07-01" });
+    const initiatives = new InitiativeRepository(db);
+    const project = initiatives.create({ categoryId: category.id, name: "Portugal Trip", startDate: "2026-07-01" });
 
-    const updated = projects.update({ id: project.id, endDate: "2026-07-21" });
+    const updated = initiatives.update({ id: project.id, endDate: "2026-07-21" });
 
     expect(updated.startDate).toBe("2026-07-01");
     expect(updated.endDate).toBe("2026-07-21");
   });
 
-  it("rejects project date ranges where start is after end", () => {
+  it("rejects initiative date ranges where start is after end", () => {
     const category = new CategoryRepository(db).create({ name: "Reisen" });
-    const projects = new ProjectRepository(db);
+    const initiatives = new InitiativeRepository(db);
 
     expect(() =>
-      projects.create({ categoryId: category.id, name: "Invalid Trip", startDate: "2026-08-10", endDate: "2026-08-01" })
+      initiatives.create({ categoryId: category.id, name: "Invalid Trip", startDate: "2026-08-10", endDate: "2026-08-01" })
     ).toThrow("startDate cannot be after endDate");
   });
 
   it("creates and filters initiative types", () => {
     const category = new CategoryRepository(db).create({ name: "Business" });
-    const projects = new ProjectRepository(db);
+    const initiatives = new InitiativeRepository(db);
 
-    const idea = projects.create({ categoryId: category.id, name: "New offer angle", type: "idea" });
-    const habit = projects.create({ categoryId: category.id, name: "Maintain customer relationships", type: "habit" });
+    const idea = initiatives.create({ categoryId: category.id, name: "New offer angle", type: "idea" });
+    const habit = initiatives.create({ categoryId: category.id, name: "Maintain customer relationships", type: "habit" });
 
     expect(idea.type).toBe("idea");
     expect(habit.type).toBe("habit");
-    expect(projects.list({ type: "idea" }).map((project) => project.id)).toContain(idea.id);
-    expect(projects.list({ type: "habit" }).map((project) => project.id)).toContain(habit.id);
+    expect(initiatives.list({ type: "idea" }).map((project) => project.id)).toContain(idea.id);
+    expect(initiatives.list({ type: "habit" }).map((project) => project.id)).toContain(habit.id);
   });
 
   it("keeps Inbox as a system category", () => {
@@ -84,6 +85,7 @@ describe("repositories", () => {
 
     expect(inbox).toMatchObject({ name: "Inbox", isSystem: true });
     expect(inbox?.color).toMatch(/^#[0-9a-f]{6}$/);
+    expect(inbox?.emoji).toBe("📥");
   });
 
   it("supports explicit category colors", () => {
@@ -112,9 +114,9 @@ describe("repositories", () => {
 
   it("marks tasks complete with completedAt", () => {
     const category = new CategoryRepository(db).create({ name: "Business" });
-    const project = new ProjectRepository(db).create({ categoryId: category.id, name: "d-max" });
+    const project = new InitiativeRepository(db).create({ categoryId: category.id, name: "d-max" });
     const tasks = new TaskRepository(db);
-    const task = tasks.create({ projectId: project.id, title: "Ship MVP" });
+    const task = tasks.create({ initiativeId: project.id, title: "Ship MVP" });
 
     const completed = tasks.complete(task.id, "2026-04-28T10:00:00.000Z");
 
@@ -122,28 +124,28 @@ describe("repositories", () => {
     expect(completed.completedAt).toBe("2026-04-28T10:00:00.000Z");
   });
 
-  it("persists manual ordering for categories, projects, and tasks", () => {
+  it("persists manual ordering for categories, initiatives, and tasks", () => {
     const categories = new CategoryRepository(db);
-    const projects = new ProjectRepository(db);
+    const initiatives = new InitiativeRepository(db);
     const tasks = new TaskRepository(db);
 
     const firstCategory = categories.create({ name: "Business" });
     const secondCategory = categories.create({ name: "Reisen" });
     categories.reorder([secondCategory.id, firstCategory.id]);
 
-    const firstProject = projects.create({ categoryId: secondCategory.id, name: "A" });
-    const secondProject = projects.create({ categoryId: secondCategory.id, name: "B" });
-    projects.reorderWithinCategory(secondCategory.id, [secondProject.id, firstProject.id]);
+    const firstProject = initiatives.create({ categoryId: secondCategory.id, name: "A" });
+    const secondProject = initiatives.create({ categoryId: secondCategory.id, name: "B" });
+    initiatives.reorderWithinCategory(secondCategory.id, [secondProject.id, firstProject.id]);
 
-    const firstTask = tasks.create({ projectId: secondProject.id, title: "First" });
-    const secondTask = tasks.create({ projectId: secondProject.id, title: "Second" });
-    tasks.reorderWithinProject(secondProject.id, [secondTask.id, firstTask.id]);
+    const firstTask = tasks.create({ initiativeId: secondProject.id, title: "First" });
+    const secondTask = tasks.create({ initiativeId: secondProject.id, title: "Second" });
+    tasks.reorderWithinInitiative(secondProject.id, [secondTask.id, firstTask.id]);
 
     expect(categories.list().filter((category) => category.name !== "Inbox").map((category) => category.id)).toEqual([
       secondCategory.id,
       firstCategory.id
     ]);
-    expect(projects.list({ categoryId: secondCategory.id }).map((project) => project.id)).toEqual([secondProject.id, firstProject.id]);
-    expect(tasks.list({ projectId: secondProject.id }).map((task) => task.id)).toEqual([secondTask.id, firstTask.id]);
+    expect(initiatives.list({ categoryId: secondCategory.id }).map((project) => project.id)).toEqual([secondProject.id, firstProject.id]);
+    expect(tasks.list({ initiativeId: secondProject.id }).map((task) => task.id)).toEqual([secondTask.id, firstTask.id]);
   });
 });

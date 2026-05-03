@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { AppChatService } from "../../src/chat/app-chat.js";
 import { CategoryRepository } from "../../src/repositories/categories.js";
-import { ProjectRepository } from "../../src/repositories/projects.js";
+import { InitiativeRepository } from "../../src/repositories/initiatives.js";
 import { TaskRepository } from "../../src/repositories/tasks.js";
 import { createTestDatabase } from "../helpers/test-db.js";
 
@@ -51,29 +51,29 @@ describe("AppChatService", () => {
 
   it("passes project context into the agent turn", async () => {
     const category = new CategoryRepository(db).create({ name: "Health" });
-    const project = new ProjectRepository(db).create({
+    const project = new InitiativeRepository(db).create({
       categoryId: category.id,
       name: "Health Rhythm",
       summary: "Build a stable health rhythm.",
       markdown: "# Overview\n\nSleep, training, and evening energy.\n"
     });
-    new TaskRepository(db).create({ projectId: project.id, title: "Plan next training week", priority: "high" });
+    new TaskRepository(db).create({ initiativeId: project.id, title: "Plan next training week", priority: "high" });
 
     const result = await service.handleMessage({
       message: "Fasse mir dieses Projekt zusammen.",
-      context: { type: "project", projectId: project.id }
+      context: { type: "initiative", initiativeId: project.id }
     });
 
-    expect(result.context).toEqual({ type: "project", projectId: project.id });
+    expect(result.context).toEqual({ type: "initiative", initiativeId: project.id });
     expect(result.conversationId).toBeTypeOf("number");
-    expect(agentMessages[0]).toContain("Type: project");
+    expect(agentMessages[0]).toContain("Type: initiative");
     expect(agentMessages[0]).toContain("Health Rhythm");
     expect(agentMessages[0]).toContain("Plan next training week");
   });
 
   it("logs the exact prompt sent to OpenClaw with readable sections", async () => {
     const category = new CategoryRepository(db).create({ name: "Health" });
-    const project = new ProjectRepository(db).create({
+    const project = new InitiativeRepository(db).create({
       categoryId: category.id,
       name: "Health Rhythm",
       markdown: "# Overview\n\nSleep, training, and evening energy.\n"
@@ -81,13 +81,13 @@ describe("AppChatService", () => {
 
     const result = await service.handleMessage({
       message: "Fasse mir dieses Projekt zusammen.",
-      context: { type: "project", projectId: project.id }
+      context: { type: "initiative", initiativeId: project.id }
     });
     const promptLog = service.listPromptLogs()[0];
 
     expect(promptLog).toMatchObject({
       conversationId: result.conversationId,
-      contextType: "project",
+      contextType: "initiative",
       contextEntityId: project.id,
       userInput: "Fasse mir dieses Projekt zusammen.",
       openClawSessionId: `explicit:dmax-web-chat-${result.conversationId}`
@@ -96,8 +96,8 @@ describe("AppChatService", () => {
     expect(promptLog.systemInstructions).toContain("Initiative type guidance");
     expect(promptLog.contextData).toContain("Health Rhythm");
     expect(promptLog.memoryHistory).toContain("No previous app chat messages");
-    expect(promptLog.tools).toContain("createProject");
-    expect(promptLog.tools).toContain("createProject with type = idea");
+    expect(promptLog.tools).toContain("createInitiative");
+    expect(promptLog.tools).toContain("createInitiative with type = idea");
     expect(promptLog.tools).toContain("system Inbox category");
     expect(promptLog.finalPrompt).toBe(agentMessages[0]);
     expect(promptLog.turnTrace?.events.map((event) => event.label)).toEqual(
@@ -115,20 +115,20 @@ describe("AppChatService", () => {
 
   it("starts a fresh contextual conversation unless a conversation id is provided", async () => {
     const category = new CategoryRepository(db).create({ name: "Health" });
-    const project = new ProjectRepository(db).create({ categoryId: category.id, name: "Health Rhythm" });
+    const project = new InitiativeRepository(db).create({ categoryId: category.id, name: "Health Rhythm" });
 
     const first = await service.handleMessage({
       message: "Erste Frage",
-      context: { type: "project", projectId: project.id }
+      context: { type: "initiative", initiativeId: project.id }
     });
     const second = await service.handleMessage({
       message: "Neue Frage",
-      context: { type: "project", projectId: project.id }
+      context: { type: "initiative", initiativeId: project.id }
     });
     const continued = await service.handleMessage({
       message: "Folgefrage",
       conversationId: first.conversationId,
-      context: { type: "project", projectId: project.id }
+      context: { type: "initiative", initiativeId: project.id }
     });
 
     expect(second.conversationId).not.toBe(first.conversationId);
@@ -137,12 +137,12 @@ describe("AppChatService", () => {
 
   it("creates and lists empty contextual chat sessions", () => {
     const category = new CategoryRepository(db).create({ name: "Health" });
-    const project = new ProjectRepository(db).create({ categoryId: category.id, name: "Health Rhythm" });
+    const project = new InitiativeRepository(db).create({ categoryId: category.id, name: "Health Rhythm" });
 
-    const first = service.createConversation({ type: "project", projectId: project.id });
-    const second = service.createConversation({ type: "project", projectId: project.id });
+    const first = service.createConversation({ type: "initiative", initiativeId: project.id });
+    const second = service.createConversation({ type: "initiative", initiativeId: project.id });
 
-    expect(service.listConversations({ type: "project", projectId: project.id }).map((conversation) => conversation.id)).toEqual([
+    expect(service.listConversations({ type: "initiative", initiativeId: project.id }).map((conversation) => conversation.id)).toEqual([
       second.id,
       first.id
     ]);
@@ -153,18 +153,18 @@ describe("AppChatService", () => {
 
   it("continues a pre-created empty contextual chat session", async () => {
     const category = new CategoryRepository(db).create({ name: "Health" });
-    const project = new ProjectRepository(db).create({ categoryId: category.id, name: "Health Rhythm" });
-    const conversation = service.createConversation({ type: "project", projectId: project.id });
+    const project = new InitiativeRepository(db).create({ categoryId: category.id, name: "Health Rhythm" });
+    const conversation = service.createConversation({ type: "initiative", initiativeId: project.id });
 
     const result = await service.handleMessage({
       message: "Weiter mit dieser Session.",
       conversationId: conversation.id,
-      context: { type: "project", projectId: project.id }
+      context: { type: "initiative", initiativeId: project.id }
     });
 
     expect(result.conversationId).toBe(conversation.id);
     expect(service.listMessages({ conversationId: conversation.id })).toHaveLength(2);
-    expect(service.listConversations({ type: "project", projectId: project.id })[0]).toMatchObject({
+    expect(service.listConversations({ type: "initiative", initiativeId: project.id })[0]).toMatchObject({
       id: conversation.id,
       title: "Weiter mit dieser Session"
     });

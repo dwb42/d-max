@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { nowIso } from "../db/time.js";
 
-export type ConversationContextType = "global" | "projects" | "category" | "project" | "task";
+export type ConversationContextType = "global" | "initiatives" | "category" | "initiative" | "task";
 
 export type AppConversation = {
   id: number;
@@ -95,7 +95,7 @@ export class AppConversationRepository {
 }
 
 function normalizedEntityId(contextType: ConversationContextType, entityId?: number | null): number | null {
-  if (contextType === "global" || contextType === "projects") {
+  if (contextType === "global" || contextType === "initiatives") {
     return null;
   }
 

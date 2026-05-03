@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defineTool } from "../core/tool-definitions.js";
 import type { ToolDefinition } from "../core/tool-definitions.js";
 import { CategoryRepository } from "../repositories/categories.js";
+import type { Category } from "../repositories/categories.js";
 
 const listCategoriesInput = z.object({}).passthrough();
 const createCategoryInput = z.object({
@@ -37,7 +38,7 @@ export const categoryTools: ToolDefinition<any>[] = [
 
       return {
         ok: true,
-        data: new CategoryRepository(context.db).list()
+        data: new CategoryRepository(context.db).list().map(categoryForTool)
       };
     }
   }),
@@ -52,7 +53,7 @@ export const categoryTools: ToolDefinition<any>[] = [
 
       return {
         ok: true,
-        data: new CategoryRepository(context.db).create(input)
+        data: categoryForTool(new CategoryRepository(context.db).create(input))
       };
     }
   }),
@@ -68,7 +69,7 @@ export const categoryTools: ToolDefinition<any>[] = [
       try {
         return {
           ok: true,
-          data: new CategoryRepository(context.db).update(input)
+          data: categoryForTool(new CategoryRepository(context.db).update(input))
         };
       } catch (error) {
         return {
@@ -79,3 +80,8 @@ export const categoryTools: ToolDefinition<any>[] = [
     }
   })
 ];
+
+function categoryForTool(category: Category): Omit<Category, "emoji"> {
+  const { emoji: _emoji, ...toolCategory } = category;
+  return toolCategory;
+}

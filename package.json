@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Agentic project and task memory system for Dietrich.",
+  "description": "Agentic initiative and task memory system for Dietrich.",
   "scripts": {
     "dev": "tsx src/main.ts",
     "dev:app": "npm run dev",

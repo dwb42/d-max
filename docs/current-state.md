@@ -8,7 +8,7 @@ code says otherwise.
 
 ## Snapshot
 
-d-max is Dietrich's agentic project, task, and project-memory system.
+d-max is Dietrich's agentic initiative, task, and initiative-memory system.
 
 Active interfaces:
 
@@ -16,7 +16,7 @@ Active interfaces:
 - Browser app for `/drive`, `/lebensbereiche`, `/lebensbereiche/:categoryName`,
   `/calendar/timeline`, `/ideas`, `/ideas/:categoryName`, `/projects`,
   `/projects/:categoryName`, `/habits`, `/habits/:categoryName`,
-  `/projects/:id`, `/tasks`, `/tasks/:id`, `/prompt-vorlagen`, and `/prompts`.
+  `/initiatives/:id`, `/tasks`, `/tasks/:id`, `/prompt-vorlagen`, and `/prompts`.
 - Browser/WebRTC realtime voice prototype using LiveKit and xAI realtime voice.
 
 SQLite is the source of truth. Durable state changes go through tools/API
@@ -27,21 +27,22 @@ services.
 SQLite tables:
 
 ```text
-categories, projects, tasks,
+categories, initiatives, tasks,
 app_chat_messages, app_conversations, app_prompt_logs, app_state_events
 ```
 
-`projects.markdown` is required project memory. `projects.type` segments the
-current technical Project object into `idea`, `project`, and `habit`; existing
-projects default to `project`. Initiatives with `type = project` may have
-nullable `start_date` and `end_date` fields for a bounded project time span;
+`initiatives.markdown` is required initiative memory. `initiatives.type` segments the
+current technical Initiative object into `idea`, `project`, and `habit`; existing
+initiatives default to `project`. Initiatives with `type = project` may have
+nullable `start_date` and `end_date` fields for a bounded initiative time span;
 ideas are loose thoughts without time binding, and habits are ongoing practices
 without a clear start/end. Categories are life areas; their `description` field
 is Markdown for scope, current situation/satisfaction, target state, and
 high-level measures. Categories also have an auto-assigned `color` used by the
-timeline UI. `Inbox` is a system category used as the fallback when category
-placement is unclear. There are no exploratory memory tables or session-summary
-tables.
+timeline UI and an auto-assigned `emoji` used by the life-area UI. The agent
+tools do not expose emoji editing. `Inbox` is a system category used as the
+fallback when category placement is unclear. There are no exploratory memory
+tables or session-summary tables.
 
 ## Runtime And Provider State
 
@@ -50,7 +51,7 @@ tables.
   `docs/session-handoff-openclaw-latency-2026-05-02.md`. Read it before
   continuing latency work; it captures the measured bottlenecks, recent
   OpenClaw agent changes, and next targets.
-- Tools cover categories, projects, and tasks. Project tools expose the
+- Tools cover categories, initiatives, and tasks. Initiative tools expose the
   `type` field for `idea`, `project`, and `habit`, plus `startDate`/`endDate`
   for time-bounded `type=project` initiatives.
 - Risky tool calls return `requiresConfirmation` unless the ToolRunner is
@@ -64,7 +65,7 @@ tables.
   starts the Drive voice agent too when LiveKit env vars are configured.
 - The web-chat OpenClaw config is intentionally narrow. It keeps the browser
   chat path on OpenClaw/Codex while disabling OpenClaw memory-core for this
-  runtime; d-max project memory remains the SQLite/markdown source of truth.
+  runtime; d-max initiative memory remains the SQLite/markdown source of truth.
 - During OpenClaw cold start, d-max treats a bound gateway port as an existing
   startup in progress and does not repeatedly restart the gateway.
 - The browser polls `/api/openclaw/status` every 15s. The status is shown in the
@@ -98,7 +99,7 @@ Implemented behavior:
   each state. There is intentionally no restart click yet; that would need a
   separate backend restart endpoint.
 - There is no standalone global chat page; d-max chat UI is the contextual
-  drawer used from overview/category/project/task contexts.
+  drawer used from overview/category/initiative/task contexts.
 - Chat voice message UX: record full message, show sound bar, then send.
 - App chat rejects concurrent turns in the same conversation before persisting
   a duplicate user message.
@@ -108,6 +109,7 @@ Implemented behavior:
   SSE and refetches visible state without a manual page reload.
 - `/lebensbereiche`: first main navigation item. Shows all categories as
   life areas and groups their initiatives by `idea`, `project`, and `habit`.
+  Category rows show the category emoji instead of the color dot.
   There is intentionally no category creation UI in this view; new life areas
   are created through DMAX/agent flows.
 - `/lebensbereiche/:categoryName`: life-area detail page with category name,
@@ -121,19 +123,19 @@ Implemented behavior:
   `start_date` and `end_date`, grouped by category color on a horizontal
   timeline. Defaults to previous month through six months ahead, with controls
   for 3/6/12/18 months ahead. Bars are clipped to the visible range and open the
-  project detail when clicked.
-- `/projects/:id`: type badge, editable basic fields (name, category, status,
-  summary, and start/end dates for `type=project`), markdown project memory
+  initiative detail when clicked.
+- `/initiatives/:id`: type badge, editable basic fields (name, category, status,
+  summary, and start/end dates for `type=project`), markdown initiative memory
   rendered as UI, Back to the current type page/category, linked tasks below
-  project memory.
+  initiative memory.
 - `/tasks/:id`: task detail with status, priority, due/completed/updated dates,
-  notes, Back to Tasks, Back to Project, and status actions.
+  notes, Back to Tasks, Back to Initiative, and status actions.
 - `/drive`: LiveKit room creation, browser mic publishing, audio meter,
   start/end controls.
 - `/prompts`: debug view for prompts sent to OpenClaw.
 - `/prompt-vorlagen`: read-only overview of the effective prompt templates for
   navigation/context levels such as global, life-area list/detail,
-  idea/project/habit list/detail, and task list/detail.
+  idea/initiative/habit list/detail, and task list/detail.
 
 ## API Server
 
@@ -146,11 +148,11 @@ GET  /api/categories
 POST /api/categories
 PATCH /api/categories/:id
 PATCH /api/categories/order
-GET  /api/projects
-POST /api/projects
-GET  /api/projects/:id
-PATCH /api/projects/:id
-PATCH /api/projects/order
+GET  /api/initiatives
+POST /api/initiatives
+GET  /api/initiatives/:id
+PATCH /api/initiatives/:id
+PATCH /api/initiatives/order
 GET  /api/tasks
 GET  /api/tasks/:id
 PATCH /api/tasks/:id
@@ -168,6 +170,10 @@ GET  /api/debug/prompt-templates
 GET  /api/state/events
 POST /api/voice/session
 ```
+
+Compatibility: `/api/projects`, `/api/projects/:id`, and
+`/api/projects/order` are still accepted as transitional HTTP aliases for old
+bookmarks/clients, but new code should use `/api/initiatives`.
 
 Boundary: explicit UI actions use API routes/repositories. Telegram and app
 chat natural-language turns use OpenClaw plus d-max tools. Browser Drive Mode
@@ -202,7 +208,7 @@ Hardening left:
 
 Known issue:
 
-- Drive Mode can speak/listen through xAI, but durable project/task commits from
+- Drive Mode can speak/listen through xAI, but durable initiative/task commits from
   realtime voice are not wired after the exploratory memory removal.
 
 ## Environment And Secrets

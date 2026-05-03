@@ -9,9 +9,9 @@ import type {
   LiveKitVoiceSession,
   OpenClawStatus,
   PersistedChatMessage,
-  Project,
-  ProjectDetail,
-  ProjectType,
+  Initiative,
+  InitiativeDetail,
+  InitiativeType,
   PromptTemplateDefinition,
   StateEvent,
   TaskDetail
@@ -61,66 +61,66 @@ export async function reorderCategories(categoryIds: number[]): Promise<Category
   return response.categories;
 }
 
-export async function reorderProjects(categoryId: number, projectIds: number[]): Promise<void> {
-  await request("/api/projects/order", {
+export async function reorderInitiatives(categoryId: number, initiativeIds: number[]): Promise<void> {
+  await request("/api/initiatives/order", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ categoryId, projectIds })
+    body: JSON.stringify({ categoryId, initiativeIds })
   });
 }
 
-export async function fetchProjects(): Promise<Project[]> {
-  const response = await request<{ projects: Project[] }>("/api/projects");
-  return response.projects;
+export async function fetchInitiatives(): Promise<Initiative[]> {
+  const response = await request<{ initiatives: Initiative[] }>("/api/initiatives");
+  return response.initiatives;
 }
 
-export async function createProject(input: {
+export async function createInitiative(input: {
   categoryId: number;
-  type: ProjectType;
+  type: InitiativeType;
   name: string;
   summary?: string | null;
   markdown?: string;
   startDate?: string | null;
   endDate?: string | null;
-}): Promise<Project> {
-  const response = await request<{ project: Project }>("/api/projects", {
+}): Promise<Initiative> {
+  const response = await request<{ initiative: Initiative }>("/api/initiatives", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input)
   });
-  return response.project;
+  return response.initiative;
 }
 
-export async function updateProject(
-  projectId: number,
+export async function updateInitiative(
+  initiativeId: number,
   input: {
     categoryId?: number;
     parentId?: number | null;
     name?: string;
-    status?: Project["status"];
+    status?: Initiative["status"];
     summary?: string | null;
     startDate?: string | null;
     endDate?: string | null;
   }
-): Promise<Project> {
-  const response = await request<{ project: Project }>(`/api/projects/${projectId}`, {
+): Promise<Initiative> {
+  const response = await request<{ initiative: Initiative }>(`/api/initiatives/${initiativeId}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input)
   });
-  return response.project;
+  return response.initiative;
 }
 
-export async function reorderTasks(projectId: number, taskIds: number[]): Promise<void> {
+export async function reorderTasks(initiativeId: number, taskIds: number[]): Promise<void> {
   await request("/api/tasks/order", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ projectId, taskIds })
+    body: JSON.stringify({ initiativeId, taskIds })
   });
 }
 
-export async function fetchProjectDetail(projectId: number): Promise<ProjectDetail> {
-  return request<ProjectDetail>(`/api/projects/${projectId}`);
+export async function fetchInitiativeDetail(initiativeId: number): Promise<InitiativeDetail> {
+  return request<InitiativeDetail>(`/api/initiatives/${initiativeId}`);
 }
 
 export async function fetchTaskDetail(taskId: number): Promise<TaskDetail> {
@@ -353,8 +353,8 @@ function conversationContextSearchParams(context: ConversationContext): URLSearc
   const params = new URLSearchParams({ contextType: context.type });
   if (context.type === "category") {
     params.set("contextEntityId", String(context.categoryId));
-  } else if (context.type === "project") {
-    params.set("contextEntityId", String(context.projectId));
+  } else if (context.type === "initiative") {
+    params.set("contextEntityId", String(context.initiativeId));
   } else if (context.type === "task") {
     params.set("contextEntityId", String(context.taskId));
   }

@@ -4,10 +4,10 @@ import type { CreateStateEventInput } from "../repositories/state-events.js";
 const STATE_MUTATING_TOOLS = new Set<ToolName>([
   "createCategory",
   "updateCategory",
-  "createProject",
-  "updateProject",
-  "archiveProject",
-  "updateProjectMarkdown",
+  "createInitiative",
+  "updateInitiative",
+  "archiveInitiative",
+  "updateInitiativeMarkdown",
   "createTask",
   "updateTask",
   "completeTask",
@@ -35,13 +35,13 @@ export function stateEventFromToolResult(name: ToolName, input: unknown, result:
     return { ...base, entityType: "category", entityId: categoryId, categoryId };
   }
 
-  if (name === "createProject" || name === "updateProject" || name === "archiveProject" || name === "updateProjectMarkdown") {
-    const projectId = numberValue(dataRecord?.id) ?? numberValue(inputRecord?.id);
+  if (name === "createInitiative" || name === "updateInitiative" || name === "archiveInitiative" || name === "updateInitiativeMarkdown") {
+    const initiativeId = numberValue(dataRecord?.id) ?? numberValue(inputRecord?.id);
     return {
       ...base,
-      entityType: "project",
-      entityId: projectId,
-      projectId,
+      entityType: "initiative",
+      entityId: initiativeId,
+      initiativeId,
       categoryId: numberValue(dataRecord?.categoryId) ?? numberValue(inputRecord?.categoryId)
     };
   }
@@ -53,7 +53,7 @@ export function stateEventFromToolResult(name: ToolName, input: unknown, result:
       entityType: "task",
       entityId: taskId,
       taskId,
-      projectId: numberValue(dataRecord?.projectId) ?? numberValue(inputRecord?.projectId)
+      initiativeId: numberValue(dataRecord?.initiativeId) ?? numberValue(inputRecord?.initiativeId)
     };
   }
 

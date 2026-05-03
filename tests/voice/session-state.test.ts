@@ -5,7 +5,7 @@ import type { PendingVoiceAction } from "../../src/voice/types.js";
 const unsafeTaskAction: PendingVoiceAction = {
   id: "action-1",
   tool: "createTask",
-  input: { projectId: 1, title: "Grok SIP Spike bauen" },
+  input: { initiativeId: 1, title: "Grok SIP Spike bauen" },
   summary: "Create task: Grok SIP Spike bauen",
   requiresConfirmation: true,
   unsafeAfterInterruption: true,

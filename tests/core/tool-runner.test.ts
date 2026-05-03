@@ -77,7 +77,7 @@ describe("ToolRunner", () => {
     const runner = new ToolRunner();
 
     runner.register({
-      name: "updateProject",
+      name: "updateInitiative",
       description: "Update a project",
       inputSchema: z.object({
         id: z.number().int().positive(),
@@ -90,12 +90,12 @@ describe("ToolRunner", () => {
       })
     });
 
-    const result = await runner.run("updateProject", { id: 1, type: "project" });
+    const result = await runner.run("updateInitiative", { id: 1, type: "project" });
 
     expect(result).toMatchObject({
       ok: false,
       requiresConfirmation: true,
-      confirmationKind: "updateProject"
+      confirmationKind: "updateInitiative"
     });
   });
 
@@ -103,7 +103,7 @@ describe("ToolRunner", () => {
     const runner = new ToolRunner();
 
     runner.register({
-      name: "updateProject",
+      name: "updateInitiative",
       description: "Update a project",
       inputSchema: z.object({
         id: z.number().int().positive(),
@@ -116,12 +116,12 @@ describe("ToolRunner", () => {
       })
     });
 
-    const result = await runner.run("updateProject", { id: 1, type: "habit", confirmed: true });
+    const result = await runner.run("updateInitiative", { id: 1, type: "habit", confirmed: true });
 
     expect(result).toMatchObject({
       ok: false,
       requiresConfirmation: true,
-      confirmationKind: "updateProject",
+      confirmationKind: "updateInitiative",
       proposedAction: {
         input: { id: 1, type: "habit" }
       }
@@ -132,7 +132,7 @@ describe("ToolRunner", () => {
     const runner = new ToolRunner();
 
     runner.register({
-      name: "updateProject",
+      name: "updateInitiative",
       description: "Update a project",
       inputSchema: z.object({
         id: z.number().int().positive(),
@@ -146,7 +146,7 @@ describe("ToolRunner", () => {
     });
 
     const result = await runner.run(
-      "updateProject",
+      "updateInitiative",
       { id: 1, type: "habit", confirmed: true },
       { allowConfirmedActions: true }
     );
@@ -162,7 +162,7 @@ describe("ToolRunner", () => {
     const runner = new ToolRunner();
 
     runner.register({
-      name: "updateProjectMarkdown",
+      name: "updateInitiativeMarkdown",
       description: "Update project markdown",
       inputSchema: z.object({
         id: z.number().int().positive(),
@@ -175,15 +175,15 @@ describe("ToolRunner", () => {
       })
     });
 
-    await runner.run("updateProjectMarkdown", { id: 5, markdown: "# New", confirmed: true }, { db, allowConfirmedActions: true });
+    await runner.run("updateInitiativeMarkdown", { id: 5, markdown: "# New", confirmed: true }, { db, allowConfirmedActions: true });
 
     expect(new StateEventRepository(db).listAfter(0)).toMatchObject([
       {
         source: "tool",
-        operation: "updateProjectMarkdown",
-        entityType: "project",
+        operation: "updateInitiativeMarkdown",
+        entityType: "initiative",
         entityId: 5,
-        projectId: 5,
+        initiativeId: 5,
         categoryId: 2
       }
     ]);

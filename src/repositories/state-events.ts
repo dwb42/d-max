@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { nowIso } from "../db/time.js";
 
 export type StateEventSource = "api" | "tool";
-export type StateEventEntityType = "overview" | "category" | "project" | "task";
+export type StateEventEntityType = "overview" | "category" | "initiative" | "task";
 
 export type StateEvent = {
   id: number;
@@ -11,7 +11,7 @@ export type StateEvent = {
   entityType: StateEventEntityType;
   entityId: number | null;
   categoryId: number | null;
-  projectId: number | null;
+  initiativeId: number | null;
   taskId: number | null;
   createdAt: string;
 };
@@ -23,7 +23,7 @@ type StateEventRow = {
   entity_type: StateEventEntityType;
   entity_id: number | null;
   category_id: number | null;
-  project_id: number | null;
+  initiative_id: number | null;
   task_id: number | null;
   created_at: string;
 };
@@ -34,7 +34,7 @@ export type CreateStateEventInput = {
   entityType?: StateEventEntityType;
   entityId?: number | null;
   categoryId?: number | null;
-  projectId?: number | null;
+  initiativeId?: number | null;
   taskId?: number | null;
 };
 
@@ -46,7 +46,7 @@ function toStateEvent(row: StateEventRow): StateEvent {
     entityType: row.entity_type,
     entityId: row.entity_id,
     categoryId: row.category_id,
-    projectId: row.project_id,
+    initiativeId: row.initiative_id,
     taskId: row.task_id,
     createdAt: row.created_at
   };
@@ -59,7 +59,7 @@ export class StateEventRepository {
     const result = this.db
       .prepare(
         `insert into app_state_events
-          (source, operation, entity_type, entity_id, category_id, project_id, task_id, created_at)
+          (source, operation, entity_type, entity_id, category_id, initiative_id, task_id, created_at)
          values (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
@@ -68,7 +68,7 @@ export class StateEventRepository {
         input.entityType ?? "overview",
         input.entityId ?? null,
         input.categoryId ?? null,
-        input.projectId ?? null,
+        input.initiativeId ?? null,
         input.taskId ?? null,
         now
       );

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { listPromptTemplates, resolveConversationContext } from "../../src/chat/conversation-context.js";
 import { CategoryRepository } from "../../src/repositories/categories.js";
-import { ProjectRepository } from "../../src/repositories/projects.js";
+import { InitiativeRepository } from "../../src/repositories/initiatives.js";
 import { TaskRepository } from "../../src/repositories/tasks.js";
 import { createTestDatabase } from "../helpers/test-db.js";
 
@@ -19,13 +19,13 @@ describe("resolveConversationContext", () => {
 
   it("builds a category context block", () => {
     const category = new CategoryRepository(db).create({ name: "Business" });
-    const project = new ProjectRepository(db).create({
+    const project = new InitiativeRepository(db).create({
       categoryId: category.id,
       name: "d-max",
       startDate: "2026-05-02",
       endDate: "2026-06-15"
     });
-    new TaskRepository(db).create({ projectId: project.id, title: "Add contextual chat", priority: "urgent" });
+    new TaskRepository(db).create({ initiativeId: project.id, title: "Add contextual chat", priority: "urgent" });
 
     const resolved = resolveConversationContext(db, { type: "category", categoryId: category.id });
 
@@ -40,13 +40,13 @@ describe("resolveConversationContext", () => {
 
   it("builds a task context with project memory", () => {
     const category = new CategoryRepository(db).create({ name: "Health" });
-    const project = new ProjectRepository(db).create({
+    const project = new InitiativeRepository(db).create({
       categoryId: category.id,
       name: "Health Rhythm",
       startDate: "2026-05-05",
       markdown: "# Overview\n\nEnergy and training rhythm.\n"
     });
-    const task = new TaskRepository(db).create({ projectId: project.id, title: "Choose weekly training slots" });
+    const task = new TaskRepository(db).create({ initiativeId: project.id, title: "Choose weekly training slots" });
 
     const resolved = resolveConversationContext(db, { type: "task", taskId: task.id });
 

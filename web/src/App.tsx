@@ -4,6 +4,8 @@ import {
   Blocks,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Circle,
   ClipboardList,
   Copy,
@@ -28,27 +30,27 @@ import {
   completeTask,
   createCategory,
   createChatConversation,
-  createProject,
+  createInitiative,
   createVoiceSession,
   fetchChatActivity,
   fetchChatConversations,
   fetchChatMessages,
   fetchOpenClawStatus,
   fetchOverview,
-  fetchProjects,
+  fetchInitiatives,
   fetchPromptLogs,
   fetchPromptTemplates,
-  fetchProjectDetail,
+  fetchInitiativeDetail,
   fetchTaskDetail,
   prewarmOpenClaw,
   reorderCategories,
-  reorderProjects,
+  reorderInitiatives,
   reorderTasks,
   subscribeStateEvents,
   streamChatMessage,
   transcribeVoiceMessage,
   updateCategory,
-  updateProject,
+  updateInitiative,
   updateTaskStatus
 } from "./api.js";
 import type {
@@ -59,9 +61,9 @@ import type {
   AppPromptLog,
   PersistedChatMessage,
   OpenClawStatus,
-  Project,
-  ProjectDetail,
-  ProjectType,
+  Initiative,
+  InitiativeDetail,
+  InitiativeType,
   PromptTemplateDefinition,
   StateEvent,
   Task,
@@ -70,10 +72,10 @@ import type {
 import "./styles.css";
 
 type CollectionView = "ideas" | "projects" | "habits";
-type View = "drive" | "lifeAreas" | "lifeArea" | "timeline" | CollectionView | "project" | "tasks" | "task" | "promptTemplates" | "prompts";
+type View = "drive" | "lifeAreas" | "lifeArea" | "timeline" | CollectionView | "initiative" | "tasks" | "task" | "promptTemplates" | "prompts";
 type RouteState = {
   view: View;
-  projectId: number | null;
+  initiativeId: number | null;
   taskId: number | null;
   categoryName: string | null;
 };
@@ -99,8 +101,17 @@ type AudioMeterHandle = {
   analyser: AnalyserNode;
   raf: number;
 };
+type CreateInitiativeInput = {
+  categoryId: number;
+  type: InitiativeType;
+  name: string;
+  summary?: string | null;
+  markdown?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+};
 
-type NavItem = { id: Exclude<View, "project" | "task">; label: string; icon: typeof Mic; path: string };
+type NavItem = { id: Exclude<View, "initiative" | "task">; label: string; icon: typeof Mic; path: string };
 
 const primaryNavItems: NavItem[] = [
   { id: "lifeAreas", label: "Lebensbereiche", icon: LayoutGrid, path: "/lebensbereiche" },
@@ -121,44 +132,44 @@ function routeFromPath(path: string): RouteState {
   const [pathname] = path.split("?");
   const lifeAreaMatch = pathname.match(/^\/lebensbereiche\/([^/]+)$/);
   if (lifeAreaMatch) {
-    return { view: "lifeArea", projectId: null, taskId: null, categoryName: decodeURIComponent(lifeAreaMatch[1] ?? "") };
+    return { view: "lifeArea", initiativeId: null, taskId: null, categoryName: decodeURIComponent(lifeAreaMatch[1] ?? "") };
   }
   const ideaCategoryMatch = pathname.match(/^\/ideas\/([^/]+)$/);
   if (ideaCategoryMatch) {
-    return { view: "ideas", projectId: null, taskId: null, categoryName: decodeURIComponent(ideaCategoryMatch[1] ?? "") };
+    return { view: "ideas", initiativeId: null, taskId: null, categoryName: decodeURIComponent(ideaCategoryMatch[1] ?? "") };
   }
-  const projectMatch = pathname.match(/^\/projects\/(\d+)$/);
-  if (projectMatch) {
-    return { view: "project", projectId: Number(projectMatch[1]), taskId: null, categoryName: null };
+  const initiativeMatch = pathname.match(/^\/initiatives\/(\d+)$/) ?? pathname.match(/^\/projects\/(\d+)$/);
+  if (initiativeMatch) {
+    return { view: "initiative", initiativeId: Number(initiativeMatch[1]), taskId: null, categoryName: null };
   }
   const categoryMatch = pathname.match(/^\/projects\/([^/]+)$/);
   if (categoryMatch) {
-    return { view: "projects", projectId: null, taskId: null, categoryName: decodeURIComponent(categoryMatch[1] ?? "") };
+    return { view: "projects", initiativeId: null, taskId: null, categoryName: decodeURIComponent(categoryMatch[1] ?? "") };
   }
   const habitCategoryMatch = pathname.match(/^\/habits\/([^/]+)$/);
   if (habitCategoryMatch) {
-    return { view: "habits", projectId: null, taskId: null, categoryName: decodeURIComponent(habitCategoryMatch[1] ?? "") };
+    return { view: "habits", initiativeId: null, taskId: null, categoryName: decodeURIComponent(habitCategoryMatch[1] ?? "") };
   }
   const taskMatch = pathname.match(/^\/tasks\/(\d+)$/);
   if (taskMatch) {
-    return { view: "task", projectId: null, taskId: Number(taskMatch[1]), categoryName: null };
+    return { view: "task", initiativeId: null, taskId: Number(taskMatch[1]), categoryName: null };
   }
 
-  if (pathname === "/drive") return { view: "drive", projectId: null, taskId: null, categoryName: null };
-  if (pathname === "/lebensbereiche") return { view: "lifeAreas", projectId: null, taskId: null, categoryName: null };
-  if (pathname === "/calendar/timeline") return { view: "timeline", projectId: null, taskId: null, categoryName: null };
-  if (pathname === "/chat" || pathname === "/") return { view: "lifeAreas", projectId: null, taskId: null, categoryName: null };
-  if (pathname === "/ideas") return { view: "ideas", projectId: null, taskId: null, categoryName: null };
-  if (pathname === "/projects") return { view: "projects", projectId: null, taskId: null, categoryName: null };
-  if (pathname === "/habits") return { view: "habits", projectId: null, taskId: null, categoryName: null };
-  if (pathname === "/tasks") return { view: "tasks", projectId: null, taskId: null, categoryName: null };
-  if (pathname === "/prompt-vorlagen") return { view: "promptTemplates", projectId: null, taskId: null, categoryName: null };
-  if (pathname === "/prompts") return { view: "prompts", projectId: null, taskId: null, categoryName: null };
-  return { view: "lifeAreas", projectId: null, taskId: null, categoryName: null };
+  if (pathname === "/drive") return { view: "drive", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/lebensbereiche") return { view: "lifeAreas", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/calendar/timeline") return { view: "timeline", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/chat" || pathname === "/") return { view: "lifeAreas", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/ideas") return { view: "ideas", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/projects") return { view: "projects", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/habits") return { view: "habits", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/tasks") return { view: "tasks", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/prompt-vorlagen") return { view: "promptTemplates", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/prompts") return { view: "prompts", initiativeId: null, taskId: null, categoryName: null };
+  return { view: "lifeAreas", initiativeId: null, taskId: null, categoryName: null };
 }
 
-function pathForRoute(view: View, projectId?: number | null): string {
-  if (view === "project") return `/projects/${projectId}`;
+function pathForRoute(view: View, initiativeId?: number | null): string {
+  if (view === "initiative") return `/initiatives/${initiativeId}`;
   if (view === "task") return "/tasks";
   if (view === "lifeAreas") return "/lebensbereiche";
   if (view === "timeline") return "/calendar/timeline";
@@ -174,7 +185,7 @@ function pathForCollectionCategory(view: CollectionView, categoryName: string): 
   return `/${view}/${encodeURIComponent(categoryName)}`;
 }
 
-function collectionViewForProjectType(type: ProjectType): CollectionView {
+function collectionViewForInitiativeType(type: InitiativeType): CollectionView {
   if (type === "idea") return "ideas";
   if (type === "habit") return "habits";
   return "projects";
@@ -183,7 +194,7 @@ function collectionViewForProjectType(type: ProjectType): CollectionView {
 function getRouteConversationContext(
   route: RouteState,
   overview: AppOverview | null,
-  projectDetail: ProjectDetail | null,
+  initiativeDetail: InitiativeDetail | null,
   taskDetail: TaskDetail | null
 ): { context: ConversationContext; label: string } | null {
   if ((isCollectionView(route.view) || route.view === "lifeArea") && route.categoryName) {
@@ -192,17 +203,17 @@ function getRouteConversationContext(
   }
 
   if (isCollectionView(route.view)) {
-    return { context: { type: "projects" }, label: titleForView(route.view) };
+    return { context: { type: "initiatives" }, label: titleForView(route.view) };
   }
 
   if (route.view === "lifeAreas" || route.view === "timeline") {
-    return { context: { type: "projects" }, label: titleForView(route.view) };
+    return { context: { type: "initiatives" }, label: titleForView(route.view) };
   }
 
-  if (route.view === "project" && route.projectId) {
+  if (route.view === "initiative" && route.initiativeId) {
     return {
-      context: { type: "project", projectId: route.projectId },
-      label: projectDetail?.project.name ?? `Project ${route.projectId}`
+      context: { type: "initiative", initiativeId: route.initiativeId },
+      label: initiativeDetail?.initiative.name ?? `Initiative ${route.initiativeId}`
     };
   }
 
@@ -221,7 +232,7 @@ function conversationContextKey(context: ConversationContext | null): string {
     return "none";
   }
 
-  if (context.type === "global" || context.type === "projects") {
+  if (context.type === "global" || context.type === "initiatives") {
     return context.type;
   }
 
@@ -229,8 +240,8 @@ function conversationContextKey(context: ConversationContext | null): string {
     return `category:${context.categoryId}`;
   }
 
-  if (context.type === "project") {
-    return `project:${context.projectId}`;
+  if (context.type === "initiative") {
+    return `initiative:${context.initiativeId}`;
   }
 
   return `task:${context.taskId}`;
@@ -297,8 +308,8 @@ function preferredAudioMimeType(): string {
 export default function App() {
   const [route, setRoute] = useState<RouteState>(() => routeFromPath(`${window.location.pathname}${window.location.search}`));
   const [overview, setOverview] = useState<AppOverview | null>(null);
-  const [lifeAreaProjects, setLifeAreaProjects] = useState<Project[] | null>(null);
-  const [projectDetail, setProjectDetail] = useState<ProjectDetail | null>(null);
+  const [lifeAreaInitiatives, setLifeAreaInitiatives] = useState<Initiative[] | null>(null);
+  const [initiativeDetail, setInitiativeDetail] = useState<InitiativeDetail | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplateDefinition[]>([]);
   const [promptLogs, setPromptLogs] = useState<AppPromptLog[]>([]);
@@ -335,6 +346,7 @@ export default function App() {
     const parsed = stored ? Number(stored) : 560;
     return Number.isFinite(parsed) ? Math.min(Math.max(parsed, 420), 820) : 560;
   });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem("dmax.sidebarCollapsed") === "true");
   const chatAudioMeterRef = useRef<AudioMeterHandle | null>(null);
   const chatMediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chatVoiceChunksRef = useRef<BlobPart[]>([]);
@@ -345,8 +357,8 @@ export default function App() {
   const appShellRef = useRef<HTMLDivElement | null>(null);
   const view = route.view;
   const hasUserCategories = Boolean(overview?.categories.some((category) => !category.isSystem));
-  const isEmptyState = Boolean(overview && !hasUserCategories && overview.projects.length === 0 && overview.tasks.length === 0);
-  const routeConversationContext = useMemo(() => getRouteConversationContext(route, overview, projectDetail, taskDetail), [route, overview, projectDetail, taskDetail]);
+  const isEmptyState = Boolean(overview && !hasUserCategories && overview.initiatives.length === 0 && overview.tasks.length === 0);
+  const routeConversationContext = useMemo(() => getRouteConversationContext(route, overview, initiativeDetail, taskDetail), [route, overview, initiativeDetail, taskDetail]);
   const agentTarget = useMemo<{ context: ConversationContext; label: string }>(
     () => routeConversationContext ?? { context: { type: "global" }, label: "Global Chat" },
     [routeConversationContext]
@@ -411,6 +423,14 @@ export default function App() {
   function navigate(path: string) {
     window.history.pushState(null, "", path);
     setRoute(routeFromPath(path));
+  }
+
+  function toggleSidebar() {
+    setSidebarCollapsed((current) => {
+      const next = !current;
+      window.localStorage.setItem("dmax.sidebarCollapsed", String(next));
+      return next;
+    });
   }
 
   async function submitChatMessage(text: string, source: "text" | "voice" = "text") {
@@ -701,15 +721,15 @@ export default function App() {
     await refresh();
 
     if (route.view === "lifeAreas" || route.view === "lifeArea") {
-      await fetchProjects()
-        .then(setLifeAreaProjects)
+      await fetchInitiatives()
+        .then(setLifeAreaInitiatives)
         .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load initiatives."));
     }
 
-    if (route.view === "project" && route.projectId) {
-      await fetchProjectDetail(route.projectId)
-        .then(setProjectDetail)
-        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load project."));
+    if (route.view === "initiative" && route.initiativeId) {
+      await fetchInitiativeDetail(route.initiativeId)
+        .then(setInitiativeDetail)
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load initiative."));
     }
 
     if (route.view === "task" && route.taskId) {
@@ -788,24 +808,24 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (route.view !== "project" || !route.projectId) {
-      setProjectDetail(null);
+    if (route.view !== "initiative" || !route.initiativeId) {
+      setInitiativeDetail(null);
       return;
     }
 
-    fetchProjectDetail(route.projectId)
-      .then(setProjectDetail)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load project."));
+    fetchInitiativeDetail(route.initiativeId)
+      .then(setInitiativeDetail)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load initiative."));
   }, [route]);
 
   useEffect(() => {
     if (route.view !== "lifeAreas" && route.view !== "lifeArea") {
-      setLifeAreaProjects(null);
+      setLifeAreaInitiatives(null);
       return;
     }
 
-    fetchProjects()
-      .then(setLifeAreaProjects)
+    fetchInitiatives()
+      .then(setLifeAreaInitiatives)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load initiatives."));
   }, [route]);
 
@@ -864,53 +884,170 @@ export default function App() {
     void loadPromptTemplates();
   }, [view]);
 
+  function renderContentHeader() {
+    if (view === "lifeArea") {
+      const category = overview?.categories.find((candidate) => candidate.name.toLowerCase() === route.categoryName?.toLowerCase()) ?? null;
+      const initiatives = category ? (lifeAreaInitiatives ?? overview?.initiatives ?? []).filter((initiative) => initiative.categoryId === category.id) : [];
+      return (
+        <div className="content-header-title">
+          <div className="back-actions">
+            <div className="back-action-group">
+              <button className="small-button back-button" onClick={() => navigate("/lebensbereiche")}>
+                Zurueck zu Lebensbereiche
+              </button>
+            </div>
+          </div>
+          <div className="section-heading">
+            <div className="initiative-title-line">
+              {category ? <span className="life-area-emoji large" aria-hidden="true">{category.emoji}</span> : null}
+              <h1>{category?.name ?? "Lebensbereich"}</h1>
+              {category?.isSystem ? <span className="system-badge">System</span> : null}
+            </div>
+            <p>
+              {category?.description
+                ? firstMarkdownLine(category.description)
+                : `${initiatives.length} ${propsCountLabel(initiatives.length, "Initiative", "Initiatives")}`}
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    if (view === "initiative") {
+      const initiative = initiativeDetail?.initiative ?? null;
+      const category = initiative ? overview?.categories.find((candidate) => candidate.id === initiative.categoryId) : null;
+      const backLabel = titleForView(collectionViewForInitiativeType(initiative?.type ?? "project"));
+      return (
+        <div className="content-header-title">
+          <div className="back-actions">
+            <div className="back-action-group">
+              <button className="small-button back-button" onClick={() => navigate(`/${collectionViewForInitiativeType(initiative?.type ?? "project")}`)}>
+                Zurueck zu {backLabel}
+              </button>
+              {category && initiative ? (
+                <button className="small-button back-button" onClick={() => navigate(pathForCollectionCategory(collectionViewForInitiativeType(initiative.type), category.name))}>
+                  Zurueck zu {category.name}
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <div className="section-heading">
+            <div className="initiative-title-line">
+              <h1>{initiative ? displayInitiativeName(initiative) : "Eintrag"}</h1>
+              {initiative ? <InitiativeTypeBadge type={initiative.type} /> : null}
+              {initiative?.isSystem ? <span className="system-badge">System</span> : null}
+            </div>
+            {initiative ? <p>{initiative.summary ?? firstMarkdownLine(initiative.markdown)}</p> : null}
+          </div>
+        </div>
+      );
+    }
+
+    if (view === "task") {
+      const task = taskDetail?.task ?? null;
+      const initiative = taskDetail?.initiative ?? null;
+      return (
+        <div className="content-header-title">
+          <div className="back-actions">
+            <div className="back-action-group">
+              <button className="small-button back-button" onClick={() => navigate("/tasks")}>
+                Zurueck zu Massnahmen
+              </button>
+              {initiative ? (
+                <button className="small-button back-button" onClick={() => navigate(`/initiatives/${initiative.id}`)}>
+                  Zurueck zum Eintrag
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <div className="section-heading task-detail-heading">
+            <div>
+              <h1>{task?.title ?? "Massnahme"}</h1>
+              {task ? <p>{initiative?.name ?? `Initiative ${task.initiativeId}`}</p> : null}
+            </div>
+            {task ? (
+              <button
+                className="small-button"
+                onClick={() => void completeTask(task.id).then(async () => {
+                  await refresh();
+                  setTaskDetail(await fetchTaskDetail(task.id));
+                })}
+              >
+                Erledigt
+              </button>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <header className="topbar">
+        <div>
+          {isCollectionView(view) && route.categoryName ? (
+            <button className="topbar-title-link" onClick={() => navigate(`/${view}`)}>
+              {titleForView(view)}
+            </button>
+          ) : (
+            <h1>{titleForView(view)}</h1>
+          )}
+          {subtitleForView(view) ? <p>{subtitleForView(view)}</p> : null}
+        </div>
+      </header>
+    );
+  }
+
   return (
     <div
-      className={`app-shell ${agentDrawer.open ? "with-agent-drawer" : ""}`}
+      className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${agentDrawer.open ? "with-agent-drawer" : ""}`}
       ref={appShellRef}
       style={{ "--agent-drawer-width": `${agentDrawerWidth}px` } as CSSProperties}
     >
       <aside className="sidebar">
-        <button className="brand brand-link" onClick={() => navigate("/projects")} title="Zur Startseite">
-          <div className="brand-mark">D</div>
-          <div>
-            <div className="brand-name">MAX</div>
+        <div className="sidebar-main">
+          <div className="sidebar-header">
+            <button className="brand brand-link" onClick={() => navigate("/projects")} title="Zur Startseite">
+              <div className="brand-mark">D</div>
+              <div className="brand-copy">
+                <div className="brand-name">MAX</div>
+              </div>
+            </button>
+            <button
+              type="button"
+              className="sidebar-toggle"
+              aria-label={sidebarCollapsed ? "Navigation ausklappen" : "Navigation einklappen"}
+              title={sidebarCollapsed ? "Navigation ausklappen" : "Navigation einklappen"}
+              aria-expanded={!sidebarCollapsed}
+              onClick={toggleSidebar}
+            >
+              {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+            </button>
           </div>
-        </button>
 
-        <nav className="nav primary-nav">
-          {primaryNavItems.map((item) => renderNavItem(item, view, projectDetail, navigate))}
-        </nav>
+          <nav className="nav primary-nav">
+            {primaryNavItems.map((item) => renderNavItem(item, view, initiativeDetail, navigate))}
+          </nav>
+        </div>
 
         <nav className="nav secondary-nav">
-          {secondaryNavItems.map((item) => renderNavItem(item, view, projectDetail, navigate))}
+          {secondaryNavItems.map((item) => renderNavItem(item, view, initiativeDetail, navigate))}
         </nav>
       </aside>
 
       <main className="main">
-        <DmaxAgentButton
-          status={openClawStatus}
-          active={agentDrawer.open && conversationContextKey(agentDrawer.context) === agentTargetKey}
-          onClick={() => toggleContextualAgent(agentTarget.context, agentTarget.label)}
-        />
-        {view !== "project" && view !== "task" && view !== "lifeArea" ? (
-          <header className="topbar">
-            <div>
-              {isCollectionView(view) && route.categoryName ? (
-                <button className="topbar-title-link" onClick={() => navigate(`/${view}`)}>
-                  {titleForView(view)}
-                </button>
-              ) : (
-                <h1>{titleForView(view)}</h1>
-              )}
-              {subtitleForView(view) ? <p>{subtitleForView(view)}</p> : null}
-            </div>
-          </header>
-        ) : null}
+        <div className="content-sticky-header">
+          <div className="content-header-main">{renderContentHeader()}</div>
+          <DmaxAgentButton
+            status={openClawStatus}
+            active={agentDrawer.open && conversationContextKey(agentDrawer.context) === agentTargetKey}
+            onClick={() => toggleContextualAgent(agentTarget.context, agentTarget.label)}
+          />
+        </div>
 
-        {error ? <div className="error-banner">{error}</div> : null}
+        <div className="content-scroll-area">
+          {error ? <div className="error-banner">{error}</div> : null}
 
-        {isEmptyState && view !== "lifeAreas" ? (
+          {isEmptyState && view !== "lifeAreas" ? (
           <OnboardingView
             onCreateCategory={async (name) => {
               await createCategory({ name });
@@ -918,9 +1055,9 @@ export default function App() {
             }}
             onNavigate={navigate}
           />
-        ) : null}
+          ) : null}
 
-        {!isEmptyState && view === "drive" && (
+          {!isEmptyState && view === "drive" && (
           <DriveView
             voiceState={voiceState}
             voiceError={voiceError}
@@ -977,102 +1114,124 @@ export default function App() {
             }}
             audioLevel={audioLevel}
           />
-        )}
-        {view === "lifeAreas" && (
+          )}
+          {view === "lifeAreas" && (
           <LifeAreasView
             categories={overview?.categories ?? []}
-            projects={lifeAreaProjects ?? overview?.projects ?? []}
+            initiatives={lifeAreaInitiatives ?? overview?.initiatives ?? []}
             onOpenLifeArea={(categoryName) => navigate(pathForLifeArea(categoryName))}
-            onOpenProject={(projectId) => navigate(`/projects/${projectId}`)}
-          />
-        )}
-        {view === "lifeArea" && (
-          <LifeAreaDetailView
-            category={overview?.categories.find((category) => category.name.toLowerCase() === route.categoryName?.toLowerCase()) ?? null}
-            projects={lifeAreaProjects ?? overview?.projects ?? []}
-            onBack={() => navigate("/lebensbereiche")}
-            onOpenProject={(projectId) => navigate(`/projects/${projectId}`)}
-            onUpdateCategory={async (categoryId, input) => {
-              await updateCategory(categoryId, input);
-              await refresh();
-            }}
-          />
-        )}
-        {!isEmptyState && view === "timeline" && (
-          <TimelineView
-            categories={overview?.categories ?? []}
-            projects={overview?.projects ?? []}
-            onOpenProject={(projectId) => navigate(`/projects/${projectId}`)}
-          />
-        )}
-        {!isEmptyState && isCollectionView(view) && (
-          <ProjectsView
-            categories={overview?.categories ?? []}
-            projects={overview?.projects ?? []}
-            tasks={overview?.tasks ?? []}
-            projectType={projectTypeForCollectionView(view)}
-            singularLabel={singularLabelForCollectionView(view)}
-            pluralLabel={titleForView(view)}
-            categoryFilterName={route.categoryName}
-            onOpenProject={(projectId) => navigate(`/projects/${projectId}`)}
-            onOpenCategory={(categoryName) => navigate(pathForCollectionCategory(view, categoryName))}
-            onReorderCategories={async (categoryIds) => {
-              await reorderCategories(categoryIds);
-              await refresh();
-            }}
-            onReorderProjects={async (categoryId, projectIds) => {
-              await reorderProjects(categoryId, projectIds);
-              await refresh();
-            }}
-            onCreateProject={async (input) => {
+            onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+            onCreateInitiative={async (input) => {
               try {
                 setError(null);
-                const project = await createProject(input);
+                await createInitiative(input);
                 await refresh();
-                navigate(`/projects/${project.id}`);
+                setLifeAreaInitiatives(await fetchInitiatives());
               } catch (err) {
                 setError(err instanceof Error ? err.message : "Eintrag konnte nicht angelegt werden.");
                 throw err;
               }
             }}
           />
-        )}
-        {!isEmptyState && view === "project" && (
-          <ProjectDetailView
-            detail={projectDetail}
+          )}
+          {view === "lifeArea" && (
+          <LifeAreaDetailView
+            category={overview?.categories.find((category) => category.name.toLowerCase() === route.categoryName?.toLowerCase()) ?? null}
+            initiatives={lifeAreaInitiatives ?? overview?.initiatives ?? []}
+            onBack={() => navigate("/lebensbereiche")}
+            onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+            onCreateInitiative={async (input) => {
+              try {
+                setError(null);
+                await createInitiative(input);
+                await refresh();
+                setLifeAreaInitiatives(await fetchInitiatives());
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Eintrag konnte nicht angelegt werden.");
+                throw err;
+              }
+            }}
+            onUpdateCategory={async (categoryId, input) => {
+              await updateCategory(categoryId, input);
+              await refresh();
+            }}
+          />
+          )}
+          {!isEmptyState && view === "timeline" && (
+          <TimelineView
             categories={overview?.categories ?? []}
-            onBack={() => navigate(`/${collectionViewForProjectType(projectDetail?.project.type ?? "project")}`)}
+            initiatives={overview?.initiatives ?? []}
+            onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+          />
+          )}
+          {!isEmptyState && isCollectionView(view) && (
+          <InitiativesView
+            categories={overview?.categories ?? []}
+            initiatives={overview?.initiatives ?? []}
+            tasks={overview?.tasks ?? []}
+            initiativeType={initiativeTypeForCollectionView(view)}
+            singularLabel={singularLabelForCollectionView(view)}
+            pluralLabel={titleForView(view)}
+            categoryFilterName={route.categoryName}
+            onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+            onOpenCategory={(categoryName) => navigate(pathForCollectionCategory(view, categoryName))}
+            onReorderCategories={async (categoryIds) => {
+              await reorderCategories(categoryIds);
+              await refresh();
+            }}
+            onReorderInitiatives={async (categoryId, initiativeIds) => {
+              await reorderInitiatives(categoryId, initiativeIds);
+              await refresh();
+            }}
+            onCreateInitiative={async (input) => {
+              try {
+                setError(null);
+                const initiative = await createInitiative(input);
+                await refresh();
+                navigate(`/initiatives/${initiative.id}`);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Eintrag konnte nicht angelegt werden.");
+                throw err;
+              }
+            }}
+          />
+          )}
+          {!isEmptyState && view === "initiative" && (
+          <InitiativeDetailView
+            detail={initiativeDetail}
+            categories={overview?.categories ?? []}
+            onBack={() => navigate(`/${collectionViewForInitiativeType(initiativeDetail?.initiative.type ?? "project")}`)}
             onBackToCategory={(categoryName) =>
-              navigate(pathForCollectionCategory(collectionViewForProjectType(projectDetail?.project.type ?? "project"), categoryName))
+              navigate(pathForCollectionCategory(collectionViewForInitiativeType(initiativeDetail?.initiative.type ?? "project"), categoryName))
             }
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
             onComplete={async (taskId) => {
               await completeTask(taskId);
               await refresh();
-              if (route.projectId) setProjectDetail(await fetchProjectDetail(route.projectId));
+              if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
             }}
             onStatus={async (taskId, status) => {
               await updateTaskStatus(taskId, status);
               await refresh();
-              if (route.projectId) setProjectDetail(await fetchProjectDetail(route.projectId));
+              if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
             }}
-            onReorderTasks={async (projectId, taskIds) => {
-              await reorderTasks(projectId, taskIds);
+            onReorderTasks={async (initiativeId, taskIds) => {
+              await reorderTasks(initiativeId, taskIds);
               await refresh();
-              if (route.projectId) setProjectDetail(await fetchProjectDetail(route.projectId));
+              if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
             }}
-            onUpdateProject={async (projectId, input) => {
-              await updateProject(projectId, input);
+            onUpdateInitiative={async (initiativeId, input) => {
+              await updateInitiative(initiativeId, input);
               await refresh();
-              setProjectDetail(await fetchProjectDetail(projectId));
+              setInitiativeDetail(await fetchInitiativeDetail(initiativeId));
             }}
           />
-        )}
-        {!isEmptyState && view === "task" && (
+          )}
+          {!isEmptyState && view === "task" && (
           <TaskDetailView
             detail={taskDetail}
             onBack={() => navigate("/tasks")}
-            onOpenProject={(projectId) => navigate(`/projects/${projectId}`)}
+            onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
             onComplete={async (taskId) => {
               await completeTask(taskId);
               await refresh();
@@ -1084,11 +1243,11 @@ export default function App() {
               setTaskDetail(await fetchTaskDetail(taskId));
             }}
           />
-        )}
-        {!isEmptyState && view === "tasks" && (
+          )}
+          {!isEmptyState && view === "tasks" && (
           <TasksView
             tasks={overview?.tasks ?? []}
-            projects={overview?.projects ?? []}
+            initiatives={overview?.initiatives ?? []}
             onComplete={async (taskId) => {
               await completeTask(taskId);
               await refresh();
@@ -1099,21 +1258,22 @@ export default function App() {
             }}
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
           />
-        )}
-        {view === "promptTemplates" && (
+          )}
+          {view === "promptTemplates" && (
           <PromptTemplatesView
             templates={promptTemplates}
             onRefresh={() => void loadPromptTemplates()}
           />
-        )}
-        {view === "prompts" && (
+          )}
+          {view === "prompts" && (
           <PromptInspectorView
             prompts={promptLogs}
             selectedPromptId={selectedPromptId}
             onSelectPrompt={setSelectedPromptId}
             onRefresh={() => void loadPrompts()}
           />
-        )}
+          )}
+        </div>
       </main>
       {agentDrawer.open ? (
         <ResizeHandle
@@ -1186,18 +1346,25 @@ function detachAllRemoteAudio(remoteAudioElementsRef: MutableRefObject<HTMLAudio
 function renderNavItem(
   item: NavItem,
   view: View,
-  projectDetail: ProjectDetail | null,
+  initiativeDetail: InitiativeDetail | null,
   navigate: (path: string) => void
 ) {
   const Icon = item.icon;
   const active =
     view === item.id
     || (view === "lifeArea" && item.id === "lifeAreas")
-    || (view === "project" && projectDetail?.project.type && collectionViewForProjectType(projectDetail.project.type) === item.id)
+    || (view === "initiative" && initiativeDetail?.initiative.type && collectionViewForInitiativeType(initiativeDetail.initiative.type) === item.id)
     || (view === "task" && item.id === "tasks");
 
   return (
-    <button key={item.id} className={`nav-item ${active ? "active" : ""}`} onClick={() => navigate(item.path)}>
+    <button
+      key={item.id}
+      type="button"
+      className={`nav-item ${active ? "active" : ""}`}
+      title={item.label}
+      aria-current={active ? "page" : undefined}
+      onClick={() => navigate(item.path)}
+    >
       <Icon size={18} />
       <span>{item.label}</span>
     </button>
@@ -1290,7 +1457,8 @@ function ChatView(props: {
 }) {
   const isVoiceActive = props.voicePhase !== "idle";
   const visibleMessages = props.messages.filter((message) => message.text.trim() || message.activities?.length || message.source);
-  const hasStreamingAssistantText = props.messages.some((message) => message.role === "assistant" && message.text.trim());
+  const latestMessage = props.messages.at(-1);
+  const hasCurrentAssistantText = Boolean(latestMessage?.role === "assistant" && latestMessage.text.trim());
   return (
     <section className="chat-layout">
       <div className="chat-thread" ref={props.threadRef}>
@@ -1301,14 +1469,14 @@ function ChatView(props: {
             {message.source ? <span>{message.source === "voice" ? "voice message" : "text"}</span> : null}
           </article>
         ))}
-        {props.busy && !hasStreamingAssistantText ? (
+        {props.busy && !hasCurrentAssistantText ? (
           <article className="chat-message assistant pending">
             <span className="loading-dots">
               <i />
               <i />
               <i />
             </span>
-            <p>d-max denkt...</p>
+            <p>DMAX denkt...</p>
             {props.activities.length ? <ActivityTrail activities={props.activities} /> : null}
           </article>
         ) : null}
@@ -1551,7 +1719,7 @@ function isCollectionView(view: View): view is CollectionView {
   return view === "ideas" || view === "projects" || view === "habits";
 }
 
-function projectTypeForCollectionView(view: CollectionView): ProjectType {
+function initiativeTypeForCollectionView(view: CollectionView): InitiativeType {
   if (view === "ideas") return "idea";
   if (view === "habits") return "habit";
   return "project";
@@ -1563,14 +1731,20 @@ function singularLabelForCollectionView(view: CollectionView): string {
   return "Projekt";
 }
 
-const projectTypeOptions: Array<{ value: ProjectType; label: string }> = [
+const initiativeTypeOptions: Array<{ value: InitiativeType; label: string }> = [
   { value: "idea", label: "Idee" },
   { value: "project", label: "Projekt" },
   { value: "habit", label: "Gewohnheit" }
 ];
 
-function projectTypeLabel(type: ProjectType): string {
-  return projectTypeOptions.find((option) => option.value === type)?.label ?? "Eintrag";
+function initiativeTypeLabel(type: InitiativeType): string {
+  return initiativeTypeOptions.find((option) => option.value === type)?.label ?? "Eintrag";
+}
+
+function pluralLabelForInitiativeType(type: InitiativeType): string {
+  if (type === "idea") return "Ideen";
+  if (type === "habit") return "Gewohnheiten";
+  return "Projekte";
 }
 
 function preferredCategoryId(categories: AppOverview["categories"], categoryFilterName: string | null): number {
@@ -1580,7 +1754,7 @@ function preferredCategoryId(categories: AppOverview["categories"], categoryFilt
   return categoryFromRoute?.id ?? categories.find((category) => category.name === "Inbox")?.id ?? categories[0]?.id ?? 0;
 }
 
-function defaultProjectMarkdown(type: ProjectType, name: string): string {
+function defaultInitiativeMarkdown(type: InitiativeType, name: string): string {
   if (type === "idea") {
     return `# Gedanke\n\n${name}\n\n# Offene Fragen\n\n- \n`;
   }
@@ -1592,11 +1766,11 @@ function defaultProjectMarkdown(type: ProjectType, name: string): string {
   return `# Ziel\n\n${name}\n\n# Kontext\n\nNoch offen.\n\n# Naechste Massnahmen\n\n- \n`;
 }
 
-function ProjectTypeBadge({ type }: { type: ProjectType }) {
-  return <span className={`type-badge ${type}`}>{projectTypeLabel(type)}</span>;
+function InitiativeTypeBadge({ type }: { type: InitiativeType }) {
+  return <span className={`type-badge ${type}`}>{initiativeTypeLabel(type)}</span>;
 }
 
-function displayProjectName(project: Pick<Project, "name" | "isSystem">): string {
+function displayInitiativeName(project: Pick<Initiative, "name" | "isSystem">): string {
   return project.isSystem && project.name === "Inbox" ? "Task Inbox" : project.name;
 }
 
@@ -1606,18 +1780,20 @@ function propsCountLabel(count: number, singularLabel: string, pluralLabel: stri
 
 function LifeAreasView(props: {
   categories: AppOverview["categories"];
-  projects: Project[];
+  initiatives: Initiative[];
   onOpenLifeArea: (categoryName: string) => void;
-  onOpenProject: (projectId: number) => void;
+  onOpenInitiative: (initiativeId: number) => void;
+  onCreateInitiative: (input: CreateInitiativeInput) => Promise<void>;
 }) {
   const groups = props.categories.map((category) => {
-    const initiatives = props.projects.filter((project) => project.categoryId === category.id);
+    const initiatives = props.initiatives.filter((project) => project.categoryId === category.id);
     return {
       category,
       initiatives,
-      byType: projectTypeOptions.map((option) => ({
+      byType: initiativeTypeOptions.map((option) => ({
         ...option,
-        projects: initiatives.filter((project) => project.type === option.value)
+        categoryId: category.id,
+        initiatives: initiatives.filter((initiative) => initiative.type === option.value)
       }))
     };
   });
@@ -1628,7 +1804,7 @@ function LifeAreasView(props: {
         <section className="life-area-section" key={group.category.id}>
           <div className="life-area-heading">
             <div>
-              <span className="life-area-color" style={{ background: group.category.color }} />
+              <span className="life-area-emoji" aria-hidden="true">{group.category.emoji}</span>
               <button className="life-area-title-link" onClick={() => props.onOpenLifeArea(group.category.name)}>
                 {group.category.name}
               </button>
@@ -1638,7 +1814,11 @@ function LifeAreasView(props: {
           </div>
           {group.category.description ? <p className="life-area-description">{firstMarkdownLine(group.category.description)}</p> : null}
 
-          <LifeAreaInitiativeGroups groups={group.byType} onOpenProject={props.onOpenProject} />
+          <LifeAreaInitiativeGroups
+            groups={group.byType}
+            onOpenInitiative={props.onOpenInitiative}
+            onCreateInitiative={props.onCreateInitiative}
+          />
         </section>
       ))}
       {groups.length === 0 ? <EmptyState title="Noch keine Lebensbereiche" /> : null}
@@ -1648,9 +1828,10 @@ function LifeAreasView(props: {
 
 function LifeAreaDetailView(props: {
   category: AppOverview["categories"][number] | null;
-  projects: Project[];
+  initiatives: Initiative[];
   onBack: () => void;
-  onOpenProject: (projectId: number) => void;
+  onOpenInitiative: (initiativeId: number) => void;
+  onCreateInitiative: (input: CreateInitiativeInput) => Promise<void>;
   onUpdateCategory: (categoryId: number, input: { name?: string; description?: string | null; color?: string | null }) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -1667,31 +1848,15 @@ function LifeAreaDetailView(props: {
   }
 
   const category = props.category;
-  const initiatives = props.projects.filter((project) => project.categoryId === category.id);
-  const groups = projectTypeOptions.map((option) => ({
+  const initiatives = props.initiatives.filter((project) => project.categoryId === category.id);
+  const groups = initiativeTypeOptions.map((option) => ({
     ...option,
-    projects: initiatives.filter((project) => project.type === option.value)
+    categoryId: category.id,
+    initiatives: initiatives.filter((initiative) => initiative.type === option.value)
   }));
 
   return (
-    <section className="project-detail life-area-detail">
-      <div className="back-actions">
-        <div className="back-action-group">
-          <button className="small-button back-button" onClick={props.onBack}>
-            Zurueck zu Lebensbereiche
-          </button>
-        </div>
-      </div>
-
-      <div className="section-heading">
-        <div className="project-title-line">
-          <span className="life-area-color large" style={{ background: category.color }} />
-          <h2>{category.name}</h2>
-          {category.isSystem ? <span className="system-badge">System</span> : null}
-        </div>
-        <p>{category.description ? firstMarkdownLine(category.description) : `${initiatives.length} ${propsCountLabel(initiatives.length, "Initiative", "Initiatives")}`}</p>
-      </div>
-
+    <section className="initiative-detail life-area-detail">
       <section className="panel life-area-description-panel">
         <div className="panel-heading-row">
           <h3>Beschreibung</h3>
@@ -1732,137 +1897,194 @@ function LifeAreaDetailView(props: {
         <div className="panel-heading-row">
           <h3>Initiatives</h3>
         </div>
-        <LifeAreaInitiativeGroups groups={groups} onOpenProject={props.onOpenProject} />
+        <LifeAreaInitiativeGroups
+          groups={groups}
+          onOpenInitiative={props.onOpenInitiative}
+          onCreateInitiative={props.onCreateInitiative}
+        />
       </section>
     </section>
   );
 }
 
 function LifeAreaInitiativeGroups(props: {
-  groups: Array<{ value: ProjectType; label: string; projects: Project[] }>;
-  onOpenProject: (projectId: number) => void;
+  groups: Array<{ value: InitiativeType; label: string; categoryId: number; initiatives: Initiative[] }>;
+  onOpenInitiative: (initiativeId: number) => void;
+  onCreateInitiative: (input: CreateInitiativeInput) => Promise<void>;
 }) {
+  const [openCreateKey, setOpenCreateKey] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const [creatingKey, setCreatingKey] = useState<string | null>(null);
+
   return (
     <div className="life-area-type-grid">
-      {props.groups.map((typeGroup) => (
-        <section className="life-area-type-section" key={typeGroup.value}>
+      {props.groups.map((typeGroup) => {
+        const createKey = `${typeGroup.categoryId}:${typeGroup.value}`;
+        const createOpen = openCreateKey === createKey;
+        const creating = creatingKey === createKey;
+        const pluralLabel = pluralLabelForInitiativeType(typeGroup.value);
+        return (
+        <section className="life-area-type-section" key={createKey}>
           <div className="life-area-type-heading">
-            <ProjectTypeBadge type={typeGroup.value} />
-            <span>{typeGroup.projects.length}</span>
+            <div className="life-area-type-title">
+              <span className={`type-heading-label ${typeGroup.value}`}>{pluralLabel}</span>
+              <button
+                type="button"
+                className="icon-button add-inline"
+                title={`${typeGroup.label} hinzufügen`}
+                aria-label={`${typeGroup.label} hinzufügen`}
+                onClick={() => {
+                  setOpenCreateKey((current) => current === createKey ? null : createKey);
+                  setDraftName("");
+                }}
+              >
+                <Plus size={17} />
+              </button>
+            </div>
+            <span>{typeGroup.initiatives.length}</span>
           </div>
-          {typeGroup.projects.length === 0 ? (
+          {createOpen ? (
+            <form
+              className="life-area-create-form"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                const name = draftName.trim();
+                if (!name || creating) {
+                  return;
+                }
+                setCreatingKey(createKey);
+                try {
+                  await props.onCreateInitiative({
+                    categoryId: typeGroup.categoryId,
+                    type: typeGroup.value,
+                    name,
+                    markdown: defaultInitiativeMarkdown(typeGroup.value, name)
+                  });
+                  setDraftName("");
+                  setOpenCreateKey(null);
+                } finally {
+                  setCreatingKey(null);
+                }
+              }}
+            >
+              <input
+                autoFocus
+                value={draftName}
+                onChange={(event) => setDraftName(event.target.value)}
+                placeholder="Name"
+                aria-label="Name"
+              />
+              <button type="submit" className="icon-button confirm" disabled={!draftName.trim() || creating} title="Anlegen" aria-label="Anlegen">
+                <Plus size={17} />
+              </button>
+            </form>
+          ) : null}
+          {typeGroup.initiatives.length === 0 ? (
             <div className="life-area-empty">Keine {typeGroup.label.toLowerCase()}.</div>
           ) : (
             <div className="life-area-initiative-list">
-              {typeGroup.projects.map((project) => (
-                <button className="life-area-initiative-row" key={project.id} onClick={() => props.onOpenProject(project.id)}>
-                  <span>{displayProjectName(project)}</span>
+              {typeGroup.initiatives.map((initiative) => (
+                <button className="life-area-initiative-row" key={initiative.id} onClick={() => props.onOpenInitiative(initiative.id)}>
+                  <span>{displayInitiativeName(initiative)}</span>
                   <small>
-                    {project.type === "project" && formatProjectDateRangeForUi(project) ? `${formatProjectDateRangeForUi(project)} · ` : ""}
-                    {project.status}
+                    {initiative.type === "project" && formatInitiativeDateRangeForUi(initiative) ? `${formatInitiativeDateRangeForUi(initiative)} · ` : ""}
+                    {initiative.status}
                   </small>
                 </button>
               ))}
             </div>
           )}
         </section>
-      ))}
+      );
+      })}
     </div>
   );
 }
 
-function ProjectsView({
+function InitiativesView({
   categories,
-  projects,
+  initiatives,
   tasks,
-  projectType,
+  initiativeType,
   singularLabel,
   pluralLabel,
   categoryFilterName,
-  onOpenProject,
+  onOpenInitiative,
   onOpenCategory,
   onReorderCategories,
-  onReorderProjects,
-  onCreateProject
+  onReorderInitiatives,
+  onCreateInitiative
 }: {
   categories: AppOverview["categories"];
-  projects: Project[];
+  initiatives: Initiative[];
   tasks: Task[];
-  projectType: ProjectType;
+  initiativeType: InitiativeType;
   singularLabel: string;
   pluralLabel: string;
   categoryFilterName: string | null;
-  onOpenProject: (projectId: number) => void;
+  onOpenInitiative: (initiativeId: number) => void;
   onOpenCategory: (categoryName: string) => void;
   onReorderCategories: (categoryIds: number[]) => Promise<void>;
-  onReorderProjects: (categoryId: number, projectIds: number[]) => Promise<void>;
-  onCreateProject: (input: {
-    categoryId: number;
-    type: ProjectType;
-    name: string;
-    summary?: string | null;
-    markdown?: string;
-    startDate?: string | null;
-    endDate?: string | null;
-  }) => Promise<void>;
+  onReorderInitiatives: (categoryId: number, initiativeIds: number[]) => Promise<void>;
+  onCreateInitiative: (input: CreateInitiativeInput) => Promise<void>;
 }) {
   const [draggedCategoryId, setDraggedCategoryId] = useState<number | null>(null);
   const [categoryDropId, setCategoryDropId] = useState<number | null>(null);
-  const [draggedProject, setDraggedProject] = useState<{ categoryId: number; projectId: number } | null>(null);
-  const [projectDropId, setProjectDropId] = useState<number | null>(null);
-  const [newProjectCategoryId, setNewProjectCategoryId] = useState<number>(() => preferredCategoryId(categories, categoryFilterName));
-  const [newProjectName, setNewProjectName] = useState("");
-  const [newProjectStartDate, setNewProjectStartDate] = useState("");
-  const [newProjectEndDate, setNewProjectEndDate] = useState("");
-  const [creatingProject, setCreatingProject] = useState(false);
+  const [draggedInitiative, setDraggedProject] = useState<{ categoryId: number; initiativeId: number } | null>(null);
+  const [initiativeDropId, setProjectDropId] = useState<number | null>(null);
+  const [newInitiativeCategoryId, setNewProjectCategoryId] = useState<number>(() => preferredCategoryId(categories, categoryFilterName));
+  const [newInitiativeName, setNewProjectName] = useState("");
+  const [newInitiativeStartDate, setNewProjectStartDate] = useState("");
+  const [newInitiativeEndDate, setNewProjectEndDate] = useState("");
+  const [creatingInitiative, setCreatingProject] = useState(false);
   const visibleCategories = categoryFilterName
     ? categories.filter((category) => category.name.toLowerCase() === categoryFilterName.toLowerCase())
     : categories;
-  const visibleProjects = projects.filter((project) => project.type === projectType);
-  const groupedProjects = visibleCategories
+  const visibleInitiatives = initiatives.filter((project) => project.type === initiativeType);
+  const groupedInitiatives = visibleCategories
     .map((category) => ({
       category,
-      projects: visibleProjects.filter((project) => project.categoryId === category.id)
+      initiatives: visibleInitiatives.filter((initiative) => initiative.categoryId === category.id)
     }))
-    .filter((group) => group.projects.length > 0);
-  const uncategorizedProjects = categoryFilterName ? [] : visibleProjects.filter((project) => !categories.some((category) => category.id === project.categoryId));
-  const groups = uncategorizedProjects.length > 0
-    ? [...groupedProjects, { category: { id: 0, name: "Uncategorized", description: null, isSystem: false }, projects: uncategorizedProjects }]
-    : groupedProjects;
+    .filter((group) => group.initiatives.length > 0);
+  const uncategorizedInitiatives = categoryFilterName ? [] : visibleInitiatives.filter((initiative) => !categories.some((category) => category.id === initiative.categoryId));
+  const groups = uncategorizedInitiatives.length > 0
+    ? [...groupedInitiatives, { category: { id: 0, name: "Uncategorized", description: null, isSystem: false }, initiatives: uncategorizedInitiatives }]
+    : groupedInitiatives;
   const reorderableCategoryIds = groups.map((group) => group.category.id).filter((id) => id > 0);
-  const canReorderVisibleProjects = true;
-  const selectedCategoryId = categories.some((category) => category.id === newProjectCategoryId)
-    ? newProjectCategoryId
+  const canReorderVisibleInitiatives = true;
+  const selectedCategoryId = categories.some((category) => category.id === newInitiativeCategoryId)
+    ? newInitiativeCategoryId
     : preferredCategoryId(categories, categoryFilterName);
-  const hasDateFields = projectType === "project";
-  const hasInvalidNewProjectDateRange = hasDateFields && projectDateRangeInvalid(newProjectStartDate, newProjectEndDate);
+  const hasDateFields = initiativeType === "project";
+  const hasInvalidNewProjectDateRange = hasDateFields && initiativeDateRangeInvalid(newInitiativeStartDate, newInitiativeEndDate);
 
   useEffect(() => {
     const preferred = preferredCategoryId(categories, categoryFilterName);
-    if (categoryFilterName || !categories.some((category) => category.id === newProjectCategoryId)) {
+    if (categoryFilterName || !categories.some((category) => category.id === newInitiativeCategoryId)) {
       setNewProjectCategoryId(preferred);
     }
-  }, [categories, categoryFilterName, newProjectCategoryId]);
+  }, [categories, categoryFilterName, newInitiativeCategoryId]);
 
   return (
-    <section className="project-grid">
+    <section className="initiative-grid">
       <form
         className={`entry-create ${hasDateFields ? "with-dates" : ""}`}
         onSubmit={async (event) => {
           event.preventDefault();
-          const name = newProjectName.trim();
-          if (!name || !selectedCategoryId || creatingProject || hasInvalidNewProjectDateRange) {
+          const name = newInitiativeName.trim();
+          if (!name || !selectedCategoryId || creatingInitiative || hasInvalidNewProjectDateRange) {
             return;
           }
           setCreatingProject(true);
           try {
-            await onCreateProject({
+            await onCreateInitiative({
               categoryId: selectedCategoryId,
-              type: projectType,
+              type: initiativeType,
               name,
-              markdown: defaultProjectMarkdown(projectType, name),
-              startDate: hasDateFields ? newProjectStartDate || null : undefined,
-              endDate: hasDateFields ? newProjectEndDate || null : undefined
+              markdown: defaultInitiativeMarkdown(initiativeType, name),
+              startDate: hasDateFields ? newInitiativeStartDate || null : undefined,
+              endDate: hasDateFields ? newInitiativeEndDate || null : undefined
             });
             setNewProjectName("");
             setNewProjectStartDate("");
@@ -1880,7 +2102,7 @@ function ProjectsView({
           ))}
         </select>
         <input
-          value={newProjectName}
+          value={newInitiativeName}
           onChange={(event) => setNewProjectName(event.target.value)}
           placeholder={`${singularLabel} benennen`}
         />
@@ -1890,7 +2112,7 @@ function ProjectsView({
               Start
               <input
                 type="date"
-                value={newProjectStartDate}
+                value={newInitiativeStartDate}
                 onChange={(event) => setNewProjectStartDate(event.target.value)}
                 aria-label="Startdatum"
               />
@@ -1899,8 +2121,8 @@ function ProjectsView({
               Ende
               <input
                 type="date"
-                value={newProjectEndDate}
-                min={newProjectStartDate || undefined}
+                value={newInitiativeEndDate}
+                min={newInitiativeStartDate || undefined}
                 onChange={(event) => setNewProjectEndDate(event.target.value)}
                 aria-label="Enddatum"
               />
@@ -1910,16 +2132,16 @@ function ProjectsView({
         <button
           className="primary-action compact"
           type="submit"
-          disabled={!newProjectName.trim() || !selectedCategoryId || creatingProject || hasInvalidNewProjectDateRange}
+          disabled={!newInitiativeName.trim() || !selectedCategoryId || creatingInitiative || hasInvalidNewProjectDateRange}
         >
           <Plus size={17} />
-          {creatingProject ? "Anlegen" : "Anlegen"}
+          {creatingInitiative ? "Anlegen" : "Anlegen"}
         </button>
       </form>
 
       {groups.map((group) => (
         <section
-          className={`project-category ${draggedCategoryId === group.category.id ? "dragging" : ""} ${categoryDropId === group.category.id ? "drag-over" : ""}`}
+          className={`initiative-category ${draggedCategoryId === group.category.id ? "dragging" : ""} ${categoryDropId === group.category.id ? "drag-over" : ""}`}
           key={group.category.id}
           onDragOver={(event) => {
             if (!draggedCategoryId || group.category.id === 0) return;
@@ -1935,7 +2157,7 @@ function ProjectsView({
             void onReorderCategories(nextIds);
           }}
         >
-          <div className="project-category-heading">
+          <div className="initiative-category-heading">
             <div>
               {group.category.id === 0 ? (
                 <h2>{group.category.name}</h2>
@@ -1945,7 +2167,7 @@ function ProjectsView({
                 </button>
               )}
             </div>
-            {group.category.id !== 0 && !categoryFilterName && canReorderVisibleProjects ? (
+            {group.category.id !== 0 && !categoryFilterName && canReorderVisibleInitiatives ? (
               <button
                 className="drag-handle"
                 draggable
@@ -1963,35 +2185,35 @@ function ProjectsView({
                 <GripVertical size={17} />
               </button>
             ) : null}
-            <span>{group.projects.length} {propsCountLabel(group.projects.length, singularLabel, pluralLabel)}</span>
+            <span>{group.initiatives.length} {propsCountLabel(group.initiatives.length, singularLabel, pluralLabel)}</span>
           </div>
-          <div className="project-category-list">
-            {group.projects.map((project) => {
-              const projectTasks = tasks.filter((task) => task.projectId === project.id);
+          <div className="initiative-category-list">
+            {group.initiatives.map((project) => {
+              const initiativeTasks = tasks.filter((task) => task.initiativeId === project.id);
               return (
                 <article
-                  className={`project-row clickable ${canReorderVisibleProjects ? "draggable-row" : ""} ${draggedProject?.projectId === project.id ? "dragging" : ""} ${projectDropId === project.id ? "drag-over" : ""}`}
+                  className={`initiative-row clickable ${canReorderVisibleInitiatives ? "draggable-row" : ""} ${draggedInitiative?.initiativeId === project.id ? "dragging" : ""} ${initiativeDropId === project.id ? "drag-over" : ""}`}
                   key={project.id}
-                  draggable={canReorderVisibleProjects}
-                  onClick={() => onOpenProject(project.id)}
+                  draggable={canReorderVisibleInitiatives}
+                  onClick={() => onOpenInitiative(project.id)}
                   onDragStart={(event) => {
-                    if (!canReorderVisibleProjects) return;
+                    if (!canReorderVisibleInitiatives) return;
                     event.dataTransfer.effectAllowed = "move";
-                    setDraggedProject({ categoryId: group.category.id, projectId: project.id });
+                    setDraggedProject({ categoryId: group.category.id, initiativeId: project.id });
                   }}
                   onDragOver={(event) => {
-                    if (!draggedProject || draggedProject.categoryId !== group.category.id) return;
+                    if (!draggedInitiative || draggedInitiative.categoryId !== group.category.id) return;
                     event.preventDefault();
                     setProjectDropId(project.id);
                   }}
                   onDrop={(event) => {
                     event.preventDefault();
-                    if (!draggedProject || draggedProject.categoryId !== group.category.id) return;
-                    const projectIds = group.projects.map((candidate) => candidate.id);
-                    const nextIds = moveIdToDropPosition(projectIds, draggedProject.projectId, project.id, dropAfter(event));
+                    if (!draggedInitiative || draggedInitiative.categoryId !== group.category.id) return;
+                    const initiativeIds = group.initiatives.map((candidate) => candidate.id);
+                    const nextIds = moveIdToDropPosition(initiativeIds, draggedInitiative.initiativeId, project.id, dropAfter(event));
                     setDraggedProject(null);
                     setProjectDropId(null);
-                    void onReorderProjects(group.category.id, nextIds);
+                    void onReorderInitiatives(group.category.id, nextIds);
                   }}
                   onDragEnd={() => {
                     setDraggedProject(null);
@@ -1999,17 +2221,17 @@ function ProjectsView({
                   }}
                 >
                   <div>
-                    <div className="project-title-line">
-                      <h3>{displayProjectName(project)}</h3>
-                      <ProjectTypeBadge type={project.type} />
+                    <div className="initiative-title-line">
+                      <h3>{displayInitiativeName(project)}</h3>
+                      <InitiativeTypeBadge type={project.type} />
                       {project.isSystem ? <span className="system-badge">System</span> : null}
                     </div>
                     <p>{project.summary ?? firstMarkdownLine(project.markdown)}</p>
                   </div>
                   <div className="row-meta">
-                    {project.type === "project" && formatProjectDateRangeForUi(project) ? <span>{formatProjectDateRangeForUi(project)}</span> : null}
+                    {project.type === "project" && formatInitiativeDateRangeForUi(project) ? <span>{formatInitiativeDateRangeForUi(project)}</span> : null}
                     <span>{project.status}</span>
-                    <span>{projectTasks.length} Massnahmen</span>
+                    <span>{initiativeTasks.length} Massnahmen</span>
                   </div>
                 </article>
               );
@@ -2026,8 +2248,8 @@ const timelineMonthOptions = [3, 6, 12, 18];
 
 function TimelineView(props: {
   categories: AppOverview["categories"];
-  projects: Project[];
-  onOpenProject: (projectId: number) => void;
+  initiatives: Initiative[];
+  onOpenInitiative: (initiativeId: number) => void;
 }) {
   const [monthsAhead, setMonthsAhead] = useState(6);
   const today = useMemo(() => startOfUtcDay(new Date()), []);
@@ -2037,12 +2259,12 @@ function TimelineView(props: {
   const weekLabels = useMemo(() => buildTimelineWeeks(range.start, range.end), [range]);
   const todayOffset = dateOffsetPercent(today, range.start, totalDays);
   const categoryById = new Map(props.categories.map((category) => [category.id, category]));
-  const entries = props.projects
-    .filter((project) => project.type === "project" && project.status === "active" && project.startDate && project.endDate)
-    .map((project) => {
-      const category = categoryById.get(project.categoryId);
-      const start = project.startDate ? parseDateOnlyUtc(project.startDate) : null;
-      const end = project.endDate ? parseDateOnlyUtc(project.endDate) : null;
+  const entries = props.initiatives
+    .filter((initiative) => initiative.type === "project" && initiative.status === "active" && initiative.startDate && initiative.endDate)
+    .map((initiative) => {
+      const category = categoryById.get(initiative.categoryId);
+      const start = initiative.startDate ? parseDateOnlyUtc(initiative.startDate) : null;
+      const end = initiative.endDate ? parseDateOnlyUtc(initiative.endDate) : null;
       if (!category || !start || !end || end < range.start || start > range.end) {
         return null;
       }
@@ -2050,7 +2272,7 @@ function TimelineView(props: {
       const clippedStart = start < range.start ? range.start : start;
       const clippedEnd = end > range.end ? range.end : end;
       return {
-        project,
+        initiative,
         category,
         left: dateOffsetPercent(clippedStart, range.start, totalDays),
         width: Math.max(((daysBetween(clippedStart, clippedEnd) + 1) / totalDays) * 100, 0.7)
@@ -2058,8 +2280,8 @@ function TimelineView(props: {
     })
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
     .sort((a, b) => {
-      const dateCompare = (a.project.startDate ?? "").localeCompare(b.project.startDate ?? "");
-      return dateCompare || a.project.sortOrder - b.project.sortOrder || a.project.name.localeCompare(b.project.name);
+      const dateCompare = (a.initiative.startDate ?? "").localeCompare(b.initiative.startDate ?? "");
+      return dateCompare || a.initiative.sortOrder - b.initiative.sortOrder || a.initiative.name.localeCompare(b.initiative.name);
     });
   const groups = props.categories
     .map((category) => ({
@@ -2141,8 +2363,8 @@ function TimelineView(props: {
                     {group.entries.map((entry, index) => (
                       <button
                         className="timeline-bar"
-                        key={entry.project.id}
-                        onClick={() => props.onOpenProject(entry.project.id)}
+                        key={entry.initiative.id}
+                        onClick={() => props.onOpenInitiative(entry.initiative.id)}
                         style={
                           {
                             left: `${entry.left}%`,
@@ -2151,9 +2373,9 @@ function TimelineView(props: {
                             "--category-color": entry.category.color
                           } as CSSProperties
                         }
-                        title={`${displayProjectName(entry.project)} · ${formatProjectDateRangeForUi(entry.project) ?? ""}`}
+                        title={`${displayInitiativeName(entry.initiative)} · ${formatInitiativeDateRangeForUi(entry.initiative) ?? ""}`}
                       >
-                        <span>{displayProjectName(entry.project)}</span>
+                        <span>{displayInitiativeName(entry.initiative)}</span>
                       </button>
                     ))}
                   </div>
@@ -2185,22 +2407,22 @@ function TimelineGrid(props: {
   );
 }
 
-function ProjectDetailView(props: {
-  detail: ProjectDetail | null;
+function InitiativeDetailView(props: {
+  detail: InitiativeDetail | null;
   categories: AppOverview["categories"];
   onBack: () => void;
   onBackToCategory: (categoryName: string) => void;
   onOpenTask: (taskId: number) => void;
   onComplete: (taskId: number) => Promise<void>;
   onStatus: (taskId: number, status: string) => Promise<void>;
-  onReorderTasks?: (projectId: number, taskIds: number[]) => Promise<void>;
-  onUpdateProject: (
-    projectId: number,
+  onReorderTasks?: (initiativeId: number, taskIds: number[]) => Promise<void>;
+  onUpdateInitiative: (
+    initiativeId: number,
     input: {
       categoryId?: number;
       parentId?: number | null;
       name?: string;
-      status?: Project["status"];
+      status?: Initiative["status"];
       summary?: string | null;
       startDate?: string | null;
       endDate?: string | null;
@@ -2208,38 +2430,17 @@ function ProjectDetailView(props: {
   ) => Promise<void>;
 }) {
   if (!props.detail) {
-    return <EmptyState title="Loading project..." />;
+    return <EmptyState title="Loading initiative..." />;
   }
 
-  const category = props.categories.find((candidate) => candidate.id === props.detail?.project.categoryId);
-  const projectId = props.detail.project.id;
-  const project = props.detail.project;
-  const backLabel = titleForView(collectionViewForProjectType(project.type));
+  const category = props.categories.find((candidate) => candidate.id === props.detail?.initiative.categoryId);
+  const initiativeId = props.detail.initiative.id;
+  const initiative = props.detail.initiative;
   return (
-    <section className="project-detail">
-      <div className="back-actions">
-        <div className="back-action-group">
-          <button className="small-button back-button" onClick={props.onBack}>
-            Zurueck zu {backLabel}
-          </button>
-          {category ? (
-            <button className="small-button back-button" onClick={() => props.onBackToCategory(category.name)}>
-              Zurueck zu {category.name}
-            </button>
-          ) : null}
-        </div>
-      </div>
-      <div className="section-heading">
-        <div className="project-title-line">
-          <h2>{displayProjectName(project)}</h2>
-          <ProjectTypeBadge type={project.type} />
-          {project.isSystem ? <span className="system-badge">System</span> : null}
-        </div>
-        <p>{project.summary ?? firstMarkdownLine(project.markdown)}</p>
-      </div>
-      <ProjectBasicsForm project={project} categories={props.categories} onUpdateProject={props.onUpdateProject} />
+    <section className="initiative-detail">
+      <InitiativeBasicsForm initiative={initiative} categories={props.categories} onUpdateInitiative={props.onUpdateInitiative} />
       <section className="panel">
-        <RichText text={project.markdown || "No project markdown yet."} />
+        <RichText text={initiative.markdown || "No initiative markdown yet."} />
       </section>
       <Panel title="Massnahmen">
         {props.detail.tasks.length === 0 ? (
@@ -2247,11 +2448,11 @@ function ProjectDetailView(props: {
         ) : (
           <TasksView
             tasks={props.detail.tasks}
-            projects={[props.detail.project]}
+            initiatives={[props.detail.initiative]}
             onComplete={props.onComplete}
             onStatus={props.onStatus}
             onOpenTask={props.onOpenTask}
-            onReorderTasks={(taskIds) => void props.onReorderTasks?.(projectId, taskIds)}
+            onReorderTasks={(taskIds) => void props.onReorderTasks?.(initiativeId, taskIds)}
           />
         )}
       </Panel>
@@ -2262,7 +2463,7 @@ function ProjectDetailView(props: {
 function TaskDetailView(props: {
   detail: TaskDetail | null;
   onBack: () => void;
-  onOpenProject: (projectId: number) => void;
+  onOpenInitiative: (initiativeId: number) => void;
   onComplete: (taskId: number) => Promise<void>;
   onStatus: (taskId: number, status: string) => Promise<void>;
 }) {
@@ -2270,32 +2471,9 @@ function TaskDetailView(props: {
     return <EmptyState title="Loading task..." />;
   }
 
-  const { task, project, category } = props.detail;
+  const { task } = props.detail;
   return (
     <section className="task-detail">
-      <div className="back-actions">
-        <div className="back-action-group">
-          <button className="small-button back-button" onClick={props.onBack}>
-            Zurueck zu Massnahmen
-          </button>
-          {project ? (
-            <button className="small-button back-button" onClick={() => props.onOpenProject(project.id)}>
-              Zurueck zum Eintrag
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="section-heading task-detail-heading">
-        <div>
-          <h2>{task.title}</h2>
-          <p>{project?.name ?? `Project ${task.projectId}`}</p>
-        </div>
-        <button className="small-button" onClick={() => void props.onComplete(task.id)}>
-          Erledigt
-        </button>
-      </div>
-
       <section className="panel task-detail-panel">
         <dl className="detail-list">
           <div>
@@ -2338,16 +2516,16 @@ function TaskDetailView(props: {
   );
 }
 
-function ProjectBasicsForm(props: {
-  project: Project;
+function InitiativeBasicsForm(props: {
+  initiative: Initiative;
   categories: AppOverview["categories"];
-  onUpdateProject: (
-    projectId: number,
+  onUpdateInitiative: (
+    initiativeId: number,
     input: {
       categoryId?: number;
       parentId?: number | null;
       name?: string;
-      status?: Project["status"];
+      status?: Initiative["status"];
       summary?: string | null;
       startDate?: string | null;
       endDate?: string | null;
@@ -2355,27 +2533,27 @@ function ProjectBasicsForm(props: {
   ) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(props.project.name);
-  const [summary, setSummary] = useState(props.project.summary ?? "");
-  const [categoryId, setCategoryId] = useState(props.project.categoryId);
-  const [status, setStatus] = useState<Project["status"]>(props.project.status);
-  const [startDate, setStartDate] = useState(props.project.startDate ?? "");
-  const [endDate, setEndDate] = useState(props.project.endDate ?? "");
+  const [name, setName] = useState(props.initiative.name);
+  const [summary, setSummary] = useState(props.initiative.summary ?? "");
+  const [categoryId, setCategoryId] = useState(props.initiative.categoryId);
+  const [status, setStatus] = useState<Initiative["status"]>(props.initiative.status);
+  const [startDate, setStartDate] = useState(props.initiative.startDate ?? "");
+  const [endDate, setEndDate] = useState(props.initiative.endDate ?? "");
   const [busy, setBusy] = useState(false);
-  const hasDateFields = props.project.type === "project";
-  const hasInvalidDateRange = hasDateFields && projectDateRangeInvalid(startDate, endDate);
+  const hasDateFields = props.initiative.type === "project";
+  const hasInvalidDateRange = hasDateFields && initiativeDateRangeInvalid(startDate, endDate);
 
   useEffect(() => {
-    setName(props.project.name);
-    setSummary(props.project.summary ?? "");
-    setCategoryId(props.project.categoryId);
-    setStatus(props.project.status);
-    setStartDate(props.project.startDate ?? "");
-    setEndDate(props.project.endDate ?? "");
-  }, [props.project]);
+    setName(props.initiative.name);
+    setSummary(props.initiative.summary ?? "");
+    setCategoryId(props.initiative.categoryId);
+    setStatus(props.initiative.status);
+    setStartDate(props.initiative.startDate ?? "");
+    setEndDate(props.initiative.endDate ?? "");
+  }, [props.initiative]);
 
   if (!editing) {
-    const category = props.categories.find((candidate) => candidate.id === props.project.categoryId);
+    const category = props.categories.find((candidate) => candidate.id === props.initiative.categoryId);
     return (
       <section className="panel basics-panel">
         <div className="panel-heading-row">
@@ -2388,26 +2566,26 @@ function ProjectBasicsForm(props: {
           <div>
             <dt>Typ</dt>
             <dd>
-              <ProjectTypeBadge type={props.project.type} />
+              <InitiativeTypeBadge type={props.initiative.type} />
             </dd>
           </div>
           <div>
             <dt>Kategorie</dt>
-            <dd>{category?.name ?? `Category ${props.project.categoryId}`}</dd>
+            <dd>{category?.name ?? `Category ${props.initiative.categoryId}`}</dd>
           </div>
           <div>
             <dt>Status</dt>
-            <dd>{props.project.status}</dd>
+            <dd>{props.initiative.status}</dd>
           </div>
           {hasDateFields ? (
             <>
               <div>
                 <dt>Start</dt>
-                <dd>{props.project.startDate ?? "Offen"}</dd>
+                <dd>{props.initiative.startDate ?? "Offen"}</dd>
               </div>
               <div>
                 <dt>Ende</dt>
-                <dd>{props.project.endDate ?? "Offen"}</dd>
+                <dd>{props.initiative.endDate ?? "Offen"}</dd>
               </div>
             </>
           ) : null}
@@ -2425,7 +2603,7 @@ function ProjectBasicsForm(props: {
         if (!trimmedName || busy || hasInvalidDateRange) return;
         setBusy(true);
         try {
-          await props.onUpdateProject(props.project.id, {
+          await props.onUpdateInitiative(props.initiative.id, {
             name: trimmedName,
             summary: summary.trim() || null,
             categoryId,
@@ -2445,12 +2623,12 @@ function ProjectBasicsForm(props: {
           type="button"
           className="small-button"
           onClick={() => {
-            setName(props.project.name);
-            setSummary(props.project.summary ?? "");
-            setCategoryId(props.project.categoryId);
-            setStatus(props.project.status);
-            setStartDate(props.project.startDate ?? "");
-            setEndDate(props.project.endDate ?? "");
+            setName(props.initiative.name);
+            setSummary(props.initiative.summary ?? "");
+            setCategoryId(props.initiative.categoryId);
+            setStatus(props.initiative.status);
+            setStartDate(props.initiative.startDate ?? "");
+            setEndDate(props.initiative.endDate ?? "");
             setEditing(false);
           }}
         >
@@ -2474,7 +2652,7 @@ function ProjectBasicsForm(props: {
         </label>
         <label>
           Status
-          <select value={status} onChange={(event) => setStatus(event.target.value as Project["status"])}>
+          <select value={status} onChange={(event) => setStatus(event.target.value as Initiative["status"])}>
             <option value="active">active</option>
             <option value="paused">paused</option>
             <option value="completed">completed</option>
@@ -2509,7 +2687,7 @@ function ProjectBasicsForm(props: {
 
 function TasksView(props: {
   tasks: Task[];
-  projects: Project[];
+  initiatives: Initiative[];
   onComplete: (taskId: number) => Promise<void>;
   onStatus: (taskId: number, status: string) => Promise<void>;
   onOpenTask?: (taskId: number) => void;
@@ -2517,7 +2695,7 @@ function TasksView(props: {
 }) {
   const [draggedTaskId, setDraggedTaskId] = useState<number | null>(null);
   const [taskDropId, setTaskDropId] = useState<number | null>(null);
-  const projectById = new Map(props.projects.map((project) => [project.id, project]));
+  const initiativeById = new Map(props.initiatives.map((project) => [project.id, project]));
   const taskIds = props.tasks.map((task) => task.id);
   return (
     <section className="task-list">
@@ -2561,7 +2739,7 @@ function TasksView(props: {
           </button>
           <div>
             <h2>{task.title}</h2>
-            <p>{projectById.get(task.projectId) ? displayProjectName(projectById.get(task.projectId)!) : `Project ${task.projectId}`}</p>
+            <p>{initiativeById.get(task.initiativeId) ? displayInitiativeName(initiativeById.get(task.initiativeId)!) : `Initiative ${task.initiativeId}`}</p>
           </div>
           <select
             value={task.status}
@@ -2968,7 +3146,7 @@ function titleForView(view: View): string {
     ideas: "Ideen",
     projects: "Projekte",
     habits: "Gewohnheiten",
-    project: "Eintrag",
+    initiative: "Eintrag",
     task: "Massnahme",
     prompts: "Prompt Inspector",
     promptTemplates: "Prompt-Vorlagen",
@@ -2979,13 +3157,13 @@ function titleForView(view: View): string {
 function subtitleForView(view: View): string {
   return {
     drive: "Realtime voice surface; LiveKit connection comes next.",
-    lifeAreas: "Categories mit ihren Ideen, Projekten und Gewohnheiten.",
+    lifeAreas: "",
     lifeArea: "Beschreibung, Kontext und Initiatives.",
     timeline: "Aktive Projekte entlang der Zeitachse.",
     ideas: "",
     projects: "",
     habits: "",
-    project: "Memory, Massnahmen und Kontext.",
+    initiative: "Memory, Massnahmen und Kontext.",
     task: "Status, Prioritaet, Notizen und Kontext.",
     prompts: "Debug view for d-max prompts sent to OpenClaw.",
     promptTemplates: "Kontextabhängige Vorlagen für DMAX und OpenClaw.",
@@ -2997,14 +3175,14 @@ function firstMarkdownLine(markdown: string): string {
   return markdown
     .split("\n")
     .map((line) => line.replace(/^#+\s*/, "").trim())
-    .find(Boolean) ?? "No project memory yet";
+    .find(Boolean) ?? "No initiative memory yet";
 }
 
-function projectDateRangeInvalid(startDate: string, endDate: string): boolean {
+function initiativeDateRangeInvalid(startDate: string, endDate: string): boolean {
   return Boolean(startDate && endDate && startDate > endDate);
 }
 
-function formatProjectDateRangeForUi(project: Pick<Project, "startDate" | "endDate">): string | null {
+function formatInitiativeDateRangeForUi(project: Pick<Initiative, "startDate" | "endDate">): string | null {
   if (project.startDate && project.endDate) {
     return `${formatDateOnly(project.startDate)} - ${formatDateOnly(project.endDate)}`;
   }

@@ -18,18 +18,18 @@ describe("AppConversationRepository", () => {
 
   it("creates global and entity-scoped conversations", () => {
     const global = conversations.create({ contextType: "global", title: "Global Chat" });
-    const project = conversations.create({ contextType: "project", contextEntityId: 42, title: "Health Rhythm" });
+    const project = conversations.create({ contextType: "initiative", contextEntityId: 42, title: "Health Rhythm" });
 
     expect(global.contextEntityId).toBeNull();
     expect(project.contextEntityId).toBe(42);
-    expect(conversations.findById(project.id)?.contextType).toBe("project");
+    expect(conversations.findById(project.id)?.contextType).toBe("initiative");
   });
 
   it("finds the latest conversation for a context", () => {
-    conversations.create({ contextType: "project", contextEntityId: 42, title: "Old" }, "2026-04-30T08:00:00.000Z");
-    const latest = conversations.create({ contextType: "project", contextEntityId: 42, title: "New" }, "2026-04-30T09:00:00.000Z");
+    conversations.create({ contextType: "initiative", contextEntityId: 42, title: "Old" }, "2026-04-30T08:00:00.000Z");
+    const latest = conversations.create({ contextType: "initiative", contextEntityId: 42, title: "New" }, "2026-04-30T09:00:00.000Z");
 
-    expect(conversations.findLatestByContext({ contextType: "project", contextEntityId: 42 })?.id).toBe(latest.id);
+    expect(conversations.findLatestByContext({ contextType: "initiative", contextEntityId: 42 })?.id).toBe(latest.id);
   });
 
   it("lists all conversations for one context without mixing contexts", () => {

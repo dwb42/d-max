@@ -5,11 +5,11 @@ import { createTestDatabase } from "../helpers/test-db.js";
 
 const CONTEXT_RELEVANT_TABLES = [
   "categories",
-  "projects",
+  "initiatives",
   "tasks"
 ];
 
-const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "2f091fa3f430e0b770fa42da24a8cdff1e8f958138b6bc2c2aa5f532103c2180";
+const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "00651ad42336a75774c2dfa5f195193b61ce060e1719eb6b590cfe2bb8a3cad6";
 
 describe("context resolver schema synchronization", () => {
   let db: Database.Database;

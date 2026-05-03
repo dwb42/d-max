@@ -3,19 +3,20 @@ export type Category = {
   name: string;
   description: string | null;
   color: string;
+  emoji: string;
   sortOrder: number;
   isSystem: boolean;
   createdAt?: string;
   updatedAt?: string;
 };
 
-export type ProjectType = "idea" | "project" | "habit";
+export type InitiativeType = "idea" | "project" | "habit";
 
-export type Project = {
+export type Initiative = {
   id: number;
   categoryId: number;
   parentId: number | null;
-  type: ProjectType;
+  type: InitiativeType;
   name: string;
   status: "active" | "paused" | "completed" | "archived";
   summary: string | null;
@@ -30,7 +31,7 @@ export type Project = {
 
 export type Task = {
   id: number;
-  projectId: number;
+  initiativeId: number;
   title: string;
   status: "open" | "in_progress" | "blocked" | "done" | "cancelled";
   priority: "low" | "normal" | "high" | "urgent";
@@ -42,27 +43,27 @@ export type Task = {
   completedAt?: string | null;
 };
 
-export type ProjectDetail = {
-  project: Project;
+export type InitiativeDetail = {
+  initiative: Initiative;
   tasks: Task[];
 };
 
 export type TaskDetail = {
   task: Task;
-  project: Project | null;
+  initiative: Initiative | null;
   category: Category | null;
 };
 
 export type ConversationContext =
   | { type: "global" }
-  | { type: "projects" }
+  | { type: "initiatives" }
   | { type: "category"; categoryId: number }
-  | { type: "project"; projectId: number }
+  | { type: "initiative"; initiativeId: number }
   | { type: "task"; taskId: number };
 
 export type AppOverview = {
   categories: Category[];
-  projects: Project[];
+  initiatives: Initiative[];
   tasks: Task[];
 };
 
@@ -162,10 +163,10 @@ export type StateEvent = {
   id: number;
   source: "api" | "tool";
   operation: string;
-  entityType: "overview" | "category" | "project" | "task";
+  entityType: "overview" | "category" | "initiative" | "task";
   entityId: number | null;
   categoryId: number | null;
-  projectId: number | null;
+  initiativeId: number | null;
   taskId: number | null;
   createdAt: string;
 };

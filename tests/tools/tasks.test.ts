@@ -14,7 +14,7 @@ describe("task tools", () => {
     db.close();
   });
 
-  it("creates Inbox category/project for concrete tasks without project context", async () => {
+  it("creates Inbox category/initiative for concrete tasks without initiative context", async () => {
     const runner = createToolRunner();
 
     const result = await runner.run(
@@ -22,7 +22,7 @@ describe("task tools", () => {
       {
         title: "Call the dentist",
         priority: "urgent",
-        useInboxIfProjectMissing: true
+        useInboxIfInitiativeMissing: true
       },
       { db }
     );
@@ -30,14 +30,14 @@ describe("task tools", () => {
     expect(result.ok).toBe(true);
 
     const categories = await runner.run("listCategories", {}, { db });
-    const projects = await runner.run("listProjects", {}, { db });
+    const initiatives = await runner.run("listInitiatives", {}, { db });
     const tasks = await runner.run("listTasks", {}, { db });
 
     expect(categories).toMatchObject({
       ok: true,
       data: [expect.objectContaining({ name: "Inbox", isSystem: true })]
     });
-    expect(projects).toMatchObject({
+    expect(initiatives).toMatchObject({
       ok: true,
       data: [expect.objectContaining({ name: "Inbox", isSystem: true })]
     });
@@ -53,7 +53,7 @@ describe("task tools", () => {
       "createTask",
       {
         title: "Clean Inbox",
-        useInboxIfProjectMissing: true
+        useInboxIfInitiativeMissing: true
       },
       { db }
     );

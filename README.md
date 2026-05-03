@@ -1,6 +1,6 @@
 # d-max
 
-Agentic project, task, and project-memory system for Dietrich.
+Agentic initiative, task, and initiative-memory system for Dietrich.
 
 ## Current State
 

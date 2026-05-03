@@ -1,8 +1,8 @@
 import type { ConfirmationRequest, ToolName } from "./tool-definitions.js";
 
 const CONFIRMATION_REQUIRED_TOOLS = new Set<ToolName>([
-  "archiveProject",
-  "updateProjectMarkdown",
+  "archiveInitiative",
+  "updateInitiativeMarkdown",
   "deleteTask"
 ]);
 
@@ -17,7 +17,7 @@ export function requiresConfirmation({ tool, input, allowConfirmedActions = fals
     return false;
   }
 
-  if (tool === "updateProject" && typeof input.type === "string") {
+  if (tool === "updateInitiative" && typeof input.type === "string") {
     return true;
   }
 
