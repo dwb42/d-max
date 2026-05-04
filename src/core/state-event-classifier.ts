@@ -11,7 +11,11 @@ const STATE_MUTATING_TOOLS = new Set<ToolName>([
   "createTask",
   "updateTask",
   "completeTask",
-  "deleteTask"
+  "deleteTask",
+  "createTaskChecklistItem",
+  "updateTaskChecklistItem",
+  "deleteTaskChecklistItem",
+  "reorderTaskChecklistItems"
 ]);
 
 export function isStateMutatingTool(name: ToolName): boolean {
@@ -54,6 +58,21 @@ export function stateEventFromToolResult(name: ToolName, input: unknown, result:
       entityId: taskId,
       taskId,
       initiativeId: numberValue(dataRecord?.initiativeId) ?? numberValue(inputRecord?.initiativeId)
+    };
+  }
+
+  if (
+    name === "createTaskChecklistItem" ||
+    name === "updateTaskChecklistItem" ||
+    name === "deleteTaskChecklistItem" ||
+    name === "reorderTaskChecklistItems"
+  ) {
+    const taskId = numberValue(dataRecord?.taskId) ?? numberValue(inputRecord?.taskId);
+    return {
+      ...base,
+      entityType: "task",
+      entityId: taskId,
+      taskId
     };
   }
 

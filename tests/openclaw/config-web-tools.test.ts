@@ -34,7 +34,12 @@ describe("OpenClaw web config tools", () => {
       "d-max__createTask",
       "d-max__updateTask",
       "d-max__completeTask",
-      "d-max__deleteTask"
+      "d-max__deleteTask",
+      "d-max__listTaskChecklistItems",
+      "d-max__createTaskChecklistItem",
+      "d-max__updateTaskChecklistItem",
+      "d-max__deleteTaskChecklistItem",
+      "d-max__reorderTaskChecklistItems"
     ]);
     expect([...allowedTools].filter((tool) => tool.startsWith("d-max__")).sort()).toEqual([...expectedTools].sort());
   });

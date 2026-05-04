@@ -20,6 +20,7 @@ export function migrate(databasePath?: string): void {
     migrateInitiativeTypes(db);
     migrateInitiativeDates(db);
     migrateCalendarDomain(db);
+    migrateTaskChecklistItems(db);
     db.exec(schema);
     ensureInboxCategory(db);
     migratePromptLogs(db);
@@ -334,6 +335,22 @@ function migrateCalendarDomain(db: ReturnType<typeof openDatabase>): void {
       unique(provider, calendar_id)
     );
     create index if not exists idx_calendar_sources_enabled on calendar_sources(enabled, provider);
+  `);
+}
+
+function migrateTaskChecklistItems(db: ReturnType<typeof openDatabase>): void {
+  db.exec(`
+    create table if not exists task_checklist_items (
+      id integer primary key,
+      task_id integer not null references tasks(id) on delete cascade,
+      name text not null,
+      status text not null default 'todo' check (status in ('todo', 'done')),
+      sort_order integer not null default 0,
+      created_at text not null,
+      updated_at text not null
+    );
+    create index if not exists idx_task_checklist_items_task_sort_order on task_checklist_items(task_id, sort_order, id);
+    create index if not exists idx_task_checklist_items_status on task_checklist_items(status);
   `);
 }
 

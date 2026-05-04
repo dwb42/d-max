@@ -1,6 +1,6 @@
 # d-max Current State
 
-Date: 2026-05-03
+Date: 2026-05-05
 
 Short handoff for fresh Codex/OpenClaw sessions. This file describes the
 implemented repository state; older plans are historical unless this file or
@@ -28,6 +28,7 @@ SQLite tables:
 
 ```text
 categories, initiatives, tasks,
+task_checklist_items,
 calendar_entries, calendar_sources,
 app_chat_messages, app_conversations, app_prompt_logs, app_state_events
 ```
@@ -37,7 +38,10 @@ current technical Initiative object into `idea`, `project`, and `habit`; existin
 initiatives default to `project`. Initiatives with `type = project` may have
 nullable `start_date` and `end_date` fields for a bounded initiative time span;
 those project spans are shown in the `/calendar` all-day row when they overlap
-the visible day/week. `calendar_entries` stores local d-max calendar time blocks
+the visible day/week. `task_checklist_items` stores simple checklist items
+inside tasks. Items have only a name, `todo`/`done` status, and persisted order;
+checklist completion does not automatically complete the parent task.
+`calendar_entries` stores local d-max calendar time blocks
 for project focus, task work, and standalone appointments. Entries have concrete
 `start_at`/`end_at` timestamps and a simple `open`/`done` status. A task can have
 multiple calendar entries; completing a task calendar entry also completes the
@@ -63,9 +67,11 @@ tables.
   `docs/session-handoff-openclaw-latency-2026-05-02.md`. Read it before
   continuing latency work; it captures the measured bottlenecks, recent
   OpenClaw agent changes, and next targets.
-- Tools cover categories, initiatives, and tasks. Initiative tools expose the
-  `type` field for `idea`, `project`, and `habit`, plus `startDate`/`endDate`
-  for time-bounded `type=project` initiatives.
+- Tools cover categories, initiatives, tasks, and task checklist items.
+  Initiative tools expose the `type` field for `idea`, `project`, and `habit`,
+  plus `startDate`/`endDate` for time-bounded `type=project` initiatives.
+  Checklist tools can list, create, update, delete, and reorder items inside a
+  task.
 - Risky tool calls return `requiresConfirmation` unless the ToolRunner is
   invoked with an explicit trusted confirmation context. Normal MCP/OpenClaw
   tool calls cannot self-confirm by setting `confirmed: true`.
@@ -150,7 +156,9 @@ Implemented behavior:
   rendered as UI, Back to the current type page/category, linked tasks below
   initiative memory.
 - `/tasks/:id`: task detail with status, priority, due/completed/updated dates,
-  notes, Back to Tasks, Back to Initiative, and status actions.
+  checklist items, notes, Back to Tasks, Back to Initiative, and status actions.
+  Checklist items can be created, renamed, checked off, deleted, and reordered
+  in the task detail view only.
 - `/drive`: LiveKit room creation, browser mic publishing, audio meter,
   start/end controls.
 - `/prompts`: debug view for prompts sent to OpenClaw.
@@ -194,6 +202,11 @@ GET  /api/tasks/:id
 PATCH /api/tasks/:id
 POST /api/tasks/:id/complete
 PATCH /api/tasks/order
+POST /api/tasks/:id/checklist-items
+PATCH /api/tasks/:id/checklist-items
+PATCH /api/tasks/:id/checklist-items/order
+PATCH /api/tasks/:id/checklist-items/:itemId
+DELETE /api/tasks/:id/checklist-items/:itemId
 GET  /api/chat/conversations
 POST /api/chat/conversations
 GET  /api/chat/messages

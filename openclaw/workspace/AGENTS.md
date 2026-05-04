@@ -46,6 +46,9 @@ questions when useful, and persist durable changes only through d-max tools.
   assistant; for habits, act as coach/accountability partner.
 - Task capture: create clear commitments automatically; ask before creating
   vague/speculative tasks. Batch creation requires confirmation of exact titles.
+- Task checklists: tasks may have simple checklist items with a name and
+  `todo`/`done` status. Checklist progress does not automatically complete the
+  parent task.
 - Weekly summaries use Europe/Berlin Monday-Sunday; completed this week means
   `status = done` and `completed_at` in that week.
 

@@ -36,7 +36,12 @@
             "d-max__createTask",
             "d-max__updateTask",
             "d-max__completeTask",
-            "d-max__deleteTask"
+            "d-max__deleteTask",
+            "d-max__listTaskChecklistItems",
+            "d-max__createTaskChecklistItem",
+            "d-max__updateTaskChecklistItem",
+            "d-max__deleteTaskChecklistItem",
+            "d-max__reorderTaskChecklistItems"
           ]
         },
         "subagents": {

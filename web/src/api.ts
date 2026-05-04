@@ -21,6 +21,7 @@ import type {
   PromptTemplateDefinition,
   StateEvent,
   Task,
+  TaskChecklistItem,
   TaskDetail
 } from "./types.js";
 
@@ -287,6 +288,41 @@ export async function updateTask(
     body: JSON.stringify(input)
   });
   return response.task;
+}
+
+export async function createTaskChecklistItem(taskId: number, input: { name: string }): Promise<TaskChecklistItem> {
+  const response = await request<{ item: TaskChecklistItem }>(`/api/tasks/${taskId}/checklist-items`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.item;
+}
+
+export async function updateTaskChecklistItem(
+  taskId: number,
+  itemId: number,
+  input: { name?: string; status?: TaskChecklistItem["status"] }
+): Promise<TaskChecklistItem> {
+  const response = await request<{ item: TaskChecklistItem }>(`/api/tasks/${taskId}/checklist-items/${itemId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.item;
+}
+
+export async function deleteTaskChecklistItem(taskId: number, itemId: number): Promise<void> {
+  await request(`/api/tasks/${taskId}/checklist-items/${itemId}`, { method: "DELETE" });
+}
+
+export async function reorderTaskChecklistItems(taskId: number, itemIds: number[]): Promise<TaskChecklistItem[]> {
+  const response = await request<{ items: TaskChecklistItem[] }>(`/api/tasks/${taskId}/checklist-items/order`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ itemIds })
+  });
+  return response.items;
 }
 
 export async function createVoiceSession(input: { mode: "drive" }): Promise<LiveKitVoiceSession> {

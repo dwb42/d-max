@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import { listPromptTemplates, resolveConversationContext } from "../../src/chat/conversation-context.js";
 import { CategoryRepository } from "../../src/repositories/categories.js";
 import { InitiativeRepository } from "../../src/repositories/initiatives.js";
+import { TaskChecklistItemRepository } from "../../src/repositories/task-checklist-items.js";
 import { TaskRepository } from "../../src/repositories/tasks.js";
 import { createTestDatabase } from "../helpers/test-db.js";
 
@@ -122,6 +123,10 @@ describe("resolveConversationContext", () => {
       markdown: "# Overview\n\nEnergy and training rhythm.\n"
     });
     const task = new TaskRepository(db).create({ initiativeId: project.id, title: "Choose weekly training slots" });
+    const checklistItems = new TaskChecklistItemRepository(db);
+    checklistItems.create({ taskId: task.id, name: "Pick gym days" });
+    const secondItem = checklistItems.create({ taskId: task.id, name: "Block calendar slots" });
+    checklistItems.update({ id: secondItem.id, status: "done" });
 
     const resolved = resolveConversationContext(db, { type: "task", taskId: task.id });
 
@@ -131,6 +136,9 @@ describe("resolveConversationContext", () => {
     expect(resolved.agentContextBlock).toContain("type: project (Project)");
     expect(resolved.agentContextBlock).toContain("time span: starts 2026-05-05");
     expect(resolved.agentContextBlock).toContain("Choose weekly training slots");
+    expect(resolved.agentContextBlock).toContain("Checklist (2):");
+    expect(resolved.agentContextBlock).toContain("[todo] Pick gym days");
+    expect(resolved.agentContextBlock).toContain("[done] Block calendar slots");
     expect(resolved.agentContextBlock).toContain("Energy and training rhythm");
   });
 
@@ -161,6 +169,7 @@ describe("resolveConversationContext", () => {
     expect(templates.find((template) => template.id === "habits-list")?.effectiveContext).toBe("habits");
     expect(templates.find((template) => template.id === "habits-detail")?.effectiveContext).toBe("habit");
     expect(templates.find((template) => template.id === "tasks-list")?.effectiveContext).toBe("tasks");
+    expect(templates.find((template) => template.id === "tasks-detail")?.contextDataTemplate).toContain("Checklist");
     expect(templates.find((template) => template.id === "category-detail")?.route).toBe("/categories/:categoryName");
     expect(templates.find((template) => template.id === "category-detail")?.contextDataTemplate).not.toContain("Color: {{category_color}}");
     expect(templates.find((template) => template.id === "category-detail")?.contextDataTemplate).toContain("Ideen in diesem Lebensbereich");

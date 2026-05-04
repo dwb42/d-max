@@ -3,6 +3,8 @@ import type Database from "better-sqlite3";
 import { CategoryRepository } from "../repositories/categories.js";
 import { InitiativeRepository } from "../repositories/initiatives.js";
 import type { Initiative } from "../repositories/initiatives.js";
+import { TaskChecklistItemRepository } from "../repositories/task-checklist-items.js";
+import type { TaskChecklistItem } from "../repositories/task-checklist-items.js";
 import { TaskRepository } from "../repositories/tasks.js";
 import type { Task } from "../repositories/tasks.js";
 import type { ConversationContextType } from "../repositories/app-conversations.js";
@@ -218,6 +220,8 @@ const promptTemplateSpecs: Array<{
     contextDataLines: [
       "Task: #{{task_id}} {{task_title}}",
       "Status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}; completed: {{task_completed_at}}",
+      "Checklist ({{checklist_item_count}}):",
+      "- #{{checklist_item_id}} [{{checklist_item_status}}] {{checklist_item_name}}",
       "Notes: {{task_notes}}",
       "Initiative: #{{initiative_id}} {{initiative_name}}; type: {{initiative_type}}; status: {{initiative_status}}; time span: {{initiative_time_span}}; summary: {{initiative_summary}}",
       "Category: #{{category_id}} {{category_name}} ({{category_color}})",
@@ -298,6 +302,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   const categories = new CategoryRepository(db);
   const initiatives = new InitiativeRepository(db);
   const tasks = new TaskRepository(db);
+  const taskChecklistItems = new TaskChecklistItemRepository(db);
 
   if (context.type === "global") {
     return {
@@ -482,9 +487,12 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   const initiative = initiatives.findById(task.initiativeId);
   const category = initiative ? categories.findById(initiative.categoryId) : null;
   const siblingTasks = initiative ? tasks.list({ initiativeId: initiative.id }).filter((candidate) => candidate.id !== task.id) : [];
+  const checklistItems = taskChecklistItems.listByTask(task.id);
   const lines = [
     `Task: #${task.id} ${task.title}`,
     `Status: ${task.status}; priority: ${task.priority}; due: ${task.dueAt ?? "none"}; completed: ${task.completedAt ?? "no"}`,
+    `Checklist (${checklistItems.length}):`,
+    ...checklistItems.map(formatChecklistItem),
     `Notes: ${task.notes ?? "none"}`,
     initiative ? formatInitiativeHeader(initiative) : `Initiative: #${task.initiativeId} not found`,
     category ? `Category: #${category.id} ${category.name} (${category.color})` : "Category: unknown",
@@ -717,6 +725,10 @@ function formatInitiativeMarkdownContext(initiative: Initiative): string[] {
 
 function formatTask(task: Task): string {
   return `- #${task.id} [${task.status}, ${task.priority}${task.dueAt ? `, due ${task.dueAt}` : ""}] ${task.title}${task.notes ? ` — ${truncate(task.notes, 180)}` : ""}`;
+}
+
+function formatChecklistItem(item: TaskChecklistItem): string {
+  return `- #${item.id} [${item.status}] ${item.name}`;
 }
 
 function rankTasks(tasks: Task[]): Task[] {

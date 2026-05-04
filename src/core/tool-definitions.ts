@@ -15,7 +15,12 @@ export type ToolName =
   | "createTask"
   | "updateTask"
   | "completeTask"
-  | "deleteTask";
+  | "deleteTask"
+  | "listTaskChecklistItems"
+  | "createTaskChecklistItem"
+  | "updateTaskChecklistItem"
+  | "deleteTaskChecklistItem"
+  | "reorderTaskChecklistItems";
 
 export type ToolContext = {
   db?: Database.Database;

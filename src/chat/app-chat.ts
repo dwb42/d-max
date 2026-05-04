@@ -423,7 +423,8 @@ const OPENCLAW_TOOL_CONTEXT = [
   "Known d-max tool surface:",
   "- Categories: listCategories, createCategory, updateCategory",
   "- Initiatives: listInitiatives, getInitiative, createInitiative, updateInitiative, archiveInitiative, updateInitiativeMarkdown",
-  "- Tasks: listTasks, createTask, updateTask, completeTask, deleteTask"
+  "- Tasks: listTasks, createTask, updateTask, completeTask, deleteTask",
+  "- Task checklists: listTaskChecklistItems, createTaskChecklistItem, updateTaskChecklistItem, deleteTaskChecklistItem, reorderTaskChecklistItems"
 ].join("\n");
 
 function formatMemoryHistory(messages: AppChatMessage[]): string {

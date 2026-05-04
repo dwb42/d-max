@@ -2201,7 +2201,12 @@ function formatToolName(name: string): string {
     createTask: "Aufgabe erstellen",
     updateTask: "Aufgabe aktualisieren",
     completeTask: "Aufgabe abschliessen",
-    deleteTask: "Aufgabe loeschen"
+    deleteTask: "Aufgabe loeschen",
+    listTaskChecklistItems: "Checkliste laden",
+    createTaskChecklistItem: "Checklisteneintrag erstellen",
+    updateTaskChecklistItem: "Checklisteneintrag aktualisieren",
+    deleteTaskChecklistItem: "Checklisteneintrag loeschen",
+    reorderTaskChecklistItems: "Checkliste sortieren"
   };
   const normalizedName = name.replace(/^d-max__/, "");
   return labels[name] ?? labels[normalizedName] ?? `DMAX ${normalizedName.replaceAll("_", " ")}`;

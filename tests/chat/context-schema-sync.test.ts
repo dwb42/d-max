@@ -7,11 +7,12 @@ const CONTEXT_RELEVANT_TABLES = [
   "categories",
   "initiatives",
   "tasks",
+  "task_checklist_items",
   "calendar_entries",
   "calendar_sources"
 ];
 
-const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "5932770e51d8e351352afd551fc7e7c49d27281328bfc1037cd7beadb5d4a92c";
+const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "4c95403b0720ccbf3ddcf66dfb0d8445dfa2ffa45fc7640ad5e237b44ab398a4";
 
 describe("context resolver schema synchronization", () => {
   let db: Database.Database;

@@ -256,7 +256,7 @@ button:disabled {
 .content-scroll-area {
   min-height: 0;
   overflow: auto;
-  padding: 24px 28px 28px;
+  padding: 24px 28px 12px;
 }
 
 .dmax-agent-button {
@@ -2020,8 +2020,10 @@ button.initiative-markdown-panel:hover {
 }
 
 .calendar-planner-sidebar {
+  position: relative;
+  z-index: 12;
   align-self: start;
-  max-height: calc(100vh - 150px);
+  max-height: calc(100vh - 130px);
   overflow: auto;
   padding: 14px;
 }
@@ -2040,18 +2042,24 @@ button.initiative-markdown-panel:hover {
 }
 
 .calendar-project-card {
+  position: relative;
   border: 1px solid #dfe4dc;
   border-radius: 8px;
   background: #f7f8f5;
 }
 
+.calendar-project-card:hover {
+  z-index: 20;
+}
+
 .calendar-project-card summary {
+  position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 9px;
+  gap: 10px;
   align-items: center;
-  min-height: 48px;
-  padding: 9px 10px;
+  min-height: 58px;
+  padding: 11px 12px;
   cursor: grab;
   list-style: none;
 }
@@ -2060,7 +2068,16 @@ button.initiative-markdown-panel:hover {
   display: none;
 }
 
-.calendar-project-card summary strong,
+.calendar-project-card summary > span > strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #17211c;
+  font-size: 15px;
+  line-height: 1.15;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .config-source-row strong {
   display: block;
   overflow: hidden;
@@ -2069,7 +2086,7 @@ button.initiative-markdown-panel:hover {
   white-space: nowrap;
 }
 
-.calendar-project-card summary small,
+.calendar-project-card summary > span > small,
 .calendar-task-palette span,
 .config-source-row span,
 .config-section p {
@@ -2112,7 +2129,7 @@ button.initiative-markdown-panel:hover {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
-  max-height: calc(100vh - 150px);
+  max-height: calc(100vh - 130px);
   overflow: hidden;
 }
 
@@ -2183,11 +2200,18 @@ button.initiative-markdown-panel:hover {
   position: relative;
   display: grid;
   grid-template-columns: 78px repeat(var(--calendar-days), minmax(150px, 1fr));
-  grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
   min-width: 780px;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+.calendar-frame.all-day-open {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.calendar-frame.all-day-closed {
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .calendar-time-scroll {
@@ -2197,6 +2221,14 @@ button.initiative-markdown-panel:hover {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.calendar-frame.all-day-open .calendar-time-scroll {
+  grid-row: 3;
+}
+
+.calendar-frame.all-day-closed .calendar-time-scroll {
+  grid-row: 2;
 }
 
 .calendar-day-header-spacer,
@@ -2211,6 +2243,19 @@ button.initiative-markdown-panel:hover {
 .calendar-time-axis {
   border-right: 1px solid #dfe4dc;
   background: #f7f8f5;
+}
+
+.calendar-day-header-spacer,
+.calendar-day-header {
+  grid-row: 1;
+}
+
+.calendar-day-header-spacer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 5px 6px;
 }
 
 .calendar-day-header {
@@ -2241,6 +2286,7 @@ button.initiative-markdown-panel:hover {
 .calendar-all-day-label {
   display: flex;
   align-items: flex-start;
+  grid-row: 2;
   min-height: 32px;
   max-height: 132px;
   overflow: auto;
@@ -2249,30 +2295,33 @@ button.initiative-markdown-panel:hover {
   font-size: 12px;
 }
 
-.calendar-all-day-label.collapsed {
-  max-height: 32px;
-}
-
 .calendar-row-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  justify-content: flex-start;
+  gap: 4px;
   width: auto;
   max-width: 100%;
   min-height: 22px;
   border: 0;
-  border-radius: 6px;
-  padding: 0 5px 0 2px;
+  border-radius: 0;
+  padding: 0;
   background: transparent;
   color: #66726b;
   font-size: 12px;
+  font-weight: 700;
   line-height: 1;
   text-align: left;
   white-space: nowrap;
 }
 
 .calendar-row-toggle:hover {
-  background: #edf1eb;
+  background: transparent;
+  color: #17211c;
+}
+
+.calendar-row-toggle.active {
+  background: transparent;
   color: #17211c;
 }
 
@@ -2286,6 +2335,8 @@ button.initiative-markdown-panel:hover {
 
 .calendar-row-toggle svg {
   flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
   transition: transform 140ms ease;
 }
 
@@ -2297,17 +2348,13 @@ button.initiative-markdown-panel:hover {
   display: flex;
   flex-wrap: wrap;
   align-content: flex-start;
+  grid-row: 2;
   gap: 5px;
   min-height: 32px;
   max-height: 132px;
   overflow-y: auto;
   border-right: 1px solid #edf1eb;
   padding: 4px 6px;
-}
-
-.calendar-all-day-column.collapsed {
-  max-height: 32px;
-  overflow: hidden;
 }
 
 .calendar-all-day-event {
@@ -2426,6 +2473,10 @@ button.initiative-markdown-panel:hover {
   box-shadow: 0 6px 14px rgba(16, 23, 20, 0.08);
 }
 
+.calendar-event-block.has-project-info {
+  overflow: visible;
+}
+
 .calendar-event-block.done {
   opacity: 0.72;
 }
@@ -2438,22 +2489,121 @@ button.initiative-markdown-panel:hover {
   background: #f3f5ff;
 }
 
+.calendar-project-hover-card {
+  position: absolute;
+  z-index: 30;
+  display: none;
+  width: min(260px, 72vw);
+  height: fit-content;
+  max-height: none;
+  border: 1px solid #cfd7d0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  overflow: hidden;
+  background: #ffffff;
+  color: #17211c;
+  text-align: left;
+  pointer-events: none;
+  box-shadow: 0 14px 38px rgba(16, 23, 20, 0.18);
+}
+
+.calendar-project-hover-card.sidebar {
+  position: fixed;
+  width: 250px;
+}
+
+.calendar-project-hover-card.calendar {
+  top: 4px;
+  left: calc(100% + 8px);
+}
+
+.calendar-project-summary:hover .calendar-project-hover-card,
+.calendar-project-summary:focus-within .calendar-project-hover-card,
+.calendar-event-block.has-project-info:hover .calendar-project-hover-card,
+.calendar-event-block.has-project-info:focus-within .calendar-project-hover-card,
+.calendar-project-hover-card.visible {
+  display: block;
+}
+
+.calendar-project-hover-card strong {
+  display: block;
+  overflow: hidden;
+  color: #17211c;
+  font-size: 12px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-project-hover-card dl {
+  display: block;
+  margin: 6px 0 0;
+}
+
+.calendar-project-hover-card dl div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 3px;
+}
+
+.calendar-project-hover-card dt,
+.calendar-project-hover-card dd,
+.calendar-project-hover-card p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.18;
+}
+
+.calendar-project-hover-card dt {
+  flex: 0 0 68px;
+  color: #66726b;
+}
+
+.calendar-project-hover-card dd {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: #17211c;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-project-hover-card p {
+  display: -webkit-box;
+  margin-top: 6px;
+  overflow: hidden;
+  color: #3f4c45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
 .calendar-event-main {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
   align-items: start;
   height: 100%;
-  padding: 6px;
+  padding: 7px 8px;
+}
+
+.calendar-event-block.dmax .calendar-event-main {
+  padding-right: 30px;
+  padding-left: 28px;
+}
+
+.calendar-event-main > div {
+  min-width: 0;
 }
 
 .calendar-event-main strong {
-  display: block;
+  display: -webkit-box;
   overflow: hidden;
-  font-size: 12px;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.15;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .calendar-event-main span {
@@ -2473,13 +2623,22 @@ button.initiative-markdown-panel:hover {
 .calendar-complete-toggle,
 .calendar-delete-button {
   display: grid;
+  position: absolute;
+  z-index: 5;
   width: 22px;
   height: 22px;
   place-items: center;
   padding: 0;
 }
 
+.calendar-complete-toggle {
+  top: 5px;
+  left: 4px;
+}
+
 .calendar-delete-button {
+  top: 5px;
+  right: 4px;
   color: #8d4a40;
 }
 
@@ -2906,6 +3065,100 @@ button.initiative-markdown-panel:hover {
   padding: 0 10px;
   background: #ffffff;
   color: #17211c;
+}
+
+.task-checklist-panel {
+  width: 100%;
+  align-content: start;
+  gap: 12px;
+  border: 1px solid #dfe4dc;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.task-checklist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-checklist-header h2 {
+  margin: 0;
+  color: #17211c;
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.task-checklist-header span {
+  color: #66726b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.task-checklist-items {
+  display: grid;
+  gap: 6px;
+}
+
+.task-checklist-item {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  gap: 6px;
+  align-items: center;
+  min-height: 40px;
+  padding: 4px;
+  border: 1px solid #edf0eb;
+  border-radius: 7px;
+  background: #fbfcfa;
+  cursor: grab;
+}
+
+.task-checklist-item.dragging {
+  opacity: 0.55;
+}
+
+.task-checklist-item.drag-over {
+  border-color: #27806f;
+  background: #eef7f3;
+}
+
+.task-checklist-name {
+  min-width: 0;
+  border: 0;
+  padding: 0 6px;
+  background: transparent;
+  color: #17211c;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+}
+
+.task-checklist-item.done .task-checklist-name {
+  color: #77827b;
+  text-decoration: line-through;
+}
+
+.task-checklist-name-form {
+  min-width: 0;
+}
+
+.task-checklist-name-form input,
+.task-checklist-create-form input {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid #d7ddd5;
+  border-radius: 7px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: #17211c;
+}
+
+.task-checklist-create-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 8px;
+  align-items: center;
 }
 
 .task-notes-panel {

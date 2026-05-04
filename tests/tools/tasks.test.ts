@@ -72,4 +72,41 @@ describe("task tools", () => {
     const deleted = await runner.run("deleteTask", { id: taskId, confirmed: true }, { db, allowConfirmedActions: true });
     expect(deleted).toMatchObject({ ok: true });
   });
+
+  it("creates, updates, lists, and reorders task checklist items", async () => {
+    const runner = createToolRunner();
+    const createdTask = await runner.run(
+      "createTask",
+      {
+        title: "Checklist task",
+        useInboxIfInitiativeMissing: true
+      },
+      { db }
+    );
+
+    expect(createdTask.ok).toBe(true);
+    const taskId = createdTask.ok ? (createdTask.data as { id: number }).id : 0;
+
+    const first = await runner.run("createTaskChecklistItem", { taskId, name: "First item" }, { db });
+    const second = await runner.run("createTaskChecklistItem", { taskId, name: "Second item" }, { db });
+
+    expect(first).toMatchObject({ ok: true, data: { taskId, name: "First item", status: "todo" } });
+    expect(second).toMatchObject({ ok: true, data: { taskId, name: "Second item", status: "todo" } });
+
+    const firstId = first.ok ? (first.data as { id: number }).id : 0;
+    const secondId = second.ok ? (second.data as { id: number }).id : 0;
+    const updated = await runner.run("updateTaskChecklistItem", { id: firstId, status: "done" }, { db });
+    const reordered = await runner.run("reorderTaskChecklistItems", { taskId, itemIds: [secondId, firstId] }, { db });
+    const listed = await runner.run("listTaskChecklistItems", { taskId }, { db });
+
+    expect(updated).toMatchObject({ ok: true, data: { id: firstId, status: "done" } });
+    expect(reordered).toMatchObject({ ok: true });
+    expect(listed).toMatchObject({
+      ok: true,
+      data: [
+        expect.objectContaining({ id: secondId }),
+        expect.objectContaining({ id: firstId, status: "done" })
+      ]
+    });
+  });
 });

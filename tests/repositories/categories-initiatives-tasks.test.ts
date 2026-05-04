@@ -4,6 +4,7 @@ import { CalendarEntryRepository } from "../../src/repositories/calendar-entries
 import { CalendarSourceRepository } from "../../src/repositories/calendar-sources.js";
 import { CategoryRepository } from "../../src/repositories/categories.js";
 import { InitiativeRepository } from "../../src/repositories/initiatives.js";
+import { TaskChecklistItemRepository } from "../../src/repositories/task-checklist-items.js";
 import { TaskRepository } from "../../src/repositories/tasks.js";
 import { createTestDatabase } from "../helpers/test-db.js";
 
@@ -124,6 +125,26 @@ describe("repositories", () => {
 
     expect(completed.status).toBe("done");
     expect(completed.completedAt).toBe("2026-04-28T10:00:00.000Z");
+  });
+
+  it("manages task checklist items without completing the parent task", () => {
+    const category = new CategoryRepository(db).create({ name: "Business" });
+    const project = new InitiativeRepository(db).create({ categoryId: category.id, name: "d-max" });
+    const tasks = new TaskRepository(db);
+    const task = tasks.create({ initiativeId: project.id, title: "Ship checklist MVP" });
+    const checklistItems = new TaskChecklistItemRepository(db);
+
+    const first = checklistItems.create({ taskId: task.id, name: "Create schema" });
+    const second = checklistItems.create({ taskId: task.id, name: "Build UI" });
+    const completedItem = checklistItems.update({ id: first.id, status: "done" });
+    checklistItems.reorderWithinTask(task.id, [second.id, first.id]);
+
+    expect(completedItem.status).toBe("done");
+    expect(tasks.findById(task.id)?.status).toBe("open");
+    expect(checklistItems.listByTask(task.id).map((item) => item.id)).toEqual([second.id, first.id]);
+
+    tasks.delete(task.id);
+    expect(checklistItems.listByTask(task.id)).toEqual([]);
   });
 
   it("persists manual ordering for categories, initiatives, and tasks", () => {

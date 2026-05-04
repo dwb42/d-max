@@ -43,6 +43,16 @@ export type Task = {
   completedAt?: string | null;
 };
 
+export type TaskChecklistItem = {
+  id: number;
+  taskId: number;
+  name: string;
+  status: "todo" | "done";
+  sortOrder: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type CalendarEntryType = "initiative_focus" | "task_work" | "standalone";
 export type CalendarEntryStatus = "open" | "done";
 
@@ -145,6 +155,7 @@ export type InitiativeDetail = {
 
 export type TaskDetail = {
   task: Task;
+  checklistItems?: TaskChecklistItem[];
   initiative: Initiative | null;
   category: Category | null;
 };

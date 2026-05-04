@@ -41,8 +41,10 @@ import {
   createChatConversation,
   createInitiative,
   createTask,
+  createTaskChecklistItem,
   createVoiceSession,
   deleteCalendarEntry,
+  deleteTaskChecklistItem,
   disconnectGoogleCalendar,
   fetchChatActivity,
   fetchChatConversations,
@@ -61,6 +63,7 @@ import {
   prewarmOpenClaw,
   reorderCategories,
   reorderInitiatives,
+  reorderTaskChecklistItems,
   reorderTasks,
   subscribeStateEvents,
   streamChatMessage,
@@ -70,6 +73,7 @@ import {
   updateCategory,
   updateInitiative,
   updateTask,
+  updateTaskChecklistItem,
   updateTaskStatus
 } from "./api.js";
 import type {
@@ -91,6 +95,7 @@ import type {
   PromptTemplateDefinition,
   StateEvent,
   Task,
+  TaskChecklistItem,
   TaskDetail
 } from "./types.js";
 import "./styles.css";
@@ -1348,6 +1353,26 @@ export default function App() {
               await refresh();
               setTaskDetail(await fetchTaskDetail(taskId));
             }}
+            onCreateChecklistItem={async (taskId, name) => {
+              await createTaskChecklistItem(taskId, { name });
+              await refresh();
+              setTaskDetail(await fetchTaskDetail(taskId));
+            }}
+            onUpdateChecklistItem={async (taskId, itemId, input) => {
+              await updateTaskChecklistItem(taskId, itemId, input);
+              await refresh();
+              setTaskDetail(await fetchTaskDetail(taskId));
+            }}
+            onDeleteChecklistItem={async (taskId, itemId) => {
+              await deleteTaskChecklistItem(taskId, itemId);
+              await refresh();
+              setTaskDetail(await fetchTaskDetail(taskId));
+            }}
+            onReorderChecklistItems={async (taskId, itemIds) => {
+              await reorderTaskChecklistItems(taskId, itemIds);
+              await refresh();
+              setTaskDetail(await fetchTaskDetail(taskId));
+            }}
           />
           )}
           {!isEmptyState && view === "tasks" && (
@@ -2513,6 +2538,21 @@ type CalendarDragState = {
   offsetY: number;
 };
 
+type CalendarProjectHoverInfo = {
+  name: string;
+  categoryName: string;
+  statusLabel: string;
+  dateRange: string | null;
+  openTaskCount: number;
+  summary: string | null;
+};
+
+type CalendarProjectHoverOverlay = {
+  info: CalendarProjectHoverInfo;
+  top: number;
+  left: number;
+};
+
 const calendarStartHour = 6;
 const calendarDefaultEndHour = 23;
 const calendarSnapMinutes = 10;
@@ -2539,6 +2579,7 @@ function CalendarPlannerView(props: {
   const [busy, setBusy] = useState(false);
   const [standaloneDraft, setStandaloneDraft] = useState<{ date: string; startMinutes: number } | null>(null);
   const [activeCalendarDrag, setActiveCalendarDrag] = useState<CalendarDragState | null>(null);
+  const [sidebarProjectHover, setSidebarProjectHover] = useState<CalendarProjectHoverOverlay | null>(null);
   const range = useMemo(() => calendarVisibleRange(props.controls.anchorDate, props.controls.mode), [props.controls.anchorDate, props.controls.mode]);
   const days = useMemo(() => daysInRange(range.start, range.end), [range]);
   const events = calendar?.events ?? [];
@@ -2553,6 +2594,25 @@ function CalendarPlannerView(props: {
     current.push(task);
     tasksByInitiative.set(task.initiativeId, current);
   }
+  const projectHoverInfoById = useMemo(() => {
+    const infoById = new Map<number, CalendarProjectHoverInfo>();
+    for (const initiative of props.initiatives.filter((candidate) => candidate.type === "project")) {
+      const category = props.categories.find((candidate) => candidate.id === initiative.categoryId);
+      const openTaskCount = props.tasks.filter((task) =>
+        task.initiativeId === initiative.id && task.status !== "done" && task.status !== "cancelled"
+      ).length;
+      const summary = initiative.summary?.trim() || firstMarkdownLine(initiative.markdown);
+      infoById.set(initiative.id, {
+        name: displayInitiativeName(initiative),
+        categoryName: category?.name ?? "Ohne Kategorie",
+        statusLabel: initiative.status === "active" ? "Aktiv" : initiative.status === "paused" ? "Pausiert" : initiative.status === "completed" ? "Abgeschlossen" : "Archiviert",
+        dateRange: formatInitiativeDateRangeForUi(initiative),
+        openTaskCount,
+        summary: summary || null
+      });
+    }
+    return infoById;
+  }, [props.categories, props.initiatives, props.tasks]);
 
   const loadCalendar = async () => {
     setBusy(true);
@@ -2606,6 +2666,16 @@ function CalendarPlannerView(props: {
     setActiveCalendarDrag({ payload, offsetY });
   }
 
+  function showSidebarProjectHover(element: HTMLElement, info: CalendarProjectHoverInfo) {
+    const rect = element.getBoundingClientRect();
+    const width = 250;
+    setSidebarProjectHover({
+      info,
+      top: Math.max(12, Math.min(rect.top, window.innerHeight - 230)),
+      left: Math.min(rect.right + 10, window.innerWidth - width - 12)
+    });
+  }
+
   async function createStandalone(title: string) {
     if (!standaloneDraft || !title.trim()) return;
     const startAt = dateTimeFromMinutes(standaloneDraft.date, standaloneDraft.startMinutes);
@@ -2628,10 +2698,16 @@ function CalendarPlannerView(props: {
             {activeProjects.map((initiative) => {
               const category = props.categories.find((candidate) => candidate.id === initiative.categoryId);
               const projectTasks = tasksByInitiative.get(initiative.id) ?? [];
+              const hoverInfo = projectHoverInfoById.get(initiative.id) ?? null;
               return (
                 <details key={initiative.id} className="calendar-project-card">
                   <summary
+                    className="calendar-project-summary"
                     draggable
+                    onMouseEnter={(event) => hoverInfo ? showSidebarProjectHover(event.currentTarget, hoverInfo) : undefined}
+                    onMouseLeave={() => setSidebarProjectHover(null)}
+                    onFocus={(event) => hoverInfo ? showSidebarProjectHover(event.currentTarget, hoverInfo) : undefined}
+                    onBlur={() => setSidebarProjectHover(null)}
                     onDragStart={(event) => startCalendarDrag(event, { kind: "initiative", initiativeId: initiative.id, title: displayInitiativeName(initiative) })}
                     onDragEnd={() => setActiveCalendarDrag(null)}
                   >
@@ -2664,30 +2740,42 @@ function CalendarPlannerView(props: {
         </div>
       </aside>
 
+      {sidebarProjectHover ? (
+        <CalendarProjectHoverCard
+          info={sidebarProjectHover.info}
+          placement="sidebar"
+          visible
+          style={{ top: sidebarProjectHover.top, left: sidebarProjectHover.left }}
+        />
+      ) : null}
+
       <div className="calendar-workspace">
-        <div className="calendar-frame" style={{ "--calendar-days": days.length } as CSSProperties}>
+        <div className={`calendar-frame ${props.controls.showAllDay ? "all-day-open" : "all-day-closed"}`} style={{ "--calendar-days": days.length } as CSSProperties}>
           {busy ? <div className="calendar-loading-overlay">Lade...</div> : null}
-          <div className="calendar-day-header-spacer" />
-          {days.map((day) => (
-            <div className="calendar-day-header" key={day}>
-              <strong>{formatCalendarDayName(day)}</strong>
-              <span>{formatDateOnly(day)}</span>
-            </div>
-          ))}
-          <div className={`calendar-all-day-label ${props.controls.showAllDay ? "expanded" : "collapsed"}`}>
+          <div className="calendar-day-header-spacer">
             <button
               className={`calendar-row-toggle ${props.controls.showAllDay ? "active" : ""}`}
               type="button"
               onClick={props.onShowAllDayChange}
               aria-expanded={props.controls.showAllDay}
+              title={props.controls.showAllDay ? "Ganztag ausblenden" : "Ganztag einblenden"}
             >
               <ChevronDown size={15} />
               <span>Ganztag</span>
             </button>
           </div>
           {days.map((day) => (
-            <div className={`calendar-all-day-column ${props.controls.showAllDay ? "expanded" : "collapsed"}`} key={day}>
-              {props.controls.showAllDay ? events.filter((event) => event.allDay && eventOverlapsDay(event, day)).map((event) => (
+            <div className="calendar-day-header" key={day}>
+              <strong>{formatCalendarDayName(day)}</strong>
+              <span>{formatDateOnly(day)}</span>
+            </div>
+          ))}
+          {props.controls.showAllDay ? (
+            <>
+              <div className="calendar-all-day-label" aria-hidden="true" />
+              {days.map((day) => (
+                <div className="calendar-all-day-column" key={day}>
+                  {events.filter((event) => event.allDay && eventOverlapsDay(event, day)).map((event) => (
                 <button
                   key={event.id}
                   className={`calendar-all-day-event ${event.source}`}
@@ -2696,9 +2784,11 @@ function CalendarPlannerView(props: {
                 >
                   {event.title}
                 </button>
-              )) : null}
-            </div>
-          ))}
+                  ))}
+                </div>
+              ))}
+            </>
+          ) : null}
 
           <div className="calendar-time-scroll">
             <div className="calendar-time-axis" style={{ height: gridHeight }}>
@@ -2715,6 +2805,7 @@ function CalendarPlannerView(props: {
                 events={timedEvents.filter((event) => datePart(event.startAt) === day)}
                 allEvents={events}
                 activeCalendarDrag={activeCalendarDrag}
+                projectHoverInfoById={projectHoverInfoById}
                 height={gridHeight}
                 endHour={endHour}
                 onDropEntry={createDroppedEntry}
@@ -2784,6 +2875,7 @@ function CalendarDayColumn(props: {
   events: CalendarViewEvent[];
   allEvents: CalendarViewEvent[];
   activeCalendarDrag: CalendarDragState | null;
+  projectHoverInfoById: Map<number, CalendarProjectHoverInfo>;
   height: number;
   endHour: number;
   onDropEntry: (payload: CalendarDragPayload, date: string, startMinutes: number) => Promise<void>;
@@ -2861,6 +2953,7 @@ function CalendarDayColumn(props: {
           onResize={props.onResize}
           onDragStart={props.onDragStart}
           onDragEnd={props.onDragEnd}
+          projectHoverInfoById={props.projectHoverInfoById}
         />
       ))}
     </div>
@@ -2875,13 +2968,15 @@ function CalendarEventBlock(props: {
   onResize: (entryId: number, input: { startAt?: string; endAt?: string }) => Promise<void>;
   onDragStart: (event: DragEvent<HTMLElement>, payload: CalendarDragPayload) => void;
   onDragEnd: () => void;
+  projectHoverInfoById: Map<number, CalendarProjectHoverInfo>;
 }) {
   const event = props.event;
   const color = eventColor(event);
   const draggable = event.source === "dmax";
+  const projectHoverInfo = event.source === "dmax" && event.initiativeId ? props.projectHoverInfoById.get(event.initiativeId) ?? null : null;
   return (
     <article
-      className={`calendar-event-block ${event.source} ${event.source === "dmax" && event.status === "done" ? "done" : ""}`}
+      className={`calendar-event-block ${event.source} ${event.source === "dmax" && event.status === "done" ? "done" : ""} ${projectHoverInfo ? "has-project-info" : ""}`}
       draggable={draggable}
       onDragStart={(dragEvent) => {
         if (event.source !== "dmax") return;
@@ -2928,7 +3023,47 @@ function CalendarEventBlock(props: {
       {event.source === "dmax" ? (
         <button className="calendar-resize-handle bottom" title="Ende anpassen" onPointerDown={(pointerEvent) => startCalendarResize(pointerEvent, event, "bottom", props.onResize)} />
       ) : null}
+      {projectHoverInfo ? <CalendarProjectHoverCard info={projectHoverInfo} placement="calendar" /> : null}
     </article>
+  );
+}
+
+function CalendarProjectHoverCard({
+  info,
+  placement,
+  visible = false,
+  style
+}: {
+  info: CalendarProjectHoverInfo;
+  placement: "sidebar" | "calendar";
+  visible?: boolean;
+  style?: CSSProperties;
+}) {
+  return (
+    <div className={`calendar-project-hover-card ${placement} ${visible ? "visible" : ""}`} role="tooltip" style={style}>
+      <strong>{info.name}</strong>
+      <dl>
+        <div>
+          <dt>Kategorie</dt>
+          <dd>{info.categoryName}</dd>
+        </div>
+        <div>
+          <dt>Status</dt>
+          <dd>{info.statusLabel}</dd>
+        </div>
+        {info.dateRange ? (
+          <div>
+            <dt>Zeitraum</dt>
+            <dd>{info.dateRange}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt>Offene Tasks</dt>
+          <dd>{info.openTaskCount}</dd>
+        </div>
+      </dl>
+      {info.summary ? <p>{info.summary}</p> : null}
+    </div>
   );
 }
 
@@ -3638,6 +3773,10 @@ function TaskDetailView(props: {
   onBack: () => void;
   onOpenInitiative: (initiativeId: number) => void;
   onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void>;
+  onCreateChecklistItem: (taskId: number, name: string) => Promise<void>;
+  onUpdateChecklistItem: (taskId: number, itemId: number, input: { name?: string; status?: TaskChecklistItem["status"] }) => Promise<void>;
+  onDeleteChecklistItem: (taskId: number, itemId: number) => Promise<void>;
+  onReorderChecklistItems: (taskId: number, itemIds: number[]) => Promise<void>;
 }) {
   if (!props.detail) {
     return <EmptyState title="Loading task..." />;
@@ -3664,6 +3803,205 @@ function TaskDetailView(props: {
       </section>
 
       <TaskNotesPanel task={task} onUpdateTask={props.onUpdateTask} />
+      <TaskChecklistPanel
+        task={task}
+        items={props.detail.checklistItems ?? []}
+        onCreateItem={props.onCreateChecklistItem}
+        onUpdateItem={props.onUpdateChecklistItem}
+        onDeleteItem={props.onDeleteChecklistItem}
+        onReorderItems={props.onReorderChecklistItems}
+      />
+    </section>
+  );
+}
+
+function TaskChecklistPanel(props: {
+  task: Task;
+  items: TaskChecklistItem[];
+  onCreateItem: (taskId: number, name: string) => Promise<void>;
+  onUpdateItem: (taskId: number, itemId: number, input: { name?: string; status?: TaskChecklistItem["status"] }) => Promise<void>;
+  onDeleteItem: (taskId: number, itemId: number) => Promise<void>;
+  onReorderItems: (taskId: number, itemIds: number[]) => Promise<void>;
+}) {
+  const newItemInputRef = useRef<HTMLInputElement | null>(null);
+  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [busyItemId, setBusyItemId] = useState<number | null>(null);
+  const [editingItemId, setEditingItemId] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [draggedItemId, setDraggedItemId] = useState<number | null>(null);
+  const [dropItemId, setDropItemId] = useState<number | null>(null);
+  const itemIds = props.items.map((item) => item.id);
+
+  useEffect(() => {
+    setNewName("");
+    setCreating(false);
+    setBusyItemId(null);
+    setEditingItemId(null);
+    setEditingName("");
+    setDraggedItemId(null);
+    setDropItemId(null);
+  }, [props.task.id]);
+
+  const createItem = async () => {
+    const trimmedName = newName.trim();
+    if (!trimmedName || creating) return;
+    setCreating(true);
+    try {
+      await props.onCreateItem(props.task.id, trimmedName);
+      setNewName("");
+    } finally {
+      setCreating(false);
+      requestAnimationFrame(() => newItemInputRef.current?.focus());
+    }
+  };
+
+  const saveItemName = async (item: TaskChecklistItem) => {
+    const trimmedName = editingName.trim();
+    if (!trimmedName || busyItemId) return;
+    if (trimmedName === item.name) {
+      setEditingItemId(null);
+      return;
+    }
+    setBusyItemId(item.id);
+    try {
+      await props.onUpdateItem(props.task.id, item.id, { name: trimmedName });
+      setEditingItemId(null);
+    } finally {
+      setBusyItemId(null);
+    }
+  };
+
+  const toggleItem = async (item: TaskChecklistItem) => {
+    if (busyItemId) return;
+    setBusyItemId(item.id);
+    try {
+      await props.onUpdateItem(props.task.id, item.id, { status: item.status === "done" ? "todo" : "done" });
+    } finally {
+      setBusyItemId(null);
+    }
+  };
+
+  const deleteItem = async (item: TaskChecklistItem) => {
+    if (busyItemId) return;
+    setBusyItemId(item.id);
+    try {
+      await props.onDeleteItem(props.task.id, item.id);
+    } finally {
+      setBusyItemId(null);
+    }
+  };
+
+  return (
+    <section className="panel task-checklist-panel">
+      <div className="task-checklist-header">
+        <h2>Checkliste</h2>
+        <span>{props.items.filter((item) => item.status === "done").length}/{props.items.length}</span>
+      </div>
+
+      <div className="task-checklist-items">
+        {props.items.map((item) => (
+          <article
+            key={item.id}
+            className={`task-checklist-item ${item.status} ${draggedItemId === item.id ? "dragging" : ""} ${dropItemId === item.id ? "drag-over" : ""}`}
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = "move";
+              setDraggedItemId(item.id);
+            }}
+            onDragOver={(event) => {
+              if (!draggedItemId) return;
+              event.preventDefault();
+              setDropItemId(item.id);
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              if (!draggedItemId) return;
+              void props.onReorderItems(props.task.id, moveIdToDropPosition(itemIds, draggedItemId, item.id, dropAfter(event)));
+              setDraggedItemId(null);
+              setDropItemId(null);
+            }}
+            onDragEnd={() => {
+              setDraggedItemId(null);
+              setDropItemId(null);
+            }}
+          >
+            <button
+              type="button"
+              className="icon-button"
+              disabled={busyItemId === item.id}
+              onClick={() => void toggleItem(item)}
+              title={item.status === "done" ? "Wieder öffnen" : "Abhaken"}
+            >
+              {item.status === "done" ? <CheckCircle2 size={18} /> : <Circle size={18} />}
+            </button>
+            {editingItemId === item.id ? (
+              <form
+                className="task-checklist-name-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveItemName(item);
+                }}
+              >
+                <input
+                  autoFocus
+                  value={editingName}
+                  disabled={busyItemId === item.id}
+                  onChange={(event) => setEditingName(event.target.value)}
+                  onBlur={() => void saveItemName(item)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setEditingItemId(null);
+                      setEditingName("");
+                    }
+                  }}
+                />
+              </form>
+            ) : (
+              <button
+                type="button"
+                className="task-checklist-name"
+                onClick={() => {
+                  setEditingItemId(item.id);
+                  setEditingName(item.name);
+                }}
+                title="Name bearbeiten"
+              >
+                {item.name}
+              </button>
+            )}
+            <button
+              type="button"
+              className="icon-button danger"
+              disabled={busyItemId === item.id}
+              onClick={() => void deleteItem(item)}
+              title="Checklisteneintrag löschen"
+            >
+              <Trash2 size={16} />
+            </button>
+          </article>
+        ))}
+      </div>
+
+      <form
+        className="task-checklist-create-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void createItem();
+        }}
+      >
+        <input
+          ref={newItemInputRef}
+          value={newName}
+          disabled={creating}
+          placeholder="Neuer Eintrag"
+          onChange={(event) => setNewName(event.target.value)}
+        />
+        <button type="submit" className="icon-button" disabled={creating || !newName.trim()} title="Checklisteneintrag hinzufügen">
+          <Plus size={17} />
+        </button>
+      </form>
     </section>
   );
 }

@@ -14,6 +14,7 @@ import { InitiativeRepository } from "../repositories/initiatives.js";
 import type { InitiativeType } from "../repositories/initiatives.js";
 import type { TaskStatus } from "../repositories/tasks.js";
 import { TaskRepository } from "../repositories/tasks.js";
+import { TaskChecklistItemRepository } from "../repositories/task-checklist-items.js";
 import { StateEventRepository } from "../repositories/state-events.js";
 import type { CreateStateEventInput, StateEvent } from "../repositories/state-events.js";
 import { AppChatService } from "../chat/app-chat.js";
@@ -41,6 +42,7 @@ const calendarSources = new CalendarSourceRepository(db);
 const googleCalendarAuth = new GoogleCalendarAuth();
 const initiatives = new InitiativeRepository(db);
 const tasks = new TaskRepository(db);
+const taskChecklistItems = new TaskChecklistItemRepository(db);
 const stateEvents = new StateEventRepository(db);
 const chat = new AppChatService(db);
 
@@ -357,7 +359,7 @@ const server = http.createServer(async (req, res) => {
 
       const initiative = initiatives.findById(task.initiativeId);
       const category = initiative ? categories.findById(initiative.categoryId) : null;
-      sendJson(res, 200, { task, initiative, category });
+      sendJson(res, 200, { task, checklistItems: taskChecklistItems.listByTask(task.id), initiative, category });
       return;
     }
 
@@ -374,6 +376,72 @@ const server = http.createServer(async (req, res) => {
       const task = tasks.complete(Number(completeTaskMatch[1]));
       emitApiStateEvent({ operation: "completeTask", entityType: "task", entityId: task.id, taskId: task.id, initiativeId: task.initiativeId });
       sendJson(res, 200, { task });
+      return;
+    }
+
+    const checklistItemCollectionMatch = url.pathname.match(/^\/api\/tasks\/(\d+)\/checklist-items$/);
+    if (req.method === "POST" && checklistItemCollectionMatch) {
+      const taskId = Number(checklistItemCollectionMatch[1]);
+      const task = tasks.findById(taskId);
+      if (!task) {
+        sendJson(res, 404, { error: "Task not found" });
+        return;
+      }
+
+      const body = createTaskChecklistItemBody.parse(await readJson(req));
+      const item = taskChecklistItems.create({ taskId, ...body });
+      emitApiStateEvent({ operation: "createTaskChecklistItem", entityType: "task", entityId: task.id, taskId: task.id, initiativeId: task.initiativeId });
+      sendJson(res, 200, { item });
+      return;
+    }
+
+    const checklistItemOrderMatch = url.pathname.match(/^\/api\/tasks\/(\d+)\/checklist-items\/order$/);
+    if (req.method === "PATCH" && (checklistItemOrderMatch || checklistItemCollectionMatch)) {
+      const taskId = Number((checklistItemOrderMatch ?? checklistItemCollectionMatch)![1]);
+      const task = tasks.findById(taskId);
+      if (!task) {
+        sendJson(res, 404, { error: "Task not found" });
+        return;
+      }
+
+      const body = reorderTaskChecklistItemsBody.parse(await readJson(req));
+      const items = taskChecklistItems.reorderWithinTask(taskId, body.itemIds);
+      emitApiStateEvent({ operation: "reorderTaskChecklistItems", entityType: "task", entityId: task.id, taskId: task.id, initiativeId: task.initiativeId });
+      sendJson(res, 200, { items });
+      return;
+    }
+
+    const checklistItemMatch = url.pathname.match(/^\/api\/tasks\/(\d+)\/checklist-items\/(\d+)$/);
+    if (req.method === "PATCH" && checklistItemMatch) {
+      const taskId = Number(checklistItemMatch[1]);
+      const itemId = Number(checklistItemMatch[2]);
+      const task = tasks.findById(taskId);
+      const existingItem = taskChecklistItems.findById(itemId);
+      if (!task || !existingItem || existingItem.taskId !== taskId) {
+        sendJson(res, 404, { error: "Checklist item not found" });
+        return;
+      }
+
+      const body = updateTaskChecklistItemBody.parse(await readJson(req));
+      const item = taskChecklistItems.update({ id: itemId, ...body });
+      emitApiStateEvent({ operation: "updateTaskChecklistItem", entityType: "task", entityId: task.id, taskId: task.id, initiativeId: task.initiativeId });
+      sendJson(res, 200, { item });
+      return;
+    }
+
+    if (req.method === "DELETE" && checklistItemMatch) {
+      const taskId = Number(checklistItemMatch[1]);
+      const itemId = Number(checklistItemMatch[2]);
+      const task = tasks.findById(taskId);
+      const existingItem = taskChecklistItems.findById(itemId);
+      if (!task || !existingItem || existingItem.taskId !== taskId) {
+        sendJson(res, 404, { error: "Checklist item not found" });
+        return;
+      }
+
+      taskChecklistItems.delete(itemId);
+      emitApiStateEvent({ operation: "deleteTaskChecklistItem", entityType: "task", entityId: task.id, taskId: task.id, initiativeId: task.initiativeId });
+      sendJson(res, 200, { deleted: true, id: itemId });
       return;
     }
 
@@ -733,6 +801,19 @@ const createTaskBody = z.object({
   priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
   notes: z.string().trim().min(1).nullable().optional(),
   dueAt: initiativeDateBody.optional()
+});
+
+const createTaskChecklistItemBody = z.object({
+  name: z.string().trim().min(1)
+});
+
+const updateTaskChecklistItemBody = z.object({
+  name: z.string().trim().min(1).optional(),
+  status: z.enum(["todo", "done"]).optional()
+});
+
+const reorderTaskChecklistItemsBody = z.object({
+  itemIds: z.array(z.number().int().positive()).min(1)
 });
 
 const voiceSessionBody = z.object({

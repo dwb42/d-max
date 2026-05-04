@@ -60,6 +60,9 @@ concise summary before confirmation.
 - Treat "make tasks from this" as candidate proposal, not automatic batch
   creation.
 - Create only exact task titles Dietrich confirms.
+- Use task checklist tools for simple subtasks inside an existing task. Items
+  have only `name` and `status` (`todo` or `done`); checklist completion does
+  not automatically complete the parent task.
 
 ## Silent Replies
 

@@ -43,6 +43,16 @@ create table if not exists tasks (
   completed_at text
 );
 
+create table if not exists task_checklist_items (
+  id integer primary key,
+  task_id integer not null references tasks(id) on delete cascade,
+  name text not null,
+  status text not null default 'todo' check (status in ('todo', 'done')),
+  sort_order integer not null default 0,
+  created_at text not null,
+  updated_at text not null
+);
+
 create table if not exists calendar_entries (
   id integer primary key,
   type text not null check (type in ('initiative_focus', 'task_work', 'standalone')),
@@ -138,6 +148,8 @@ create index if not exists idx_tasks_initiative_sort_order on tasks(initiative_i
 create index if not exists idx_tasks_status on tasks(status);
 create index if not exists idx_tasks_priority on tasks(priority);
 create index if not exists idx_tasks_due_at on tasks(due_at);
+create index if not exists idx_task_checklist_items_task_sort_order on task_checklist_items(task_id, sort_order, id);
+create index if not exists idx_task_checklist_items_status on task_checklist_items(status);
 create index if not exists idx_calendar_entries_start_at on calendar_entries(start_at);
 create index if not exists idx_calendar_entries_end_at on calendar_entries(end_at);
 create index if not exists idx_calendar_entries_status on calendar_entries(status);
