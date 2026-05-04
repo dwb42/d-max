@@ -51,6 +51,7 @@ export type OpenClawAgentOptions = {
   sessionId?: string;
   timeoutSeconds?: number;
   readyTimeoutMs?: number;
+  signal?: AbortSignal;
   diagnostics?: ChatTurnDiagnosticContext;
 };
 
@@ -144,6 +145,7 @@ export async function runOpenClawAgentTurn(message: string, options: OpenClawAge
       model,
       sessionId,
       timeoutSeconds,
+      signal: options.signal,
       diagnostics
     });
   } catch (error) {
@@ -158,6 +160,7 @@ export async function runOpenClawAgentTurn(message: string, options: OpenClawAge
         model,
         sessionId,
         timeoutSeconds,
+        signal: options.signal,
         diagnostics
       });
     }
@@ -211,6 +214,7 @@ export async function runOpenClawSessionTurn(
       stateDir,
       model,
       timeoutSeconds,
+      signal: options.signal,
       diagnostics
     });
   } catch (error) {
@@ -224,6 +228,7 @@ export async function runOpenClawSessionTurn(
         stateDir,
         model,
         timeoutSeconds,
+        signal: options.signal,
         diagnostics
       });
     }
@@ -758,6 +763,7 @@ async function retryOpenClawGatewayTurn(
   message: string,
   options: Required<Pick<OpenClawAgentOptions, "configPath" | "stateDir" | "model" | "sessionId" | "timeoutSeconds">> & {
     diagnostics?: ChatTurnDiagnosticContext;
+    signal?: AbortSignal;
   }
 ): Promise<OpenClawAgentResult> {
   try {
@@ -1104,6 +1110,7 @@ async function runOpenClawGatewayTurn(
   message: string,
   options: Required<Pick<OpenClawAgentOptions, "configPath" | "stateDir" | "model" | "sessionId" | "timeoutSeconds">> & {
     diagnostics?: ChatTurnDiagnosticContext;
+    signal?: AbortSignal;
   }
 ): Promise<OpenClawAgentResult> {
   const sessionFile = getOpenClawSessionFile(options.stateDir, options.sessionId);
@@ -1126,7 +1133,8 @@ async function runOpenClawGatewayTurn(
       stateDir: options.stateDir,
       timeoutMs: options.timeoutSeconds * 1000,
       sessionFallback: { sessionFile, initialSessionFileSize, sessionId: options.sessionId },
-      diagnostics: options.diagnostics
+      diagnostics: options.diagnostics,
+      signal: options.signal
     }
   );
   markOpenClawGatewayReady();
@@ -1145,6 +1153,7 @@ async function runOpenClawGatewaySessionTurn(
   input: { sessionKey: string; label?: string | null },
   options: Required<Pick<OpenClawAgentOptions, "configPath" | "stateDir" | "model" | "timeoutSeconds">> & {
     diagnostics?: ChatTurnDiagnosticContext;
+    signal?: AbortSignal;
   }
 ): Promise<OpenClawAgentResult> {
   traceOpenClaw(options.diagnostics, "openclaw_sessions_create_started", {
@@ -1200,7 +1209,8 @@ async function runOpenClawGatewaySessionTurn(
     {
       stateDir: options.stateDir,
       timeoutMs: Math.min(90_000, Math.max(5_000, timeoutMs)),
-      diagnostics: options.diagnostics
+      diagnostics: options.diagnostics,
+      signal: options.signal
     }
   );
   markOpenClawGatewayReady();
@@ -1217,6 +1227,22 @@ async function runOpenClawGatewaySessionTurn(
     throw new Error("OpenClaw sessions.send did not return a runId.");
   }
 
+  const abortRun = () => {
+    void callOpenClawGateway(
+      "chat.abort",
+      { sessionKey: input.sessionKey, runId },
+      {
+        stateDir: options.stateDir,
+        timeoutMs: 5_000,
+        diagnostics: options.diagnostics
+      }
+    ).catch(() => undefined);
+  };
+  if (options.signal?.aborted) {
+    abortRun();
+    throw new DOMException("OpenClaw run aborted.", "AbortError");
+  }
+  options.signal?.addEventListener("abort", abortRun, { once: true });
   traceOpenClaw(options.diagnostics, "openclaw_agent_wait_started", {
     runId,
     timeoutMs
@@ -1228,18 +1254,24 @@ async function runOpenClawGatewaySessionTurn(
     timeoutMs
   });
   const agentWaitStartedAt = performance.now();
-  const waitResult = await callOpenClawGateway(
-    "agent.wait",
-    {
-      runId,
-      timeoutMs
-    },
-    {
-      stateDir: options.stateDir,
-      timeoutMs: timeoutMs + 2_000,
-      diagnostics: options.diagnostics
-    }
-  );
+  let waitResult: unknown;
+  try {
+    waitResult = await callOpenClawGateway(
+      "agent.wait",
+      {
+        runId,
+        timeoutMs
+      },
+      {
+        stateDir: options.stateDir,
+        timeoutMs: timeoutMs + 2_000,
+        diagnostics: options.diagnostics,
+        signal: options.signal
+      }
+    );
+  } finally {
+    options.signal?.removeEventListener("abort", abortRun);
+  }
   markOpenClawGatewayReady();
   latencyTrace(options.diagnostics, "dmax.agent_wait.after", {
     sessionKey: input.sessionKey,
@@ -1254,16 +1286,26 @@ async function runOpenClawGatewaySessionTurn(
   if (waitStatus !== "ok") {
     throw new Error(`OpenClaw run ${runId} finished with status ${waitStatus ?? "unknown"}.`);
   }
+  if (options.signal?.aborted) {
+    throw new DOMException("OpenClaw run aborted.", "AbortError");
+  }
 
   traceOpenClaw(options.diagnostics, "openclaw_session_reply_wait_started", {
     runId,
     timeoutMs: SESSION_REPLY_WAIT_TIMEOUT_MS
   });
-  const reply = await waitForCompletedSessionReply(sessionFile, initialSessionFileSize, SESSION_REPLY_WAIT_TIMEOUT_MS, options.diagnostics, {
-    sessionKey: input.sessionKey,
-    sessionId: prepared.sessionId,
-    runId
-  });
+  const reply = await raceWithAbort(
+    waitForCompletedSessionReply(sessionFile, initialSessionFileSize, SESSION_REPLY_WAIT_TIMEOUT_MS, options.diagnostics, {
+      sessionKey: input.sessionKey,
+      sessionId: prepared.sessionId,
+      runId
+    }),
+    options.signal,
+    "OpenClaw run aborted."
+  );
+  if (options.signal?.aborted) {
+    throw new DOMException("OpenClaw run aborted.", "AbortError");
+  }
   traceOpenClaw(options.diagnostics, "openclaw_session_reply_wait_finished", {
     runId,
     found: Boolean(reply)
@@ -1292,6 +1334,21 @@ async function runOpenClawGatewaySessionTurn(
     sessionId: prepared.sessionId,
     sessionKey: prepared.key
   };
+}
+
+function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined, message: string): Promise<T> {
+  if (!signal) {
+    return promise;
+  }
+  if (signal.aborted) {
+    return Promise.reject(new DOMException(message, "AbortError"));
+  }
+
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new DOMException(message, "AbortError"));
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }
 
 export function listOpenClawSessionActivities(sessionId: string, options: Pick<OpenClawAgentOptions, "stateDir"> = {}): OpenClawActivity[] {
@@ -1417,6 +1474,7 @@ async function callOpenClawGateway(
     timeoutMs: number;
     sessionFallback?: { sessionFile: string; initialSessionFileSize: number; sessionId: string };
     diagnostics?: ChatTurnDiagnosticContext;
+    signal?: AbortSignal;
   }
 ): Promise<unknown> {
   traceOpenClaw(options.diagnostics, "openclaw_gateway_client_module_load_started", { method });
@@ -1427,7 +1485,17 @@ async function callOpenClawGateway(
     let settled = false;
     let fallbackTimeout: ReturnType<typeof setTimeout> | null = null;
     let requestStarted = false;
-    const timeout = setTimeout(() => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const abort = () => {
+      traceOpenClaw(options.diagnostics, "openclaw_gateway_call_aborted", { method });
+      finish(new DOMException("OpenClaw gateway call aborted.", "AbortError"));
+    };
+    if (options.signal?.aborted) {
+      abort();
+      return;
+    }
+    options.signal?.addEventListener("abort", abort, { once: true });
+    timeout = setTimeout(() => {
       if (!options.sessionFallback) {
         traceOpenClaw(options.diagnostics, "openclaw_gateway_call_timeout", { method, timeoutMs: options.timeoutMs });
         finish(new Error(`OpenClaw gateway call timed out after ${Math.round(options.timeoutMs / 1000)}s.`));
@@ -1526,13 +1594,16 @@ async function callOpenClawGateway(
       }
 
       settled = true;
-      clearTimeout(timeout);
+      if (timeout) {
+        clearTimeout(timeout);
+      }
       if (fallbackTimeout) {
         clearTimeout(fallbackTimeout);
       }
       if (sessionPoll) {
         clearInterval(sessionPoll);
       }
+      options.signal?.removeEventListener("abort", abort);
 
       if (error) {
         traceOpenClaw(options.diagnostics, "openclaw_gateway_call_finished", {

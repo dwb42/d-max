@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
+import { CalendarEntryRepository } from "../../src/repositories/calendar-entries.js";
+import { CalendarSourceRepository } from "../../src/repositories/calendar-sources.js";
 import { CategoryRepository } from "../../src/repositories/categories.js";
 import { InitiativeRepository } from "../../src/repositories/initiatives.js";
 import { TaskRepository } from "../../src/repositories/tasks.js";
@@ -147,5 +149,48 @@ describe("repositories", () => {
     ]);
     expect(initiatives.list({ categoryId: secondCategory.id }).map((project) => project.id)).toEqual([secondProject.id, firstProject.id]);
     expect(tasks.list({ initiativeId: secondProject.id }).map((task) => task.id)).toEqual([secondTask.id, firstTask.id]);
+  });
+
+  it("creates calendar entries and completes linked tasks", () => {
+    const category = new CategoryRepository(db).create({ name: "Business" });
+    const initiative = new InitiativeRepository(db).create({ categoryId: category.id, name: "d-max" });
+    const task = new TaskRepository(db).create({ initiativeId: initiative.id, title: "Plan calendar MVP" });
+    const calendarEntries = new CalendarEntryRepository(db);
+
+    const entry = calendarEntries.create({
+      type: "task_work",
+      title: task.title,
+      startAt: "2026-05-04T09:00:00.000",
+      endAt: "2026-05-04T10:30:00.000",
+      taskId: task.id
+    });
+    const completed = calendarEntries.complete(entry.id, "2026-05-04T10:31:00.000Z");
+
+    expect(completed.status).toBe("done");
+    expect(new TaskRepository(db).findById(task.id)).toMatchObject({
+      status: "done",
+      completedAt: "2026-05-04T10:31:00.000Z"
+    });
+  });
+
+  it("stores calendar source configuration without credentials", () => {
+    const sources = new CalendarSourceRepository(db);
+
+    const source = sources.create({
+      accountLabel: "dw@b42.io",
+      calendarId: "primary",
+      displayName: "Business",
+      color: "#27806f"
+    });
+    const disabled = sources.update({ id: source.id, enabled: false });
+
+    expect(disabled).toMatchObject({
+      provider: "google",
+      accountLabel: "dw@b42.io",
+      calendarId: "primary",
+      displayName: "Business",
+      enabled: false,
+      readOnly: true
+    });
   });
 });

@@ -6,10 +6,12 @@ import { createTestDatabase } from "../helpers/test-db.js";
 const CONTEXT_RELEVANT_TABLES = [
   "categories",
   "initiatives",
-  "tasks"
+  "tasks",
+  "calendar_entries",
+  "calendar_sources"
 ];
 
-const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "00651ad42336a75774c2dfa5f195193b61ce060e1719eb6b590cfe2bb8a3cad6";
+const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "5932770e51d8e351352afd551fc7e7c49d27281328bfc1037cd7beadb5d4a92c";
 
 describe("context resolver schema synchronization", () => {
   let db: Database.Database;

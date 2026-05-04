@@ -3,9 +3,15 @@ import type {
   AppConversation,
   AppOverview,
   AppPromptLog,
+  CalendarEntry,
+  CalendarEntryType,
+  CalendarSource,
+  CalendarViewData,
   Category,
   ChatActivity,
   ConversationContext,
+  GoogleCalendarAuthStatus,
+  GoogleCalendarListItem,
   LiveKitVoiceSession,
   OpenClawStatus,
   PersistedChatMessage,
@@ -25,6 +31,120 @@ export async function fetchOverview(): Promise<AppOverview> {
 export async function fetchOpenClawStatus(): Promise<OpenClawStatus> {
   const response = await request<{ openClaw: OpenClawStatus }>("/api/openclaw/status");
   return response.openClaw;
+}
+
+export async function fetchCalendarView(start: string, end: string): Promise<CalendarViewData> {
+  return request<CalendarViewData>(`/api/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+}
+
+export async function createCalendarEntry(input: {
+  type: CalendarEntryType;
+  title: string;
+  startAt: string;
+  endAt: string;
+  initiativeId?: number | null;
+  taskId?: number | null;
+  notes?: string | null;
+}): Promise<CalendarEntry> {
+  const response = await request<{ entry: CalendarEntry }>("/api/calendar/entries", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.entry;
+}
+
+export async function updateCalendarEntry(
+  id: number,
+  input: {
+    type?: CalendarEntryType;
+    title?: string;
+    startAt?: string;
+    endAt?: string;
+    status?: CalendarEntry["status"];
+    initiativeId?: number | null;
+    taskId?: number | null;
+    notes?: string | null;
+  }
+): Promise<CalendarEntry> {
+  const response = await request<{ entry: CalendarEntry }>(`/api/calendar/entries/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.entry;
+}
+
+export async function completeCalendarEntry(id: number): Promise<CalendarEntry> {
+  const response = await request<{ entry: CalendarEntry }>(`/api/calendar/entries/${id}/complete`, { method: "POST" });
+  return response.entry;
+}
+
+export async function deleteCalendarEntry(id: number): Promise<void> {
+  await request(`/api/calendar/entries/${id}`, { method: "DELETE" });
+}
+
+export async function fetchCalendarSources(): Promise<CalendarSource[]> {
+  const response = await request<{ sources: CalendarSource[] }>("/api/config/calendar-sources");
+  return response.sources;
+}
+
+export async function fetchGoogleCalendarAuthStatus(): Promise<GoogleCalendarAuthStatus> {
+  const response = await request<{ googleCalendar: GoogleCalendarAuthStatus }>("/api/config/google-calendar/status");
+  return response.googleCalendar;
+}
+
+export async function createGoogleCalendarAuthUrl(input: { loginHint?: string | null } = {}): Promise<string> {
+  const response = await request<{ authUrl: string }>("/api/config/google-calendar/auth-url", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.authUrl;
+}
+
+export async function disconnectGoogleCalendar(): Promise<void> {
+  await request("/api/config/google-calendar/disconnect", { method: "POST" });
+}
+
+export async function fetchGoogleCalendars(): Promise<GoogleCalendarListItem[]> {
+  const response = await request<{ calendars: GoogleCalendarListItem[] }>("/api/config/google-calendar/calendars");
+  return response.calendars;
+}
+
+export async function createCalendarSource(input: {
+  accountLabel: string;
+  calendarId: string;
+  displayName: string;
+  color?: string | null;
+  enabled?: boolean;
+  readOnly?: boolean;
+}): Promise<CalendarSource> {
+  const response = await request<{ source: CalendarSource }>("/api/config/calendar-sources", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.source;
+}
+
+export async function updateCalendarSource(
+  id: number,
+  input: {
+    accountLabel?: string;
+    calendarId?: string;
+    displayName?: string;
+    color?: string | null;
+    enabled?: boolean;
+    readOnly?: boolean;
+  }
+): Promise<CalendarSource> {
+  const response = await request<{ source: CalendarSource }>(`/api/config/calendar-sources/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.source;
 }
 
 export async function prewarmOpenClaw(context?: ConversationContext | null): Promise<void> {
@@ -233,7 +353,8 @@ export async function streamChatMessage(
     onConversation?: (payload: { conversationId: number | null; context: ConversationContext }) => void;
     onActivity?: (activities: ChatActivity[]) => void;
     onAnswerDelta?: (delta: string) => void;
-  } = {}
+  } = {},
+  options: { signal?: AbortSignal } = {}
 ): Promise<AppChatResult> {
   const trace = createBrowserChatTrace();
   recordBrowserChatTraceEvent(trace, "browser_stream_request_started", {
@@ -244,7 +365,8 @@ export async function streamChatMessage(
   const response = await fetch("/api/chat/message/stream", {
     method: "POST",
     headers: { "content-type": "application/json", "x-dmax-trace-id": trace.traceId },
-    body: JSON.stringify(input)
+    body: JSON.stringify(input),
+    signal: options.signal
   });
   recordBrowserChatTraceEvent(trace, "browser_stream_response_headers_received", {
     ok: response.ok,

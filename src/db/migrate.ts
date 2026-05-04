@@ -19,6 +19,7 @@ export function migrate(databasePath?: string): void {
     migrateCategoryEmojis(db);
     migrateInitiativeTypes(db);
     migrateInitiativeDates(db);
+    migrateCalendarDomain(db);
     db.exec(schema);
     ensureInboxCategory(db);
     migratePromptLogs(db);
@@ -191,7 +192,7 @@ function migrateStateEvents(db: ReturnType<typeof openDatabase>): void {
       id integer primary key,
       source text not null check (source in ('api', 'tool')),
       operation text not null,
-      entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'task')),
+      entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'task', 'calendar_entry', 'calendar_source')),
       entity_id integer,
       category_id integer,
       initiative_id integer,
@@ -202,6 +203,8 @@ function migrateStateEvents(db: ReturnType<typeof openDatabase>): void {
     create index if not exists idx_app_state_events_created_at on app_state_events(created_at, id);
     create index if not exists idx_app_state_events_scope on app_state_events(entity_type, entity_id, initiative_id, task_id, category_id);
   `);
+
+  rebuildStateEventsForCalendarDomain(db);
 }
 
 function migrateSortOrder(db: ReturnType<typeof openDatabase>): void {
@@ -293,6 +296,44 @@ function migrateInitiativeDates(db: ReturnType<typeof openDatabase>): void {
   db.exec(`
     create index if not exists idx_initiatives_start_date on initiatives(start_date);
     create index if not exists idx_initiatives_end_date on initiatives(end_date);
+  `);
+}
+
+function migrateCalendarDomain(db: ReturnType<typeof openDatabase>): void {
+  db.exec(`
+    create table if not exists calendar_entries (
+      id integer primary key,
+      type text not null check (type in ('initiative_focus', 'task_work', 'standalone')),
+      title text not null,
+      start_at text not null,
+      end_at text not null,
+      status text not null default 'open' check (status in ('open', 'done')),
+      initiative_id integer references initiatives(id),
+      task_id integer references tasks(id),
+      notes text,
+      created_at text not null,
+      updated_at text not null
+    );
+    create index if not exists idx_calendar_entries_start_at on calendar_entries(start_at);
+    create index if not exists idx_calendar_entries_end_at on calendar_entries(end_at);
+    create index if not exists idx_calendar_entries_status on calendar_entries(status);
+    create index if not exists idx_calendar_entries_initiative_id on calendar_entries(initiative_id);
+    create index if not exists idx_calendar_entries_task_id on calendar_entries(task_id);
+
+    create table if not exists calendar_sources (
+      id integer primary key,
+      provider text not null check (provider in ('google')),
+      account_label text not null,
+      calendar_id text not null,
+      display_name text not null,
+      color text,
+      enabled integer not null default 1 check (enabled in (0, 1)),
+      read_only integer not null default 1 check (read_only in (0, 1)),
+      created_at text not null,
+      updated_at text not null,
+      unique(provider, calendar_id)
+    );
+    create index if not exists idx_calendar_sources_enabled on calendar_sources(enabled, provider);
   `);
 }
 
@@ -538,6 +579,42 @@ function rebuildStateEventsForInitiativeContext(db: ReturnType<typeof openDataba
       where entity_type in ('overview', 'category', 'project', 'initiative', 'task');
     drop table app_state_events;
     alter table app_state_events_next rename to app_state_events;
+  `);
+}
+
+function rebuildStateEventsForCalendarDomain(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "app_state_events")) {
+    return;
+  }
+
+  const sql = db.prepare("select sql from sqlite_master where type = 'table' and name = 'app_state_events'").get() as
+    | { sql: string }
+    | undefined;
+  if (sql?.sql.includes("'calendar_entry'") && sql.sql.includes("'calendar_source'")) {
+    return;
+  }
+
+  db.exec(`
+    create table app_state_events_next (
+      id integer primary key,
+      source text not null check (source in ('api', 'tool')),
+      operation text not null,
+      entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'task', 'calendar_entry', 'calendar_source')),
+      entity_id integer,
+      category_id integer,
+      initiative_id integer,
+      task_id integer,
+      created_at text not null
+    );
+    insert into app_state_events_next (id, source, operation, entity_type, entity_id, category_id, initiative_id, task_id, created_at)
+      select id, source, operation, entity_type, entity_id, category_id, initiative_id, task_id, created_at
+      from app_state_events
+      where entity_type in ('overview', 'category', 'initiative', 'task', 'calendar_entry', 'calendar_source');
+    drop table app_state_events;
+    alter table app_state_events_next rename to app_state_events;
+    create index if not exists idx_app_state_events_id on app_state_events(id);
+    create index if not exists idx_app_state_events_created_at on app_state_events(created_at, id);
+    create index if not exists idx_app_state_events_scope on app_state_events(entity_type, entity_id, initiative_id, task_id, category_id);
   `);
 }
 

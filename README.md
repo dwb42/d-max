@@ -44,6 +44,17 @@ npm run smoke:mcp
 LiveKit Drive Mode requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
 `LIVEKIT_API_SECRET`. xAI realtime voice requires `XAI_API_KEY`.
 
+Google Calendar read-only integration requires a Google OAuth web client:
+
+```bash
+GOOGLE_OAUTH_CLIENT_ID=...
+GOOGLE_OAUTH_CLIENT_SECRET=...
+GOOGLE_OAUTH_REDIRECT_URI=http://localhost:3088/api/config/google-calendar/oauth/callback
+```
+
+Then open `/config`, connect Google, and add the calendar IDs that should appear
+in `/calendar`.
+
 ## OpenClaw Checks
 
 ```bash

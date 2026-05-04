@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, DragEvent, MutableRefObject, ReactNode } from "react";
+import type { CSSProperties, DragEvent, MutableRefObject, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import {
   Blocks,
   CalendarDays,
@@ -9,11 +9,13 @@ import {
   ChevronRight,
   Circle,
   ClipboardList,
+  Clock,
   Copy,
   FileText,
   GitPullRequestArrow,
   GripVertical,
   Lightbulb,
+  ListTree,
   LayoutGrid,
   Mic,
   Mic2,
@@ -22,21 +24,33 @@ import {
   Plus,
   Repeat2,
   Send,
+  Settings,
   Square,
+  Trash2,
   X
 } from "lucide-react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import type { RemoteTrack } from "livekit-client";
 import {
   completeTask,
+  completeCalendarEntry,
+  createCalendarEntry,
   createCategory,
+  createGoogleCalendarAuthUrl,
+  createCalendarSource,
   createChatConversation,
   createInitiative,
   createTask,
   createVoiceSession,
+  deleteCalendarEntry,
+  disconnectGoogleCalendar,
   fetchChatActivity,
   fetchChatConversations,
   fetchChatMessages,
+  fetchCalendarSources,
+  fetchCalendarView,
+  fetchGoogleCalendars,
+  fetchGoogleCalendarAuthStatus,
   fetchOpenClawStatus,
   fetchOverview,
   fetchInitiatives,
@@ -51,6 +65,8 @@ import {
   subscribeStateEvents,
   streamChatMessage,
   transcribeVoiceMessage,
+  updateCalendarEntry,
+  updateCalendarSource,
   updateCategory,
   updateInitiative,
   updateTask,
@@ -59,7 +75,12 @@ import {
 import type {
   AppOverview,
   AppConversation,
+  CalendarSource,
+  CalendarViewData,
+  CalendarViewEvent,
   ConversationContext,
+  GoogleCalendarAuthStatus,
+  GoogleCalendarListItem,
   ChatActivity,
   AppPromptLog,
   PersistedChatMessage,
@@ -75,7 +96,7 @@ import type {
 import "./styles.css";
 
 type CollectionView = "ideas" | "projects" | "habits";
-type View = "drive" | "lifeAreas" | "lifeArea" | "timeline" | CollectionView | "initiative" | "tasks" | "task" | "promptTemplates" | "prompts";
+type View = "drive" | "lifeAreas" | "lifeArea" | "calendar" | "timeline" | "config" | CollectionView | "initiative" | "tasks" | "task" | "promptTemplates" | "prompts";
 type RouteState = {
   view: View;
   initiativeId: number | null;
@@ -140,10 +161,12 @@ const primaryNavItems: NavItem[] = [
   { id: "projects", label: "Projekte", icon: Blocks, path: "/projects" },
   { id: "habits", label: "Gewohnheiten", icon: Repeat2, path: "/habits" },
   { id: "tasks", label: "Massnahmen", icon: ClipboardList, path: "/tasks" },
-  { id: "timeline", label: "Timeline", icon: CalendarDays, path: "/calendar/timeline" }
+  { id: "calendar", label: "Kalender", icon: CalendarDays, path: "/calendar" },
+  { id: "timeline", label: "Timeline", icon: ListTree, path: "/calendar/timeline" }
 ];
 
 const secondaryNavItems: NavItem[] = [
+  { id: "config", label: "Config", icon: Settings, path: "/config" },
   { id: "promptTemplates", label: "Prompt-Vorlagen", icon: FileText, path: "/prompt-vorlagen" },
   { id: "prompts", label: "Prompts", icon: GitPullRequestArrow, path: "/prompts" },
   { id: "drive", label: "Drive", icon: Mic, path: "/drive" }
@@ -178,12 +201,14 @@ function routeFromPath(path: string): RouteState {
 
   if (pathname === "/drive") return { view: "drive", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/categories" || pathname === "/lebensbereiche") return { view: "lifeAreas", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/calendar") return { view: "calendar", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/calendar/timeline") return { view: "timeline", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/chat" || pathname === "/") return { view: "lifeAreas", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/ideas") return { view: "ideas", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/projects") return { view: "projects", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/habits") return { view: "habits", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/tasks") return { view: "tasks", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/config") return { view: "config", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/prompt-vorlagen") return { view: "promptTemplates", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/prompts") return { view: "prompts", initiativeId: null, taskId: null, categoryName: null };
   return { view: "lifeAreas", initiativeId: null, taskId: null, categoryName: null };
@@ -193,7 +218,9 @@ function pathForRoute(view: View, initiativeId?: number | null): string {
   if (view === "initiative") return `/initiatives/${initiativeId}`;
   if (view === "task") return "/tasks";
   if (view === "lifeAreas") return "/categories";
+  if (view === "calendar") return "/calendar";
   if (view === "timeline") return "/calendar/timeline";
+  if (view === "config") return "/config";
   if (view === "promptTemplates") return "/prompt-vorlagen";
   return `/${view}`;
 }
@@ -343,6 +370,11 @@ export default function App() {
   const [lifeAreaInitiatives, setLifeAreaInitiatives] = useState<Initiative[] | null>(null);
   const [initiativeDetail, setInitiativeDetail] = useState<InitiativeDetail | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
+  const [calendarControls, setCalendarControls] = useState<CalendarControlsState>(() => ({
+    mode: "week",
+    anchorDate: dateOnlyLocal(new Date()),
+    showAllDay: true
+  }));
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplateDefinition[]>([]);
   const [promptLogs, setPromptLogs] = useState<AppPromptLog[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState<number | null>(null);
@@ -363,6 +395,7 @@ export default function App() {
   const [chatDraft, setChatDraft] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [chatActivities, setChatActivities] = useState<ChatActivity[]>([]);
+  const [chatTurnStartedAt, setChatTurnStartedAt] = useState<number | null>(null);
   const [activeActivityConversationId, setActiveActivityConversationId] = useState<number | null>(null);
   const [chatVoicePhase, setChatVoicePhase] = useState<ChatVoicePhase>("idle");
   const [chatVoiceLevel, setChatVoiceLevel] = useState(0);
@@ -386,11 +419,17 @@ export default function App() {
   const audioMeterRef = useRef<AudioMeterHandle | null>(null);
   const remoteAudioElementsRef = useRef<HTMLAudioElement[]>([]);
   const chatThreadRef = useRef<HTMLDivElement | null>(null);
+  const chatAbortControllerRef = useRef<AbortController | null>(null);
   const appShellRef = useRef<HTMLDivElement | null>(null);
   const view = route.view;
   const hasUserCategories = Boolean(overview?.categories.some((category) => !category.isSystem));
   const isEmptyState = Boolean(overview && !hasUserCategories && overview.initiatives.length === 0 && overview.tasks.length === 0);
   const routeConversationContext = useMemo(() => getRouteConversationContext(route, overview, initiativeDetail, taskDetail), [route, overview, initiativeDetail, taskDetail]);
+  const calendarHeaderRange = useMemo(
+    () => calendarVisibleRange(calendarControls.anchorDate, calendarControls.mode),
+    [calendarControls.anchorDate, calendarControls.mode]
+  );
+  const calendarHeaderDays = useMemo(() => daysInRange(calendarHeaderRange.start, calendarHeaderRange.end), [calendarHeaderRange]);
   const agentTarget = useMemo<{ context: ConversationContext; label: string }>(
     () => routeConversationContext ?? { context: { type: "global" }, label: "Global Chat" },
     [routeConversationContext]
@@ -481,10 +520,13 @@ export default function App() {
 
     setChatDraft("");
     setChatBusy(true);
+    setChatTurnStartedAt(Date.now());
     setChatActivities([]);
     setChatMessages((current) => [...current, optimisticMessage, { id: streamingAssistantId, role: "assistant", text: "" }]);
 
     try {
+      const abortController = new AbortController();
+      chatAbortControllerRef.current = abortController;
       const activeContext = agentDrawer.open ? agentDrawer.context : null;
       const activeConversationId = agentDrawer.open ? agentDrawer.conversationId : null;
       if (!activeContext) {
@@ -513,7 +555,8 @@ export default function App() {
               )
             );
           }
-        }
+        },
+        { signal: abortController.signal }
       );
       const nextMessages = await loadPersistedChatMessages(result.conversationId);
       const messagesWithActivities = attachActivitiesToLastAssistant(nextMessages, result.activities ?? []);
@@ -524,6 +567,10 @@ export default function App() {
       }
       await refresh();
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setChatMessages((current) => current.filter((message) => message.id !== streamingAssistantId));
+        return;
+      }
       setChatMessages((current) => [
         ...current,
         {
@@ -533,10 +580,24 @@ export default function App() {
         }
       ]);
     } finally {
+      chatAbortControllerRef.current = null;
       setChatBusy(false);
+      setChatTurnStartedAt(null);
       setActiveActivityConversationId(null);
       setChatActivities([]);
     }
+  }
+
+  function abortChatTurn() {
+    chatAbortControllerRef.current?.abort();
+    setChatMessages((current) => [
+      ...current.filter((message) => !(message.role === "assistant" && message.id.startsWith("streaming-") && !message.text.trim())),
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: "Turn abgebrochen."
+      }
+    ]);
   }
 
   async function openContextualAgent(context: ConversationContext, label: string) {
@@ -1016,6 +1077,16 @@ export default function App() {
           )}
           {subtitleForView(view) ? <p>{subtitleForView(view)}</p> : null}
         </div>
+        {view === "calendar" ? (
+          <CalendarHeaderControls
+            mode={calendarControls.mode}
+            anchorDate={calendarControls.anchorDate}
+            days={calendarHeaderDays}
+            onModeChange={(mode) => setCalendarControls((current) => ({ ...current, mode }))}
+            onToday={() => setCalendarControls((current) => ({ ...current, anchorDate: dateOnlyLocal(new Date()) }))}
+            onShift={(days) => setCalendarControls((current) => ({ ...current, anchorDate: shiftDate(current.anchorDate, days) }))}
+          />
+        ) : null}
       </header>
     );
   }
@@ -1192,6 +1263,18 @@ export default function App() {
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
           />
           )}
+          {!isEmptyState && view === "calendar" && (
+          <CalendarPlannerView
+            categories={overview?.categories ?? []}
+            initiatives={overview?.initiatives ?? []}
+            tasks={overview?.tasks ?? []}
+            controls={calendarControls}
+            onShowAllDayChange={() => setCalendarControls((current) => ({ ...current, showAllDay: !current.showAllDay }))}
+            onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+            onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
+            onAfterChange={refresh}
+          />
+          )}
           {!isEmptyState && isCollectionView(view) && (
           <InitiativesView
             categories={overview?.categories ?? []}
@@ -1288,6 +1371,9 @@ export default function App() {
             onRefresh={() => void loadPromptTemplates()}
           />
           )}
+          {view === "config" && (
+          <ConfigView />
+          )}
           {view === "prompts" && (
           <PromptInspectorView
             prompts={promptLogs}
@@ -1314,6 +1400,7 @@ export default function App() {
           draft={chatDraft}
           setDraft={setChatDraft}
           busy={chatBusy}
+          turnStartedAt={chatTurnStartedAt}
           activities={chatActivities}
           voicePhase={chatVoicePhase}
           voiceLevel={chatVoiceLevel}
@@ -1321,6 +1408,7 @@ export default function App() {
           onStartVoiceMessage={() => void startChatVoiceMessage()}
           onConfirmVoiceMessage={() => void confirmChatVoiceMessage()}
           onDiscardVoiceMessage={discardChatVoiceMessage}
+          onAbortTurn={abortChatTurn}
           onSelectConversation={(conversationId) => void selectContextualConversation(conversationId)}
           onNewChat={() => void startNewContextualConversation()}
           onClose={closeContextualAgent}
@@ -1469,6 +1557,7 @@ function ChatView(props: {
   draft: string;
   setDraft: (value: string) => void;
   busy: boolean;
+  turnStartedAt: number | null;
   activities: ChatActivity[];
   voicePhase: ChatVoicePhase;
   voiceLevel: number;
@@ -1476,12 +1565,27 @@ function ChatView(props: {
   onStartVoiceMessage: () => void;
   onConfirmVoiceMessage: () => void;
   onDiscardVoiceMessage: () => void;
+  onAbortTurn: () => void;
   threadRef: MutableRefObject<HTMLDivElement | null>;
 }) {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const isVoiceActive = props.voicePhase !== "idle";
   const visibleMessages = props.messages.filter((message) => message.text.trim() || message.activities?.length || message.source);
   const latestMessage = props.messages.at(-1);
   const hasCurrentAssistantText = Boolean(latestMessage?.role === "assistant" && latestMessage.text.trim());
+
+  useEffect(() => {
+    if (!props.busy || !props.turnStartedAt) {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const updateElapsed = () => setElapsedSeconds(Math.max(0, Math.floor((Date.now() - props.turnStartedAt!) / 1000)));
+    updateElapsed();
+    const interval = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(interval);
+  }, [props.busy, props.turnStartedAt]);
+
   return (
     <section className="chat-layout">
       <div className="chat-thread" ref={props.threadRef}>
@@ -1499,7 +1603,12 @@ function ChatView(props: {
               <i />
               <i />
             </span>
-            <p>DMAX denkt...</p>
+            <div className="pending-turn-status">
+              <p>DMAX denkt... <span>{formatElapsedSeconds(elapsedSeconds)}</span></p>
+              <button type="button" className="icon-button danger" onClick={props.onAbortTurn} title="Turn abbrechen" aria-label="Turn abbrechen">
+                <Square size={16} />
+              </button>
+            </div>
             {props.activities.length ? <ActivityTrail activities={props.activities} /> : null}
           </article>
         ) : null}
@@ -1569,6 +1678,7 @@ function AgentDrawer(props: {
   draft: string;
   setDraft: (value: string) => void;
   busy: boolean;
+  turnStartedAt: number | null;
   activities: ChatActivity[];
   voicePhase: ChatVoicePhase;
   voiceLevel: number;
@@ -1576,6 +1686,7 @@ function AgentDrawer(props: {
   onStartVoiceMessage: () => void;
   onConfirmVoiceMessage: () => void;
   onDiscardVoiceMessage: () => void;
+  onAbortTurn: () => void;
   onSelectConversation: (conversationId: number) => void;
   onNewChat: () => void;
   onClose: () => void;
@@ -1631,6 +1742,7 @@ function AgentDrawer(props: {
         draft={props.draft}
         setDraft={props.setDraft}
         busy={props.busy}
+        turnStartedAt={props.turnStartedAt}
         activities={props.activities}
         voicePhase={props.voicePhase}
         voiceLevel={props.voiceLevel}
@@ -1638,6 +1750,7 @@ function AgentDrawer(props: {
         onStartVoiceMessage={props.onStartVoiceMessage}
         onConfirmVoiceMessage={props.onConfirmVoiceMessage}
         onDiscardVoiceMessage={props.onDiscardVoiceMessage}
+        onAbortTurn={props.onAbortTurn}
         threadRef={props.threadRef}
       />
     </aside>
@@ -1655,6 +1768,15 @@ function formatConversationTimestamp(conversation: AppConversation): string {
         hour: "2-digit",
         minute: "2-digit"
       });
+}
+
+function formatElapsedSeconds(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) {
+    return `${seconds}s`;
+  }
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function ResizeHandle(props: {
@@ -2373,6 +2495,633 @@ function InitiativesView({
 }
 
 const timelineMonthOptions = [3, 6, 12, 18];
+
+type CalendarMode = "day" | "week";
+type CalendarDragPayload =
+  | { kind: "initiative"; initiativeId: number; title: string }
+  | { kind: "task"; taskId: number; title: string }
+  | { kind: "entry"; entryId: number; durationMinutes: number };
+
+type CalendarDropPreview = {
+  payload: CalendarDragPayload;
+  startMinutes: number;
+  endMinutes: number;
+};
+
+type CalendarDragState = {
+  payload: CalendarDragPayload;
+  offsetY: number;
+};
+
+const calendarStartHour = 6;
+const calendarDefaultEndHour = 23;
+const calendarSnapMinutes = 10;
+const calendarPixelsPerMinute = 1.035;
+const calendarDefaultDurationMinutes = 90;
+
+type CalendarControlsState = {
+  mode: CalendarMode;
+  anchorDate: string;
+  showAllDay: boolean;
+};
+
+function CalendarPlannerView(props: {
+  categories: AppOverview["categories"];
+  initiatives: Initiative[];
+  tasks: Task[];
+  controls: CalendarControlsState;
+  onShowAllDayChange: () => void;
+  onOpenInitiative: (initiativeId: number) => void;
+  onOpenTask: (taskId: number) => void;
+  onAfterChange: () => Promise<void>;
+}) {
+  const [calendar, setCalendar] = useState<CalendarViewData | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [standaloneDraft, setStandaloneDraft] = useState<{ date: string; startMinutes: number } | null>(null);
+  const [activeCalendarDrag, setActiveCalendarDrag] = useState<CalendarDragState | null>(null);
+  const range = useMemo(() => calendarVisibleRange(props.controls.anchorDate, props.controls.mode), [props.controls.anchorDate, props.controls.mode]);
+  const days = useMemo(() => daysInRange(range.start, range.end), [range]);
+  const events = calendar?.events ?? [];
+  const timedEvents = events.filter((event) => !event.allDay);
+  const latestEndMinutes = timedEvents.reduce((max, event) => Math.max(max, minutesFromDateTime(event.endAt)), calendarDefaultEndHour * 60);
+  const endHour = Math.max(calendarDefaultEndHour, Math.ceil(latestEndMinutes / 60));
+  const gridHeight = (endHour * 60 - calendarStartHour * 60) * calendarPixelsPerMinute;
+  const activeProjects = props.initiatives.filter((initiative) => initiative.type === "project" && initiative.status === "active");
+  const tasksByInitiative = new Map<number, Task[]>();
+  for (const task of props.tasks.filter((task) => task.status === "open" || task.status === "in_progress" || task.status === "blocked")) {
+    const current = tasksByInitiative.get(task.initiativeId) ?? [];
+    current.push(task);
+    tasksByInitiative.set(task.initiativeId, current);
+  }
+
+  const loadCalendar = async () => {
+    setBusy(true);
+    try {
+      setCalendar(await fetchCalendarView(range.start, range.end));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadCalendar();
+  }, [range.start, range.end]);
+
+  async function reloadAfterMutation() {
+    await Promise.all([loadCalendar(), props.onAfterChange()]);
+  }
+
+  async function createDroppedEntry(payload: CalendarDragPayload, date: string, startMinutes: number) {
+    setActiveCalendarDrag(null);
+    const startAt = dateTimeFromMinutes(date, startMinutes);
+    const endAt = dateTimeFromMinutes(date, boundedEndMinutes(date, startMinutes, events));
+    if (payload.kind === "initiative") {
+      await createCalendarEntry({
+        type: "initiative_focus",
+        title: `Projekt: ${payload.title}`,
+        startAt,
+        endAt,
+        initiativeId: payload.initiativeId
+      });
+    } else if (payload.kind === "task") {
+      await createCalendarEntry({
+        type: "task_work",
+        title: payload.title,
+        startAt,
+        endAt,
+        taskId: payload.taskId
+      });
+    } else {
+      await updateCalendarEntry(payload.entryId, {
+        startAt,
+        endAt: dateTimeFromMinutes(date, startMinutes + payload.durationMinutes)
+      });
+    }
+    await reloadAfterMutation();
+  }
+
+  function startCalendarDrag(event: DragEvent<HTMLElement>, payload: CalendarDragPayload) {
+    const offsetY = calendarDragOffsetY(event);
+    setCalendarDragData(event, payload, offsetY);
+    setActiveCalendarDrag({ payload, offsetY });
+  }
+
+  async function createStandalone(title: string) {
+    if (!standaloneDraft || !title.trim()) return;
+    const startAt = dateTimeFromMinutes(standaloneDraft.date, standaloneDraft.startMinutes);
+    await createCalendarEntry({
+      type: "standalone",
+      title,
+      startAt,
+      endAt: dateTimeFromMinutes(standaloneDraft.date, standaloneDraft.startMinutes + calendarDefaultDurationMinutes)
+    });
+    setStandaloneDraft(null);
+    await reloadAfterMutation();
+  }
+
+  return (
+    <section className="calendar-planner">
+      <aside className="calendar-planner-sidebar">
+        <div className="calendar-sidebar-section">
+          <h2>Aktive Projekte</h2>
+          <div className="calendar-project-list">
+            {activeProjects.map((initiative) => {
+              const category = props.categories.find((candidate) => candidate.id === initiative.categoryId);
+              const projectTasks = tasksByInitiative.get(initiative.id) ?? [];
+              return (
+                <details key={initiative.id} className="calendar-project-card">
+                  <summary
+                    draggable
+                    onDragStart={(event) => startCalendarDrag(event, { kind: "initiative", initiativeId: initiative.id, title: displayInitiativeName(initiative) })}
+                    onDragEnd={() => setActiveCalendarDrag(null)}
+                  >
+                    <span className="calendar-category-dot" style={{ background: category?.color ?? "#27806f" }} />
+                    <span>
+                      <strong>{displayInitiativeName(initiative)}</strong>
+                      <small>{category?.name ?? "Ohne Kategorie"}</small>
+                    </span>
+                  </summary>
+                  <div className="calendar-task-palette">
+                    {projectTasks.length === 0 ? <span>Keine offenen Massnahmen</span> : null}
+                    {projectTasks.map((task) => (
+                      <button
+                        key={task.id}
+                        type="button"
+                        draggable
+                        onClick={() => props.onOpenTask(task.id)}
+                        onDragStart={(event) => startCalendarDrag(event, { kind: "task", taskId: task.id, title: task.title })}
+                        onDragEnd={() => setActiveCalendarDrag(null)}
+                      >
+                        <Circle size={13} />
+                        {task.title}
+                      </button>
+                    ))}
+                  </div>
+                </details>
+              );
+            })}
+          </div>
+        </div>
+      </aside>
+
+      <div className="calendar-workspace">
+        <div className="calendar-frame" style={{ "--calendar-days": days.length } as CSSProperties}>
+          {busy ? <div className="calendar-loading-overlay">Lade...</div> : null}
+          <div className="calendar-day-header-spacer" />
+          {days.map((day) => (
+            <div className="calendar-day-header" key={day}>
+              <strong>{formatCalendarDayName(day)}</strong>
+              <span>{formatDateOnly(day)}</span>
+            </div>
+          ))}
+          <div className={`calendar-all-day-label ${props.controls.showAllDay ? "expanded" : "collapsed"}`}>
+            <button
+              className={`calendar-row-toggle ${props.controls.showAllDay ? "active" : ""}`}
+              type="button"
+              onClick={props.onShowAllDayChange}
+              aria-expanded={props.controls.showAllDay}
+            >
+              <ChevronDown size={15} />
+              <span>Ganztag</span>
+            </button>
+          </div>
+          {days.map((day) => (
+            <div className={`calendar-all-day-column ${props.controls.showAllDay ? "expanded" : "collapsed"}`} key={day}>
+              {props.controls.showAllDay ? events.filter((event) => event.allDay && eventOverlapsDay(event, day)).map((event) => (
+                <button
+                  key={event.id}
+                  className={`calendar-all-day-event ${event.source}`}
+                  style={{ "--calendar-event-color": eventColor(event) } as CSSProperties}
+                  onClick={() => event.source === "initiative_span" ? props.onOpenInitiative(event.initiativeId) : undefined}
+                >
+                  {event.title}
+                </button>
+              )) : null}
+            </div>
+          ))}
+
+          <div className="calendar-time-scroll">
+            <div className="calendar-time-axis" style={{ height: gridHeight }}>
+              {Array.from({ length: endHour - calendarStartHour + 1 }, (_, index) => calendarStartHour + index).map((hour) => (
+                <span key={hour} style={{ top: (hour * 60 - calendarStartHour * 60) * calendarPixelsPerMinute }}>
+                  {String(hour).padStart(2, "0")}:00
+                </span>
+              ))}
+            </div>
+            {days.map((day) => (
+              <CalendarDayColumn
+                key={day}
+                date={day}
+                events={timedEvents.filter((event) => datePart(event.startAt) === day)}
+                allEvents={events}
+                activeCalendarDrag={activeCalendarDrag}
+                height={gridHeight}
+                endHour={endHour}
+                onDropEntry={createDroppedEntry}
+                onOpenStandalone={setStandaloneDraft}
+                onComplete={async (entryId) => {
+                  await completeCalendarEntry(entryId);
+                  await reloadAfterMutation();
+                }}
+                onDelete={async (entryId) => {
+                  await deleteCalendarEntry(entryId);
+                  await reloadAfterMutation();
+                }}
+                onResize={async (entryId, input) => {
+                  await updateCalendarEntry(entryId, input);
+                  await reloadAfterMutation();
+                }}
+                onDragStart={startCalendarDrag}
+                onDragEnd={() => setActiveCalendarDrag(null)}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {standaloneDraft ? (
+        <StandaloneEntryDialog
+          draft={standaloneDraft}
+          onCancel={() => setStandaloneDraft(null)}
+          onCreate={createStandalone}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function CalendarHeaderControls(props: {
+  mode: CalendarMode;
+  anchorDate: string;
+  days: string[];
+  onModeChange: (mode: CalendarMode) => void;
+  onToday: () => void;
+  onShift: (days: number) => void;
+}) {
+  const shiftAmount = props.mode === "week" ? 7 : 1;
+  return (
+    <div className="calendar-header-controls">
+      <div className="segmented-control">
+        <button className={props.mode === "day" ? "active" : ""} onClick={() => props.onModeChange("day")}>Tag</button>
+        <button className={props.mode === "week" ? "active" : ""} onClick={() => props.onModeChange("week")}>Woche</button>
+      </div>
+      <div className="calendar-range-actions">
+        <button className="icon-button" title="Zurueck" onClick={() => props.onShift(-shiftAmount)}>
+          <ChevronLeft size={18} />
+        </button>
+        <button className="small-button" onClick={props.onToday}>Heute</button>
+        <button className="icon-button" title="Weiter" onClick={() => props.onShift(shiftAmount)}>
+          <ChevronRight size={18} />
+        </button>
+      </div>
+      <strong>{formatCalendarRange(props.days)}</strong>
+    </div>
+  );
+}
+
+function CalendarDayColumn(props: {
+  date: string;
+  events: CalendarViewEvent[];
+  allEvents: CalendarViewEvent[];
+  activeCalendarDrag: CalendarDragState | null;
+  height: number;
+  endHour: number;
+  onDropEntry: (payload: CalendarDragPayload, date: string, startMinutes: number) => Promise<void>;
+  onOpenStandalone: (draft: { date: string; startMinutes: number }) => void;
+  onComplete: (entryId: number) => Promise<void>;
+  onDelete: (entryId: number) => Promise<void>;
+  onResize: (entryId: number, input: { startAt?: string; endAt?: string }) => Promise<void>;
+  onDragStart: (event: DragEvent<HTMLElement>, payload: CalendarDragPayload) => void;
+  onDragEnd: () => void;
+}) {
+  const [dragPreview, setDragPreview] = useState<CalendarDropPreview | null>(null);
+  const layouts = layoutCalendarEvents(props.events);
+  const previewTop = dragPreview ? (dragPreview.startMinutes - calendarStartHour * 60) * calendarPixelsPerMinute : 0;
+  const previewHeight = dragPreview ? Math.max(28, (dragPreview.endMinutes - dragPreview.startMinutes) * calendarPixelsPerMinute) : 0;
+  return (
+    <div
+      className={`calendar-day-column ${dragPreview ? "drag-active" : ""}`}
+      style={{ height: props.height }}
+      onDragOver={(event) => {
+        event.preventDefault();
+        const dragState = props.activeCalendarDrag ?? getCalendarDragState(event);
+        if (!dragState) return;
+        const { payload, offsetY } = dragState;
+        const startMinutes = snappedMinutesFromDraggedTop(event.currentTarget, event.clientY, offsetY);
+        const endMinutes = calendarDragEndMinutes(payload, props.date, startMinutes, props.allEvents);
+        setDragPreview((current) =>
+          current?.startMinutes === startMinutes && current.endMinutes === endMinutes && current.payload === payload
+            ? current
+            : { payload, startMinutes, endMinutes }
+        );
+      }}
+      onDragLeave={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+          setDragPreview(null);
+        }
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        const dragState = props.activeCalendarDrag ?? getCalendarDragState(event);
+        if (!dragState) return;
+        const startMinutes = dragPreview?.startMinutes ?? snappedMinutesFromDraggedTop(event.currentTarget, event.clientY, dragState.offsetY);
+        setDragPreview(null);
+        void props.onDropEntry(dragState.payload, props.date, startMinutes);
+      }}
+      onDoubleClick={(event) => {
+        if (event.target !== event.currentTarget) return;
+        props.onOpenStandalone({ date: props.date, startMinutes: snappedMinutesFromPointer(event.currentTarget, event.clientY) });
+      }}
+    >
+      {Array.from({ length: props.endHour - calendarStartHour + 1 }, (_, index) => calendarStartHour + index).map((hour) => (
+        <span className="calendar-hour-line" key={hour} style={{ top: (hour * 60 - calendarStartHour * 60) * calendarPixelsPerMinute }} />
+      ))}
+      {dragPreview ? (
+        <>
+          <span className="calendar-drop-line" style={{ top: previewTop }}>
+            <span>{timeFromMinutes(dragPreview.startMinutes)}</span>
+          </span>
+          <div
+            className="calendar-drop-preview"
+            style={{ top: previewTop, height: previewHeight }}
+          >
+            <strong>{calendarDragPreviewTitle(dragPreview.payload)}</strong>
+            <span>{timeFromMinutes(dragPreview.startMinutes)}-{timeFromMinutes(dragPreview.endMinutes)}</span>
+          </div>
+        </>
+      ) : null}
+      {layouts.map((layout) => (
+        <CalendarEventBlock
+          key={layout.event.id}
+          event={layout.event}
+          layout={layout}
+          onComplete={props.onComplete}
+          onDelete={props.onDelete}
+          onResize={props.onResize}
+          onDragStart={props.onDragStart}
+          onDragEnd={props.onDragEnd}
+        />
+      ))}
+    </div>
+  );
+}
+
+function CalendarEventBlock(props: {
+  event: CalendarViewEvent;
+  layout: CalendarEventLayout;
+  onComplete: (entryId: number) => Promise<void>;
+  onDelete: (entryId: number) => Promise<void>;
+  onResize: (entryId: number, input: { startAt?: string; endAt?: string }) => Promise<void>;
+  onDragStart: (event: DragEvent<HTMLElement>, payload: CalendarDragPayload) => void;
+  onDragEnd: () => void;
+}) {
+  const event = props.event;
+  const color = eventColor(event);
+  const draggable = event.source === "dmax";
+  return (
+    <article
+      className={`calendar-event-block ${event.source} ${event.source === "dmax" && event.status === "done" ? "done" : ""}`}
+      draggable={draggable}
+      onDragStart={(dragEvent) => {
+        if (event.source !== "dmax") return;
+        props.onDragStart(dragEvent, {
+          kind: "entry",
+          entryId: event.entryId,
+          durationMinutes: Math.max(calendarSnapMinutes, durationMinutesBetween(event.startAt, event.endAt))
+        });
+      }}
+      onDragEnd={props.onDragEnd}
+      style={
+        {
+          top: props.layout.top,
+          height: props.layout.height,
+          left: `${props.layout.left}%`,
+          width: `${props.layout.width}%`,
+          "--calendar-event-color": color
+        } as CSSProperties
+      }
+    >
+      {event.source === "dmax" ? (
+        <button className="calendar-resize-handle top" title="Start anpassen" onPointerDown={(pointerEvent) => startCalendarResize(pointerEvent, event, "top", props.onResize)} />
+      ) : null}
+      <div className="calendar-event-main">
+        {event.source === "dmax" ? (
+          <button
+            className="calendar-complete-toggle"
+            title={event.status === "done" ? "Erledigt" : "Erledigen"}
+            onClick={() => void props.onComplete(event.entryId)}
+          >
+            {event.status === "done" ? <CheckCircle2 size={15} /> : <Circle size={15} />}
+          </button>
+        ) : null}
+        <div>
+          <strong>{event.title}</strong>
+          <span>{formatTimeRange(event.startAt, event.endAt)}</span>
+        </div>
+        {event.source === "dmax" ? (
+          <button className="calendar-delete-button" title="Loeschen" onClick={() => void props.onDelete(event.entryId)}>
+            <Trash2 size={14} />
+          </button>
+        ) : null}
+      </div>
+      {event.source === "dmax" ? (
+        <button className="calendar-resize-handle bottom" title="Ende anpassen" onPointerDown={(pointerEvent) => startCalendarResize(pointerEvent, event, "bottom", props.onResize)} />
+      ) : null}
+    </article>
+  );
+}
+
+function StandaloneEntryDialog(props: {
+  draft: { date: string; startMinutes: number };
+  onCancel: () => void;
+  onCreate: (title: string) => Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  return (
+    <div className="modal-backdrop">
+      <form
+        className="compact-modal"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void props.onCreate(title);
+        }}
+      >
+        <h3>Termin</h3>
+        <p>{formatDateOnly(props.draft.date)} · {timeFromMinutes(props.draft.startMinutes)}</p>
+        <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Titel" autoFocus />
+        <div className="modal-actions">
+          <button type="button" className="secondary-action compact" onClick={props.onCancel}>Abbrechen</button>
+          <button type="submit" className="primary-action compact" disabled={!title.trim()}>Anlegen</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ConfigView() {
+  const [sources, setSources] = useState<CalendarSource[]>([]);
+  const [googleStatus, setGoogleStatus] = useState<GoogleCalendarAuthStatus | null>(null);
+  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendarListItem[]>([]);
+  const [draft, setDraft] = useState({ accountLabel: "dw@b42.io", calendarId: "", displayName: "", color: "#27806f" });
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadSources() {
+    const [nextSources, nextStatus] = await Promise.all([fetchCalendarSources(), fetchGoogleCalendarAuthStatus()]);
+    setSources(nextSources);
+    setGoogleStatus(nextStatus);
+    if (nextStatus.connected) {
+      setGoogleCalendars(await fetchGoogleCalendars());
+    } else {
+      setGoogleCalendars([]);
+    }
+  }
+
+  useEffect(() => {
+    loadSources().catch((err: unknown) => setError(err instanceof Error ? err.message : "Calendar sources konnten nicht geladen werden."));
+  }, []);
+
+  return (
+    <section className="config-layout">
+      {error ? <div className="error-banner">{error}</div> : null}
+      <div className="config-section">
+        <div className="config-section-header">
+          <div>
+            <h2>Google Kalenderquellen</h2>
+            <p>OAuth verbindet den Account; die Quellen legen fest, welche Kalender d-max live read-only lädt.</p>
+          </div>
+          <div className="google-auth-actions">
+            <span className={`google-auth-status ${googleStatus?.connected ? "connected" : ""}`}>
+              {googleStatus?.connected ? "Verbunden" : googleStatus?.configured ? "Nicht verbunden" : "Nicht konfiguriert"}
+            </span>
+            <button
+              className="secondary-action compact"
+              type="button"
+              disabled={!googleStatus?.configured}
+              onClick={async () => {
+                try {
+                  const authUrl = await createGoogleCalendarAuthUrl({ loginHint: draft.accountLabel });
+                  window.location.href = authUrl;
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Google OAuth konnte nicht gestartet werden.");
+                }
+              }}
+            >
+              <Clock size={16} />
+              Google verbinden
+            </button>
+            {googleStatus?.connected ? (
+              <button
+                className="secondary-action compact"
+                type="button"
+                onClick={async () => {
+                  await disconnectGoogleCalendar();
+                  await loadSources();
+                }}
+              >
+                Trennen
+              </button>
+            ) : null}
+          </div>
+        </div>
+        {googleStatus && !googleStatus.configured ? (
+          <div className="config-hint">
+            Setze `GOOGLE_OAUTH_CLIENT_ID` und `GOOGLE_OAUTH_CLIENT_SECRET`. Authorized redirect URI in Google:
+            <code>{googleStatus.redirectUri}</code>
+          </div>
+        ) : null}
+        {googleCalendars.length > 0 ? (
+          <div className="google-calendar-picker">
+            {googleCalendars.map((calendar) => {
+              const existing = sources.find((source) => source.provider === "google" && source.calendarId === calendar.id);
+              return (
+                <article key={calendar.id} className="google-calendar-choice">
+                  <span className="calendar-category-dot" style={{ background: calendar.backgroundColor ?? "#5167b8" }} />
+                  <div>
+                    <strong>{calendar.summary}</strong>
+                    <span>{calendar.primary ? "primary · " : ""}{calendar.id}</span>
+                  </div>
+                  <button
+                    className="secondary-action compact"
+                    type="button"
+                    disabled={Boolean(existing)}
+                    onClick={async () => {
+                      await createCalendarSource({
+                        accountLabel: draft.accountLabel,
+                        calendarId: calendar.id,
+                        displayName: calendar.summary,
+                        color: normalizeGoogleColor(calendar.backgroundColor),
+                        enabled: true,
+                        readOnly: true
+                      });
+                      await loadSources();
+                    }}
+                  >
+                    {existing ? "Hinzugefuegt" : "Hinzufuegen"}
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        ) : null}
+        <form
+          className="config-source-form"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            try {
+              setError(null);
+              await createCalendarSource({
+                accountLabel: draft.accountLabel,
+                calendarId: draft.calendarId,
+                displayName: draft.displayName || draft.calendarId,
+                color: draft.color || null,
+                enabled: true,
+                readOnly: true
+              });
+              setDraft({ accountLabel: draft.accountLabel, calendarId: "", displayName: "", color: "#27806f" });
+              await loadSources();
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Calendar source konnte nicht gespeichert werden.");
+            }
+          }}
+        >
+          <input value={draft.accountLabel} onChange={(event) => setDraft((current) => ({ ...current, accountLabel: event.target.value }))} placeholder="Account" />
+          <input value={draft.calendarId} onChange={(event) => setDraft((current) => ({ ...current, calendarId: event.target.value }))} placeholder="Google Calendar ID" />
+          <input value={draft.displayName} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Anzeigename" />
+          <input className="color-input" value={draft.color} onChange={(event) => setDraft((current) => ({ ...current, color: event.target.value }))} placeholder="#27806f" />
+          <button className="primary-action compact" type="submit" disabled={!draft.accountLabel.trim() || !draft.calendarId.trim()}>
+            <Plus size={16} />
+            Quelle
+          </button>
+        </form>
+        <div className="config-source-list">
+          {sources.length === 0 ? <EmptyState title="Noch keine Kalenderquellen konfiguriert" /> : null}
+          {sources.map((source) => (
+            <article className="config-source-row" key={source.id}>
+              <span className="calendar-category-dot" style={{ background: source.color ?? "#27806f" }} />
+              <div>
+                <strong>{source.displayName}</strong>
+                <span>{source.accountLabel} · {source.calendarId}</span>
+              </div>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={source.enabled}
+                  onChange={async (event) => {
+                    await updateCalendarSource(source.id, { enabled: event.target.checked });
+                    await loadSources();
+                  }}
+                />
+                Aktiv
+              </label>
+              <span className="readonly-pill">{source.readOnly ? "read-only" : "write"}</span>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function TimelineView(props: {
   categories: AppOverview["categories"];
@@ -3630,7 +4379,9 @@ function titleForView(view: View): string {
     drive: "Drive Mode",
     lifeAreas: "Lebensbereiche",
     lifeArea: "Lebensbereich",
+    calendar: "Kalender",
     timeline: "Timeline",
+    config: "Config",
     ideas: "Ideen",
     projects: "Projekte",
     habits: "Gewohnheiten",
@@ -3647,7 +4398,9 @@ function subtitleForView(view: View): string {
     drive: "Realtime voice surface; LiveKit connection comes next.",
     lifeAreas: "",
     lifeArea: "Beschreibung, Kontext und Initiatives.",
+    calendar: "",
     timeline: "Aktive Projekte entlang der Zeitachse.",
+    config: "Integrationen und Systemkonfiguration.",
     ideas: "",
     projects: "",
     habits: "",
@@ -3765,6 +4518,264 @@ function formatTimelineRange(start: Date, end: Date): string {
 function formatDateOnly(value: string): string {
   const [year, month, day] = value.split("-");
   return day && month && year ? `${day}.${month}.${year}` : value;
+}
+
+type CalendarEventLayout = {
+  event: CalendarViewEvent;
+  top: number;
+  height: number;
+  left: number;
+  width: number;
+};
+
+function calendarDragOffsetY(event: DragEvent<HTMLElement>): number {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return Math.max(0, Math.min(rect.height, event.clientY - rect.top));
+}
+
+function setCalendarDragData(event: DragEvent<HTMLElement>, payload: CalendarDragPayload, offsetY: number): void {
+  event.dataTransfer.effectAllowed = "copyMove";
+  event.dataTransfer.setData("application/x-dmax-calendar", JSON.stringify(payload));
+  event.dataTransfer.setData("application/x-dmax-calendar-offset-y", String(offsetY));
+}
+
+function getCalendarDragData(event: DragEvent<HTMLElement>): CalendarDragPayload | null {
+  const raw = event.dataTransfer.getData("application/x-dmax-calendar");
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as CalendarDragPayload;
+    return parsed && typeof parsed === "object" && "kind" in parsed ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function getCalendarDragState(event: DragEvent<HTMLElement>): CalendarDragState | null {
+  const payload = getCalendarDragData(event);
+  if (!payload) return null;
+  const rawOffsetY = Number(event.dataTransfer.getData("application/x-dmax-calendar-offset-y"));
+  return { payload, offsetY: Number.isFinite(rawOffsetY) ? Math.max(0, rawOffsetY) : 0 };
+}
+
+function snappedMinutesFromPointer(element: HTMLElement, clientY: number): number {
+  const rect = element.getBoundingClientRect();
+  const minutes = calendarStartHour * 60 + (clientY - rect.top + element.scrollTop) / calendarPixelsPerMinute;
+  return Math.max(0, Math.round(minutes / calendarSnapMinutes) * calendarSnapMinutes);
+}
+
+function snappedMinutesFromDraggedTop(element: HTMLElement, clientY: number, offsetY: number): number {
+  return Math.max(calendarStartHour * 60, snappedMinutesFromPointer(element, clientY - offsetY));
+}
+
+function boundedEndMinutes(date: string, startMinutes: number, events: CalendarViewEvent[]): number {
+  const defaultEnd = startMinutes + calendarDefaultDurationMinutes;
+  const followerStart = events
+    .filter((event) => !event.allDay && datePart(event.startAt) === date)
+    .map((event) => minutesFromDateTime(event.startAt))
+    .filter((minutes) => minutes > startMinutes && minutes < defaultEnd)
+    .sort((left, right) => left - right)[0];
+  return followerStart ?? defaultEnd;
+}
+
+function calendarDragEndMinutes(payload: CalendarDragPayload, date: string, startMinutes: number, events: CalendarViewEvent[]): number {
+  if (payload.kind === "entry") {
+    return startMinutes + payload.durationMinutes;
+  }
+  return boundedEndMinutes(date, startMinutes, events);
+}
+
+function calendarDragPreviewTitle(payload: CalendarDragPayload): string {
+  if (payload.kind === "initiative") {
+    return `Projekt: ${payload.title}`;
+  }
+  if (payload.kind === "task") {
+    return payload.title;
+  }
+  return "Termin verschieben";
+}
+
+function layoutCalendarEvents(events: CalendarViewEvent[]): CalendarEventLayout[] {
+  const sorted = [...events].sort((left, right) => minutesFromDateTime(left.startAt) - minutesFromDateTime(right.startAt));
+  const groups: CalendarViewEvent[][] = [];
+  let currentGroup: CalendarViewEvent[] = [];
+  let currentEnd = -1;
+
+  for (const event of sorted) {
+    const start = minutesFromDateTime(event.startAt);
+    const end = minutesFromDateTime(event.endAt);
+    if (currentGroup.length === 0 || start < currentEnd) {
+      currentGroup.push(event);
+      currentEnd = Math.max(currentEnd, end);
+    } else {
+      groups.push(currentGroup);
+      currentGroup = [event];
+      currentEnd = end;
+    }
+  }
+  if (currentGroup.length) groups.push(currentGroup);
+
+  return groups.flatMap((group) => {
+    const columns: CalendarViewEvent[][] = [];
+    const placements = new Map<string, number>();
+    for (const event of group) {
+      const start = minutesFromDateTime(event.startAt);
+      let columnIndex = columns.findIndex((column) => {
+        const last = column.at(-1);
+        return !last || eventEndMinutes(last) <= start;
+      });
+      if (columnIndex === -1) {
+        columnIndex = columns.length;
+        columns.push([]);
+      }
+      columns[columnIndex]!.push(event);
+      placements.set(event.id, columnIndex);
+    }
+    const columnCount = Math.max(columns.length, 1);
+    return group.map((event) => {
+      const start = minutesFromDateTime(event.startAt);
+      const end = eventEndMinutes(event);
+      const top = (start - calendarStartHour * 60) * calendarPixelsPerMinute;
+      const height = Math.max(28, (end - start) * calendarPixelsPerMinute);
+      const columnIndex = placements.get(event.id) ?? 0;
+      return {
+        event,
+        top,
+        height,
+        left: (columnIndex / columnCount) * 100,
+        width: 100 / columnCount
+      };
+    });
+  });
+}
+
+function startCalendarResize(
+  event: ReactPointerEvent<HTMLButtonElement>,
+  calendarEvent: Extract<CalendarViewEvent, { source: "dmax" }>,
+  edge: "top" | "bottom",
+  onResize: (entryId: number, input: { startAt?: string; endAt?: string }) => Promise<void>
+): void {
+  event.preventDefault();
+  event.stopPropagation();
+  const initialY = event.clientY;
+  const initialStart = minutesFromDateTime(calendarEvent.startAt);
+  const initialEnd = minutesFromDateTime(calendarEvent.endAt);
+  const date = datePart(calendarEvent.startAt);
+
+  const onPointerMove = (moveEvent: PointerEvent) => {
+    moveEvent.preventDefault();
+  };
+  const onPointerUp = (upEvent: PointerEvent) => {
+    const deltaMinutes = Math.round(((upEvent.clientY - initialY) / calendarPixelsPerMinute) / calendarSnapMinutes) * calendarSnapMinutes;
+    if (edge === "top") {
+      const nextStart = Math.min(initialEnd - calendarSnapMinutes, Math.max(0, initialStart + deltaMinutes));
+      void onResize(calendarEvent.entryId, { startAt: dateTimeFromMinutes(date, nextStart) });
+    } else {
+      const nextEnd = Math.max(initialStart + calendarSnapMinutes, initialEnd + deltaMinutes);
+      void onResize(calendarEvent.entryId, { endAt: dateTimeFromMinutes(date, nextEnd) });
+    }
+    window.removeEventListener("pointermove", onPointerMove);
+    window.removeEventListener("pointerup", onPointerUp);
+  };
+
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerUp);
+}
+
+function calendarVisibleRange(anchorDate: string, mode: CalendarMode): { start: string; end: string } {
+  if (mode === "day") {
+    return { start: anchorDate, end: anchorDate };
+  }
+  const date = parseDateOnlyUtc(anchorDate) ?? startOfUtcDay(new Date());
+  const day = date.getUTCDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const monday = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + mondayOffset));
+  const sunday = new Date(Date.UTC(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate() + 6));
+  return { start: dateOnlyFromUtc(monday), end: dateOnlyFromUtc(sunday) };
+}
+
+function daysInRange(start: string, end: string): string[] {
+  const startDate = parseDateOnlyUtc(start);
+  const endDate = parseDateOnlyUtc(end);
+  if (!startDate || !endDate) return [];
+  const days: string[] = [];
+  for (let cursor = startDate; cursor <= endDate; cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate() + 1))) {
+    days.push(dateOnlyFromUtc(cursor));
+  }
+  return days;
+}
+
+function shiftDate(date: string, days: number): string {
+  const parsed = parseDateOnlyUtc(date) ?? startOfUtcDay(new Date());
+  return dateOnlyFromUtc(new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate() + days)));
+}
+
+function dateOnlyLocal(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateOnlyFromUtc(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function dateTimeFromMinutes(date: string, minutes: number): string {
+  const parsed = parseDateOnlyUtc(date) ?? startOfUtcDay(new Date());
+  const next = new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate(), 0, minutes));
+  return `${dateOnlyFromUtc(next)}T${String(next.getUTCHours()).padStart(2, "0")}:${String(next.getUTCMinutes()).padStart(2, "0")}:00.000`;
+}
+
+function minutesFromDateTime(value: string): number {
+  const time = value.includes("T") ? value.split("T")[1] ?? "00:00" : "00:00";
+  const [hour, minute] = time.split(":").map(Number);
+  return (hour || 0) * 60 + (minute || 0);
+}
+
+function datePart(value: string): string {
+  return value.slice(0, 10);
+}
+
+function durationMinutesBetween(startAt: string, endAt: string): number {
+  const startDate = parseDateOnlyUtc(datePart(startAt));
+  const endDate = parseDateOnlyUtc(datePart(endAt));
+  const dayDelta = startDate && endDate ? daysBetween(startDate, endDate) : 0;
+  return dayDelta * 1440 + minutesFromDateTime(endAt) - minutesFromDateTime(startAt);
+}
+
+function eventEndMinutes(event: CalendarViewEvent): number {
+  return minutesFromDateTime(event.startAt) + durationMinutesBetween(event.startAt, event.endAt);
+}
+
+function eventOverlapsDay(event: CalendarViewEvent, day: string): boolean {
+  return datePart(event.startAt) <= day && datePart(event.endAt) >= day;
+}
+
+function eventColor(event: CalendarViewEvent): string {
+  return event.color ?? (event.source === "google" ? "#5167b8" : event.source === "initiative_span" ? "#27806f" : "#101714");
+}
+
+function normalizeGoogleColor(color: string | null): string | null {
+  return color && /^#[0-9a-f]{6}$/i.test(color) ? color : null;
+}
+
+function formatCalendarDayName(date: string): string {
+  const parsed = parseDateOnlyUtc(date);
+  return parsed ? parsed.toLocaleDateString("de-DE", { weekday: "short", timeZone: "UTC" }) : date;
+}
+
+function formatCalendarRange(days: string[]): string {
+  if (days.length === 0) return "";
+  if (days.length === 1) return formatDateOnly(days[0]!);
+  return `${formatDateOnly(days[0]!)} - ${formatDateOnly(days.at(-1)!)}`;
+}
+
+function timeFromMinutes(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+}
+
+function formatTimeRange(startAt: string, endAt: string): string {
+  return `${timeFromMinutes(minutesFromDateTime(startAt))}-${timeFromMinutes(minutesFromDateTime(endAt))}`;
 }
 
 function startAudioMeter(stream: MediaStream, ref: MutableRefObject<AudioMeterHandle | null>, setLevel: (level: number) => void): void {

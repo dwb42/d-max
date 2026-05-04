@@ -14,7 +14,7 @@ Active interfaces:
 
 - Telegram bot for daily text and voice use.
 - Browser app for `/drive`, `/categories`, `/categories/:categoryName`,
-  `/calendar/timeline`, `/ideas`, `/ideas/:categoryName`, `/projects`,
+  `/calendar`, `/calendar/timeline`, `/config`, `/ideas`, `/ideas/:categoryName`, `/projects`,
   `/projects/:categoryName`, `/habits`, `/habits/:categoryName`,
   `/initiatives/:id`, `/tasks`, `/tasks/:id`, `/prompt-vorlagen`, and `/prompts`.
 - Browser/WebRTC realtime voice prototype using LiveKit and xAI realtime voice.
@@ -28,6 +28,7 @@ SQLite tables:
 
 ```text
 categories, initiatives, tasks,
+calendar_entries, calendar_sources,
 app_chat_messages, app_conversations, app_prompt_logs, app_state_events
 ```
 
@@ -35,14 +36,25 @@ app_chat_messages, app_conversations, app_prompt_logs, app_state_events
 current technical Initiative object into `idea`, `project`, and `habit`; existing
 initiatives default to `project`. Initiatives with `type = project` may have
 nullable `start_date` and `end_date` fields for a bounded initiative time span;
-ideas are loose thoughts without time binding, and habits are ongoing practices
-without a clear start/end. Categories are life areas; their `description` field
-is Markdown for scope, current situation/satisfaction, target state, and
-high-level measures. Categories also have an auto-assigned `color` used by the
-timeline UI and an auto-assigned `emoji` used by the life-area UI. The agent
-tools do not expose emoji editing. `Inbox` is a system category used as the
-fallback when category placement is unclear. There are no exploratory memory
-tables or session-summary tables.
+those project spans are shown in the `/calendar` all-day row when they overlap
+the visible day/week. `calendar_entries` stores local d-max calendar time blocks
+for project focus, task work, and standalone appointments. Entries have concrete
+`start_at`/`end_at` timestamps and a simple `open`/`done` status. A task can have
+multiple calendar entries; completing a task calendar entry also completes the
+linked task. `calendar_sources` stores non-secret calendar source configuration
+such as enabled Google calendar IDs; Google event credentials/tokens are not
+stored in SQLite. Google Calendar read-only OAuth stores its local token file at
+`GOOGLE_CALENDAR_TOKEN_PATH` under `data/` by default, which is gitignored.
+Configured and authorized Google calendar sources are fetched live in
+`/api/calendar`. Ideas are loose thoughts
+without time binding, and habits are ongoing practices without a clear
+start/end. Categories are life areas; their `description` field is Markdown for
+scope, current situation/satisfaction, target state, and high-level measures.
+Categories also have an auto-assigned `color` used by the timeline UI and an
+auto-assigned `emoji` used by the life-area UI. The agent tools do not expose
+emoji editing. `Inbox` is a system category used as the fallback when category
+placement is unclear. There are no exploratory memory tables or session-summary
+tables.
 
 ## Runtime And Provider State
 
@@ -124,6 +136,15 @@ Implemented behavior:
   timeline. Defaults to previous month through six months ahead, with controls
   for 3/6/12/18 months ahead. Bars are clipped to the visible range and open the
   initiative detail when clicked.
+- `/calendar`: day/week planning view with Google-Calendar-style day columns and
+  a 10-minute time grid. Local d-max entries can be created by dragging active
+  projects or open project tasks into the grid, moved by drag/drop, resized via
+  top/bottom handles, deleted, and marked done. Project date ranges appear in
+  the all-day row. Configured Google calendar sources are fetched live read-only
+  through the Google Calendar API after OAuth is connected in `/config`.
+- `/config`: configuration surface for Google calendar sources. It stores
+  provider/account/calendar/display metadata and enabled/read-only flags only;
+  no credentials or provider tokens.
 - `/initiatives/:id`: type badge, editable basic fields (name, category, status,
   summary, and start/end dates for `type=project`), markdown initiative memory
   rendered as UI, Back to the current type page/category, linked tasks below
@@ -146,6 +167,19 @@ Implemented in `src/api/server.ts`.
 ```text
 GET  /health
 GET  /api/app/overview
+GET  /api/calendar
+POST /api/calendar/entries
+PATCH /api/calendar/entries/:id
+POST /api/calendar/entries/:id/complete
+DELETE /api/calendar/entries/:id
+GET  /api/config/calendar-sources
+POST /api/config/calendar-sources
+PATCH /api/config/calendar-sources/:id
+GET  /api/config/google-calendar/status
+POST /api/config/google-calendar/auth-url
+GET  /api/config/google-calendar/calendars
+GET  /api/config/google-calendar/oauth/callback
+POST /api/config/google-calendar/disconnect
 GET  /api/categories
 POST /api/categories
 PATCH /api/categories/:id

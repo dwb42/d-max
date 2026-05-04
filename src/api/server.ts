@@ -5,6 +5,11 @@ import { env } from "../config/env.js";
 import { openDatabase } from "../db/connection.js";
 import { migrate } from "../db/migrate.js";
 import { CategoryRepository } from "../repositories/categories.js";
+import { CalendarService } from "../calendar/calendar-service.js";
+import { GoogleCalendarAuth } from "../calendar/google-calendar-auth.js";
+import { GoogleCalendarProvider } from "../calendar/google-calendar-provider.js";
+import { CalendarEntryRepository } from "../repositories/calendar-entries.js";
+import { CalendarSourceRepository } from "../repositories/calendar-sources.js";
 import { InitiativeRepository } from "../repositories/initiatives.js";
 import type { InitiativeType } from "../repositories/initiatives.js";
 import type { TaskStatus } from "../repositories/tasks.js";
@@ -31,6 +36,9 @@ migrate(env.databasePath);
 
 const db = openDatabase();
 const categories = new CategoryRepository(db);
+const calendarEntries = new CalendarEntryRepository(db);
+const calendarSources = new CalendarSourceRepository(db);
+const googleCalendarAuth = new GoogleCalendarAuth();
 const initiatives = new InitiativeRepository(db);
 const tasks = new TaskRepository(db);
 const stateEvents = new StateEventRepository(db);
@@ -96,6 +104,145 @@ const server = http.createServer(async (req, res) => {
         initiatives: activeInitiatives,
         tasks: openTasks
       });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/calendar") {
+      const startDate = calendarDateQuery.parse(url.searchParams.get("start"));
+      const endDate = calendarDateQuery.parse(url.searchParams.get("end"));
+      if (startDate > endDate) {
+        sendJson(res, 400, { error: "Calendar start cannot be after end" });
+        return;
+      }
+      sendJson(res, 200, await new CalendarService(db).getView({ startDate, endDate }));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/calendar/entries") {
+      const body = createCalendarEntryBody.parse(await readJson(req));
+      const entry = calendarEntries.create(body);
+      emitApiStateEvent({
+        operation: "createCalendarEntry",
+        entityType: "calendar_entry",
+        entityId: entry.id,
+        initiativeId: entry.initiativeId,
+        taskId: entry.taskId
+      });
+      sendJson(res, 200, { entry });
+      return;
+    }
+
+    const calendarEntryMatch = url.pathname.match(/^\/api\/calendar\/entries\/(\d+)$/);
+    if (req.method === "PATCH" && calendarEntryMatch) {
+      const body = updateCalendarEntryBody.parse(await readJson(req));
+      const entry = calendarEntries.update({ id: Number(calendarEntryMatch[1]), ...body });
+      emitApiStateEvent({
+        operation: "updateCalendarEntry",
+        entityType: "calendar_entry",
+        entityId: entry.id,
+        initiativeId: entry.initiativeId,
+        taskId: entry.taskId
+      });
+      sendJson(res, 200, { entry });
+      return;
+    }
+
+    if (req.method === "DELETE" && calendarEntryMatch) {
+      const id = Number(calendarEntryMatch[1]);
+      const existing = calendarEntries.findById(id);
+      calendarEntries.delete(id);
+      emitApiStateEvent({
+        operation: "deleteCalendarEntry",
+        entityType: "calendar_entry",
+        entityId: id,
+        initiativeId: existing?.initiativeId ?? null,
+        taskId: existing?.taskId ?? null
+      });
+      sendJson(res, 200, { deleted: true, id });
+      return;
+    }
+
+    const completeCalendarEntryMatch = url.pathname.match(/^\/api\/calendar\/entries\/(\d+)\/complete$/);
+    if (req.method === "POST" && completeCalendarEntryMatch) {
+      const entry = calendarEntries.complete(Number(completeCalendarEntryMatch[1]));
+      emitApiStateEvent({
+        operation: "completeCalendarEntry",
+        entityType: "calendar_entry",
+        entityId: entry.id,
+        initiativeId: entry.initiativeId,
+        taskId: entry.taskId
+      });
+      if (entry.taskId) {
+        emitApiStateEvent({
+          operation: "completeTask",
+          entityType: "task",
+          entityId: entry.taskId,
+          taskId: entry.taskId,
+          initiativeId: tasks.findById(entry.taskId)?.initiativeId ?? null
+        });
+      }
+      sendJson(res, 200, { entry });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/config/calendar-sources") {
+      sendJson(res, 200, { sources: calendarSources.list() });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/config/google-calendar/status") {
+      sendJson(res, 200, { googleCalendar: googleCalendarAuth.status() });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/config/google-calendar/auth-url") {
+      const body = googleCalendarAuthUrlBody.parse(await readJson(req));
+      sendJson(res, 200, { authUrl: googleCalendarAuth.createAuthorizationUrl(body.loginHint ?? null) });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/config/google-calendar/disconnect") {
+      googleCalendarAuth.disconnect();
+      sendJson(res, 200, { disconnected: true });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/config/google-calendar/calendars") {
+      sendJson(res, 200, { calendars: await new GoogleCalendarProvider().listCalendars() });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/config/google-calendar/oauth/callback") {
+      const code = url.searchParams.get("code");
+      const state = url.searchParams.get("state");
+      const error = url.searchParams.get("error");
+      if (error) {
+        sendHtmlRedirect(res, `/config?google=error&detail=${encodeURIComponent(error)}`);
+        return;
+      }
+      if (!code || !state) {
+        sendHtmlRedirect(res, "/config?google=error&detail=missing_code_or_state");
+        return;
+      }
+      await googleCalendarAuth.handleCallback({ code, state });
+      sendHtmlRedirect(res, "/config?google=connected");
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/config/calendar-sources") {
+      const body = createCalendarSourceBody.parse(await readJson(req));
+      const source = calendarSources.create(body);
+      emitApiStateEvent({ operation: "createCalendarSource", entityType: "calendar_source", entityId: source.id });
+      sendJson(res, 200, { source });
+      return;
+    }
+
+    const calendarSourceMatch = url.pathname.match(/^\/api\/config\/calendar-sources\/(\d+)$/);
+    if (req.method === "PATCH" && calendarSourceMatch) {
+      const body = updateCalendarSourceBody.parse(await readJson(req));
+      const source = calendarSources.update({ id: Number(calendarSourceMatch[1]), ...body });
+      emitApiStateEvent({ operation: "updateCalendarSource", entityType: "calendar_source", entityId: source.id });
+      sendJson(res, 200, { source });
       return;
     }
 
@@ -304,7 +451,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      await sendSse(res, async (send) => {
+      await sendSse(res, async (send, signal) => {
         recordApiDiagnostic(traceId, traceStartedAt, "api_sse_opened", { conversationId: prepared.conversationId });
         send("conversation", {
           conversationId: prepared.conversationId,
@@ -333,7 +480,7 @@ const server = http.createServer(async (req, res) => {
         const activityInterval = setInterval(publishActivities, 1000);
 
         try {
-          const agentResult = await chat.runPreparedTurn(prepared);
+          const agentResult = await chat.runPreparedTurn(prepared, { signal });
           clearInterval(activityInterval);
           const activities = agentResult.activities.length ? agentResult.activities : publishActivities();
           const result = chat.completePreparedTurn(prepared, { ...agentResult, activities });
@@ -353,6 +500,10 @@ const server = http.createServer(async (req, res) => {
           recordApiDiagnostic(traceId, traceStartedAt, "api_sse_done_sent", { conversationId: result.conversationId });
         } catch (error) {
           clearInterval(activityInterval);
+          if (isAbortError(error) || signal.aborted) {
+            recordApiDiagnostic(traceId, traceStartedAt, "api_sse_aborted");
+            return;
+          }
           const detail = error instanceof Error ? error.message : "Unknown agent error";
           const agentResult = { text: `Ich konnte den Agent-Turn nicht sauber abschließen: ${detail}`, activities: [] };
           const result = chat.completePreparedTurn(prepared, agentResult);
@@ -459,6 +610,54 @@ const updateTaskBody = z.object({
   priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
   notes: z.string().trim().min(1).nullable().optional(),
   dueAt: z.string().trim().min(1).nullable().optional()
+});
+
+const calendarDateQuery = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
+const calendarDateTime = z.string().trim().min(1);
+const calendarEntryType = z.enum(["initiative_focus", "task_work", "standalone"]);
+
+const createCalendarEntryBody = z.object({
+  type: calendarEntryType,
+  title: z.string().trim().min(1),
+  startAt: calendarDateTime,
+  endAt: calendarDateTime,
+  initiativeId: z.number().int().positive().nullable().optional(),
+  taskId: z.number().int().positive().nullable().optional(),
+  notes: z.string().nullable().optional()
+});
+
+const updateCalendarEntryBody = z.object({
+  type: calendarEntryType.optional(),
+  title: z.string().trim().min(1).optional(),
+  startAt: calendarDateTime.optional(),
+  endAt: calendarDateTime.optional(),
+  status: z.enum(["open", "done"]).optional(),
+  initiativeId: z.number().int().positive().nullable().optional(),
+  taskId: z.number().int().positive().nullable().optional(),
+  notes: z.string().nullable().optional()
+});
+
+const createCalendarSourceBody = z.object({
+  provider: z.literal("google").optional(),
+  accountLabel: z.string().trim().min(1),
+  calendarId: z.string().trim().min(1),
+  displayName: z.string().trim().min(1),
+  color: z.string().trim().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
+  enabled: z.boolean().optional(),
+  readOnly: z.boolean().optional()
+});
+
+const updateCalendarSourceBody = z.object({
+  accountLabel: z.string().trim().min(1).optional(),
+  calendarId: z.string().trim().min(1).optional(),
+  displayName: z.string().trim().min(1).optional(),
+  color: z.string().trim().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
+  enabled: z.boolean().optional(),
+  readOnly: z.boolean().optional()
+});
+
+const googleCalendarAuthUrlBody = z.object({
+  loginHint: z.string().trim().min(1).nullable().optional()
 });
 
 const createCategoryBody = z.object({
@@ -657,6 +856,23 @@ function emitApiStateEvent(input: Omit<CreateStateEventInput, "source">): StateE
   return stateEvents.create({ source: "api", ...input });
 }
 
+function sendHtmlRedirect(res: http.ServerResponse, path: string): void {
+  const target = new URL(path, env.dmaxWebBaseUrl).toString();
+  res.writeHead(302, {
+    location: target,
+    "content-type": "text/html; charset=utf-8"
+  });
+  res.end(`<!doctype html><meta http-equiv="refresh" content="0;url=${escapeHtml(target)}"><a href="${escapeHtml(target)}">Return to d-max</a>`);
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
 function getRequestTraceId(req: http.IncomingMessage): string {
   const header = req.headers["x-dmax-trace-id"];
   if (typeof header === "string" && header.trim()) {
@@ -716,7 +932,7 @@ async function streamStateEvents(req: http.IncomingMessage, res: http.ServerResp
 
 async function sendSse(
   res: http.ServerResponse,
-  handler: (send: (event: string, payload: unknown) => void) => Promise<void>,
+  handler: (send: (event: string, payload: unknown) => void, signal: AbortSignal) => Promise<void>,
   traceId?: string
 ): Promise<void> {
   res.writeHead(200, {
@@ -726,16 +942,32 @@ async function sendSse(
     ...(traceId ? { "x-dmax-trace-id": traceId } : {})
   });
 
+  const abortController = new AbortController();
+  const abort = () => abortController.abort();
+  res.req.once("aborted", abort);
+  res.req.once("close", abort);
+
   const send = (event: string, payload: unknown) => {
+    if (abortController.signal.aborted || res.writableEnded) {
+      return;
+    }
     res.write(`event: ${event}\n`);
     res.write(`data: ${JSON.stringify(payload)}\n\n`);
   };
 
   try {
-    await handler(send);
+    await handler(send, abortController.signal);
   } finally {
-    res.end();
+    res.req.off("aborted", abort);
+    res.req.off("close", abort);
+    if (!res.writableEnded) {
+      res.end();
+    }
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function chunkText(text: string, size: number): string[] {

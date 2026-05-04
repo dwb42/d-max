@@ -43,6 +43,34 @@ create table if not exists tasks (
   completed_at text
 );
 
+create table if not exists calendar_entries (
+  id integer primary key,
+  type text not null check (type in ('initiative_focus', 'task_work', 'standalone')),
+  title text not null,
+  start_at text not null,
+  end_at text not null,
+  status text not null default 'open' check (status in ('open', 'done')),
+  initiative_id integer references initiatives(id),
+  task_id integer references tasks(id),
+  notes text,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists calendar_sources (
+  id integer primary key,
+  provider text not null check (provider in ('google')),
+  account_label text not null,
+  calendar_id text not null,
+  display_name text not null,
+  color text,
+  enabled integer not null default 1 check (enabled in (0, 1)),
+  read_only integer not null default 1 check (read_only in (0, 1)),
+  created_at text not null,
+  updated_at text not null,
+  unique(provider, calendar_id)
+);
+
 create table if not exists app_chat_messages (
   id integer primary key,
   conversation_id integer references app_conversations(id),
@@ -90,7 +118,7 @@ create table if not exists app_state_events (
   id integer primary key,
   source text not null check (source in ('api', 'tool')),
   operation text not null,
-  entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'task')),
+  entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'task', 'calendar_entry', 'calendar_source')),
   entity_id integer,
   category_id integer,
   initiative_id integer,
@@ -110,6 +138,12 @@ create index if not exists idx_tasks_initiative_sort_order on tasks(initiative_i
 create index if not exists idx_tasks_status on tasks(status);
 create index if not exists idx_tasks_priority on tasks(priority);
 create index if not exists idx_tasks_due_at on tasks(due_at);
+create index if not exists idx_calendar_entries_start_at on calendar_entries(start_at);
+create index if not exists idx_calendar_entries_end_at on calendar_entries(end_at);
+create index if not exists idx_calendar_entries_status on calendar_entries(status);
+create index if not exists idx_calendar_entries_initiative_id on calendar_entries(initiative_id);
+create index if not exists idx_calendar_entries_task_id on calendar_entries(task_id);
+create index if not exists idx_calendar_sources_enabled on calendar_sources(enabled, provider);
 create index if not exists idx_app_chat_messages_created_at on app_chat_messages(created_at, id);
 create index if not exists idx_app_chat_messages_conversation_id on app_chat_messages(conversation_id, created_at, id);
 create index if not exists idx_app_conversations_context on app_conversations(context_type, context_entity_id, updated_at);

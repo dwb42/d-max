@@ -32,7 +32,7 @@ export type AppChatMessageResult = {
 
 export type AppChatAgentRunner = (
   message: string,
-  options: { conversationId: number; promptLogId: number; trace: AppChatTurnTrace }
+  options: { conversationId: number; promptLogId: number; trace: AppChatTurnTrace; signal?: AbortSignal }
 ) => Promise<{ text: string; activities: OpenClawActivity[]; openClawSessionId?: string | null; openClawSessionKey?: string | null }>;
 
 export type PreparedAppChatTurn = {
@@ -66,6 +66,7 @@ export class AppChatService {
         label: openClawSessionLabelForConversation(options.conversationId)
       }, {
         timeoutSeconds: env.dmaxOpenClawTimeoutSeconds,
+        signal: options.signal,
         diagnostics: createDiagnosticContext(options.trace, {
           conversationId: options.conversationId,
           promptLogId: options.promptLogId,
@@ -255,7 +256,7 @@ export class AppChatService {
     };
   }
 
-  async runPreparedTurn(prepared: PreparedAppChatTurn): Promise<{
+  async runPreparedTurn(prepared: PreparedAppChatTurn, options: { signal?: AbortSignal } = {}): Promise<{
     text: string;
     activities: OpenClawActivity[];
     openClawSessionId?: string | null;
@@ -271,7 +272,8 @@ export class AppChatService {
     });
     this.persistTurnTrace(prepared.promptLogId, prepared.trace);
     try {
-      const result = await this.runAgentSafely(prepared.agentMessage, prepared.conversationId, prepared.promptLogId, prepared.trace);
+      throwIfAborted(options.signal);
+      const result = await this.runAgentSafely(prepared.agentMessage, prepared.conversationId, prepared.promptLogId, prepared.trace, options.signal);
       addTurnTraceEvent(prepared.trace, "agent_turn_finished", {
         replyChars: result.text.length,
         activities: result.activities.length
@@ -327,7 +329,8 @@ export class AppChatService {
     message: string,
     conversationId: number,
     promptLogId: number,
-    trace: AppChatTurnTrace
+    trace: AppChatTurnTrace,
+    signal?: AbortSignal
   ): Promise<{
     text: string;
     activities: OpenClawActivity[];
@@ -335,8 +338,11 @@ export class AppChatService {
     openClawSessionKey?: string | null;
   }> {
     try {
-      return await this.runAgent(message, { conversationId, promptLogId, trace });
+      return await this.runAgent(message, { conversationId, promptLogId, trace, signal });
     } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
       const detail = error instanceof Error ? error.message : "Unknown agent error";
       return { text: `Ich konnte den Agent-Turn nicht sauber abschließen: ${detail}`, activities: [] };
     }
@@ -367,6 +373,16 @@ export class AppChatService {
       // Trace persistence is diagnostic only; it must not break chat delivery.
     }
   }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new DOMException("Chat turn aborted.", "AbortError");
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function openClawSessionKeyForConversation(conversationId: number): string {
