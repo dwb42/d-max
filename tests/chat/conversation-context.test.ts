@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { listPromptTemplates, resolveConversationContext } from "../../src/chat/conversation-context.js";
 import { CategoryRepository } from "../../src/repositories/categories.js";
+import { InitiativeRelationRepository } from "../../src/repositories/initiative-relations.js";
 import { InitiativeRepository } from "../../src/repositories/initiatives.js";
+import { MediaAssetRepository } from "../../src/repositories/media-assets.js";
+import { MediaLinkRepository } from "../../src/repositories/media-links.js";
 import { TaskChecklistItemRepository } from "../../src/repositories/task-checklist-items.js";
 import { TaskRepository } from "../../src/repositories/tasks.js";
 import { createTestDatabase } from "../helpers/test-db.js";
@@ -116,13 +119,34 @@ describe("resolveConversationContext", () => {
 
   it("builds a task context with project memory", () => {
     const category = new CategoryRepository(db).create({ name: "Health" });
-    const project = new InitiativeRepository(db).create({
+    const initiatives = new InitiativeRepository(db);
+    const warmup = initiatives.create({ categoryId: category.id, name: "Warmup", type: "idea" });
+    const project = initiatives.create({
       categoryId: category.id,
       name: "Health Rhythm",
       startDate: "2026-05-05",
       markdown: "# Overview\n\nEnergy and training rhythm.\n"
     });
+    const review = initiatives.create({ categoryId: category.id, name: "Review Routine", type: "habit" });
+    const relations = new InitiativeRelationRepository(db);
+    relations.create({ predecessorInitiativeId: warmup.id, successorInitiativeId: project.id });
+    relations.create({ predecessorInitiativeId: project.id, successorInitiativeId: review.id });
     const task = new TaskRepository(db).create({ initiativeId: project.id, title: "Choose weekly training slots" });
+    const asset = new MediaAssetRepository(db).create({
+      kind: "document",
+      mimeType: "application/pdf",
+      originalName: "training-plan.pdf",
+      storagePath: "assets/cc/hash/training-plan.pdf",
+      sha256: "cc123",
+      byteSize: 2048,
+      summary: "Training plan source document."
+    });
+    new MediaLinkRepository(db).create({
+      assetId: asset.id,
+      entityType: "task",
+      entityId: task.id,
+      caption: "Plan draft"
+    });
     const checklistItems = new TaskChecklistItemRepository(db);
     checklistItems.create({ taskId: task.id, name: "Pick gym days" });
     const secondItem = checklistItems.create({ taskId: task.id, name: "Block calendar slots" });
@@ -139,7 +163,15 @@ describe("resolveConversationContext", () => {
     expect(resolved.agentContextBlock).toContain("Checklist (2):");
     expect(resolved.agentContextBlock).toContain("[todo] Pick gym days");
     expect(resolved.agentContextBlock).toContain("[done] Block calendar slots");
+    expect(resolved.agentContextBlock).toContain("Media attachments (1):");
+    expect(resolved.agentContextBlock).toContain("training-plan.pdf");
+    expect(resolved.agentContextBlock).toContain("Plan draft");
+    expect(resolved.agentContextBlock).toContain("Training plan source document.");
     expect(resolved.agentContextBlock).toContain("Energy and training rhythm");
+    expect(resolved.agentContextBlock).toContain("Initiative predecessors (1):");
+    expect(resolved.agentContextBlock).toContain("Warmup");
+    expect(resolved.agentContextBlock).toContain("Initiative successors (1):");
+    expect(resolved.agentContextBlock).toContain("Review Routine");
   });
 
   it("lists prompt templates for navigation contexts", () => {
@@ -170,6 +202,11 @@ describe("resolveConversationContext", () => {
     expect(templates.find((template) => template.id === "habits-detail")?.effectiveContext).toBe("habit");
     expect(templates.find((template) => template.id === "tasks-list")?.effectiveContext).toBe("tasks");
     expect(templates.find((template) => template.id === "tasks-detail")?.contextDataTemplate).toContain("Checklist");
+    expect(templates.find((template) => template.id === "tasks-detail")?.contextDataTemplate).toContain("Media attachments");
+    expect(templates.find((template) => template.id === "tasks-detail")?.contextDataTemplate).toContain("Initiative predecessors");
+    expect(templates.find((template) => template.id === "ideas-detail")?.contextDataTemplate).toContain("Predecessors");
+    expect(templates.find((template) => template.id === "projects-detail")?.contextDataTemplate).toContain("Media attachments");
+    expect(templates.find((template) => template.id === "projects-detail")?.contextDataTemplate).toContain("Predecessors");
     expect(templates.find((template) => template.id === "category-detail")?.route).toBe("/categories/:categoryName");
     expect(templates.find((template) => template.id === "category-detail")?.contextDataTemplate).not.toContain("Color: {{category_color}}");
     expect(templates.find((template) => template.id === "category-detail")?.contextDataTemplate).toContain("Ideen in diesem Lebensbereich");

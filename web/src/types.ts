@@ -11,12 +11,14 @@ export type Category = {
 };
 
 export type InitiativeType = "idea" | "project" | "habit";
+export type ProjectPhase = "planning" | "doing";
 
 export type Initiative = {
   id: number;
   categoryId: number;
   parentId: number | null;
   type: InitiativeType;
+  projectPhase: ProjectPhase;
   name: string;
   status: "active" | "paused" | "completed" | "archived";
   summary: string | null;
@@ -29,11 +31,83 @@ export type Initiative = {
   updatedAt: string;
 };
 
+export type InitiativeRelationType = "precedes";
+
+export type InitiativeRelation = {
+  id: number;
+  predecessorInitiativeId: number;
+  successorInitiativeId: number;
+  relationType: InitiativeRelationType;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type InitiativeRelationWithInitiatives = InitiativeRelation & {
+  predecessor: Initiative;
+  successor: Initiative;
+};
+
+export type InitiativeGraph = {
+  initiatives: Initiative[];
+  relations: InitiativeRelationWithInitiatives[];
+};
+
+export type PlanningCanvas = {
+  id: number;
+  name: string;
+  description: string | null;
+  defaultStartDate: string | null;
+  defaultZoom: "month" | "week";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PlanningCanvasNode = {
+  id: number;
+  canvasId: number;
+  initiativeId: number;
+  x: number;
+  y: number;
+  width: number | null;
+  height: number | null;
+  collapsed: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PlanningCanvasInitiativeNode = PlanningCanvasNode & {
+  initiative: Initiative;
+  category: Pick<Category, "id" | "name" | "color"> | null;
+  tasks: Task[];
+  taskCount: number;
+  openTaskCount: number;
+  doneTaskCount: number;
+};
+
+export type PlanningCanvasRelationEdge = {
+  kind: "parent_child" | "precedes";
+  fromInitiativeId: number;
+  toInitiativeId: number;
+  relationId: number | null;
+};
+
+export type PlanningCanvasViewData = {
+  canvas: PlanningCanvas;
+  nodes: PlanningCanvasInitiativeNode[];
+  unmappedInitiatives: Array<{
+    initiative: Initiative;
+    category: Pick<Category, "id" | "name" | "color"> | null;
+    taskCount: number;
+    openTaskCount: number;
+  }>;
+  relationEdges: PlanningCanvasRelationEdge[];
+};
+
 export type Task = {
   id: number;
   initiativeId: number;
   title: string;
-  status: "open" | "in_progress" | "blocked" | "done" | "cancelled";
+  status: "open" | "done";
   priority: "low" | "normal" | "high" | "urgent";
   notes: string | null;
   dueAt: string | null;
@@ -51,6 +125,41 @@ export type TaskChecklistItem = {
   sortOrder: number;
   createdAt?: string;
   updatedAt?: string;
+};
+
+export type MediaKind = "image" | "audio" | "video" | "document" | "other";
+
+export type MediaAsset = {
+  id: number;
+  kind: MediaKind;
+  mimeType: string;
+  originalName: string;
+  sha256: string;
+  byteSize: number;
+  width: number | null;
+  height: number | null;
+  durationMs: number | null;
+  transcript: string | null;
+  textExcerpt: string | null;
+  summary: string | null;
+  createdAt: string;
+  updatedAt: string;
+  fileUrl: string;
+};
+
+export type MediaEntityType = "category" | "initiative" | "task" | "calendar_entry" | "app_chat_message";
+
+export type MediaAttachment = {
+  id: number;
+  assetId: number;
+  entityType: MediaEntityType;
+  entityId: number;
+  caption: string | null;
+  role: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  asset: MediaAsset;
 };
 
 export type CalendarEntryType = "initiative_focus" | "task_work" | "standalone";
@@ -150,7 +259,10 @@ export type CalendarViewData = {
 
 export type InitiativeDetail = {
   initiative: Initiative;
+  predecessors?: InitiativeRelationWithInitiatives[];
+  successors?: InitiativeRelationWithInitiatives[];
   tasks: Task[];
+  mediaAttachments?: MediaAttachment[];
 };
 
 export type TaskDetail = {
@@ -158,6 +270,7 @@ export type TaskDetail = {
   checklistItems?: TaskChecklistItem[];
   initiative: Initiative | null;
   category: Category | null;
+  mediaAttachments?: MediaAttachment[];
 };
 
 export type ConversationContext =
@@ -278,7 +391,17 @@ export type StateEvent = {
   id: number;
   source: "api" | "tool";
   operation: string;
-  entityType: "overview" | "category" | "initiative" | "task" | "calendar_entry" | "calendar_source";
+  entityType:
+    | "overview"
+    | "category"
+    | "initiative"
+    | "initiative_relation"
+    | "planning_canvas_node"
+    | "task"
+    | "calendar_entry"
+    | "calendar_source"
+    | "media_asset"
+    | "media_link";
   entityId: number | null;
   categoryId: number | null;
   initiativeId: number | null;

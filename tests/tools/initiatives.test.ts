@@ -90,4 +90,36 @@ describe("project tools", () => {
       data: [expect.objectContaining({ id: initiativeId, type: "project" })]
     });
   });
+
+  it("lets the agent create, list, graph, and delete initiative relations", async () => {
+    const runner = createToolRunner();
+    const category = new CategoryRepository(db).create({ name: "Business" });
+    const first = await runner.run("createInitiative", { categoryId: category.id, type: "idea", name: "A" }, { db });
+    const second = await runner.run("createInitiative", { categoryId: category.id, type: "project", name: "B" }, { db });
+    const predecessorInitiativeId = first.ok ? (first.data as { id: number }).id : 0;
+    const successorInitiativeId = second.ok ? (second.data as { id: number }).id : 0;
+
+    const created = await runner.run("createInitiativeRelation", { predecessorInitiativeId, successorInitiativeId }, { db });
+    const listed = await runner.run("listInitiativeRelations", { predecessorInitiativeId }, { db });
+    const graph = await runner.run("getInitiativeGraph", { initiativeId: predecessorInitiativeId }, { db });
+    const relationId = created.ok ? (created.data as { id: number }).id : 0;
+    const deleted = await runner.run("deleteInitiativeRelation", { id: relationId }, { db });
+
+    expect(created).toMatchObject({
+      ok: true,
+      data: expect.objectContaining({ predecessorInitiativeId, successorInitiativeId, relationType: "precedes" })
+    });
+    expect(listed).toMatchObject({
+      ok: true,
+      data: [expect.objectContaining({ predecessorInitiativeId, successorInitiativeId })]
+    });
+    expect(graph).toMatchObject({
+      ok: true,
+      data: {
+        initiatives: expect.arrayContaining([expect.objectContaining({ id: predecessorInitiativeId }), expect.objectContaining({ id: successorInitiativeId })]),
+        relations: [expect.objectContaining({ predecessorInitiativeId, successorInitiativeId })]
+      }
+    });
+    expect(deleted).toMatchObject({ ok: true, data: expect.objectContaining({ deleted: true, id: relationId }) });
+  });
 });

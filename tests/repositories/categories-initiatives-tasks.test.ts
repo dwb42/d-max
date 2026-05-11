@@ -3,7 +3,11 @@ import type Database from "better-sqlite3";
 import { CalendarEntryRepository } from "../../src/repositories/calendar-entries.js";
 import { CalendarSourceRepository } from "../../src/repositories/calendar-sources.js";
 import { CategoryRepository } from "../../src/repositories/categories.js";
+import { InitiativeRelationRepository } from "../../src/repositories/initiative-relations.js";
 import { InitiativeRepository } from "../../src/repositories/initiatives.js";
+import { MediaAssetRepository } from "../../src/repositories/media-assets.js";
+import { MediaLinkRepository } from "../../src/repositories/media-links.js";
+import { PlanningCanvasRepository } from "../../src/repositories/planning-canvas.js";
 import { TaskChecklistItemRepository } from "../../src/repositories/task-checklist-items.js";
 import { TaskRepository } from "../../src/repositories/tasks.js";
 import { createTestDatabase } from "../helpers/test-db.js";
@@ -82,6 +86,79 @@ describe("repositories", () => {
     expect(initiatives.list({ type: "habit" }).map((project) => project.id)).toContain(habit.id);
   });
 
+  it("manages directed initiative predecessor and successor relations without cycles", () => {
+    const category = new CategoryRepository(db).create({ name: "Business" });
+    const initiatives = new InitiativeRepository(db);
+    const relations = new InitiativeRelationRepository(db);
+    const first = initiatives.create({ categoryId: category.id, name: "A", type: "idea" });
+    const second = initiatives.create({ categoryId: category.id, name: "B", type: "project" });
+    const third = initiatives.create({ categoryId: category.id, name: "C", type: "habit" });
+
+    const firstToSecond = relations.create({ predecessorInitiativeId: first.id, successorInitiativeId: second.id });
+    const duplicate = relations.create({ predecessorInitiativeId: first.id, successorInitiativeId: second.id });
+    relations.create({ predecessorInitiativeId: second.id, successorInitiativeId: third.id });
+
+    expect(duplicate.id).toBe(firstToSecond.id);
+    expect(relations.getInitiativePredecessors(second.id).map((relation) => relation.predecessor.name)).toEqual(["A"]);
+    expect(relations.getInitiativeSuccessors(second.id).map((relation) => relation.successor.name)).toEqual(["C"]);
+    expect(relations.getInitiativeGraph({ initiativeId: second.id, maxDepth: 2 }).initiatives.map((initiative) => initiative.name).sort()).toEqual(["A", "B", "C"]);
+    expect(() => relations.create({ predecessorInitiativeId: third.id, successorInitiativeId: first.id })).toThrow("cycle");
+    expect(() => relations.create({ predecessorInitiativeId: first.id, successorInitiativeId: first.id })).toThrow("itself");
+
+    expect(relations.delete(firstToSecond.id)).toMatchObject({ id: firstToSecond.id });
+    expect(relations.getInitiativePredecessors(second.id)).toEqual([]);
+  });
+
+  it("places initiatives on the default planning canvas and exposes visible relation edges", () => {
+    const category = new CategoryRepository(db).create({ name: "Business" });
+    const initiatives = new InitiativeRepository(db);
+    const relations = new InitiativeRelationRepository(db);
+    const tasks = new TaskRepository(db);
+    const canvas = new PlanningCanvasRepository(db);
+    const parent = initiatives.create({ categoryId: category.id, name: "Parent", type: "project" });
+    const child = initiatives.create({ categoryId: category.id, parentId: parent.id, name: "Child", type: "project" });
+    const successor = initiatives.create({ categoryId: category.id, name: "Successor", type: "project" });
+    tasks.create({ initiativeId: parent.id, title: "Parent task" });
+    relations.create({ predecessorInitiativeId: child.id, successorInitiativeId: successor.id });
+
+    const firstNode = canvas.createNode({ initiativeId: parent.id, x: 10, y: 20 });
+    canvas.createNode({ initiativeId: child.id, x: 320, y: 120 });
+    canvas.createNode({ initiativeId: successor.id, x: 620, y: 220 });
+    const moved = canvas.updateNode({ id: firstNode.id, x: 40, y: 60 });
+    const view = canvas.getView();
+
+    expect(moved.x).toBe(40);
+    expect(view.canvas.name).toBe("Default");
+    expect(view.nodes.map((node) => node.initiative.name)).toEqual(["Parent", "Child", "Successor"]);
+    expect(view.nodes.find((node) => node.initiativeId === parent.id)?.openTaskCount).toBe(1);
+    expect(view.relationEdges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "parent_child", fromInitiativeId: parent.id, toInitiativeId: child.id }),
+        expect.objectContaining({ kind: "precedes", fromInitiativeId: child.id, toInitiativeId: successor.id })
+      ])
+    );
+    expect(view.unmappedInitiatives.map((entry) => entry.initiative.id)).not.toContain(parent.id);
+  });
+
+  it("filters only the planning canvas parking lot, not already placed nodes", () => {
+    const business = new CategoryRepository(db).create({ name: "Business" });
+    const family = new CategoryRepository(db).create({ name: "Familie" });
+    const initiatives = new InitiativeRepository(db);
+    const canvas = new PlanningCanvasRepository(db);
+    const businessProject = initiatives.create({ categoryId: business.id, name: "Business project", type: "project" });
+    const familyProject = initiatives.create({ categoryId: family.id, name: "Family project", type: "project" });
+    const familyIdea = initiatives.create({ categoryId: family.id, name: "Family idea", type: "idea" });
+    const unplacedFamilyProject = initiatives.create({ categoryId: family.id, name: "Unplaced family project", type: "project" });
+
+    canvas.createNode({ initiativeId: businessProject.id, x: 10, y: 20 });
+    canvas.createNode({ initiativeId: familyProject.id, x: 320, y: 20 });
+    const view = canvas.getView({ filters: { categoryId: family.id, type: "idea" } });
+
+    expect(view.nodes.map((node) => node.initiative.id).sort()).toEqual([businessProject.id, familyProject.id].sort());
+    expect(view.unmappedInitiatives.map((entry) => entry.initiative.id)).toEqual([unplacedFamilyProject.id]);
+    expect(view.unmappedInitiatives.map((entry) => entry.initiative.id)).not.toContain(familyIdea.id);
+  });
+
   it("keeps Inbox as a system category", () => {
     const categories = new CategoryRepository(db);
     const inbox = categories.findByName("Inbox");
@@ -133,9 +210,20 @@ describe("repositories", () => {
     const tasks = new TaskRepository(db);
     const task = tasks.create({ initiativeId: project.id, title: "Ship checklist MVP" });
     const checklistItems = new TaskChecklistItemRepository(db);
+    const mediaAssets = new MediaAssetRepository(db);
+    const mediaLinks = new MediaLinkRepository(db);
 
     const first = checklistItems.create({ taskId: task.id, name: "Create schema" });
     const second = checklistItems.create({ taskId: task.id, name: "Build UI" });
+    const asset = mediaAssets.create({
+      kind: "image",
+      mimeType: "image/png",
+      originalName: "task-media.png",
+      storagePath: "assets/task-media.png",
+      sha256: "task-media-hash",
+      byteSize: 42
+    });
+    mediaLinks.create({ assetId: asset.id, entityType: "task", entityId: task.id });
     const completedItem = checklistItems.update({ id: first.id, status: "done" });
     checklistItems.reorderWithinTask(task.id, [second.id, first.id]);
 
@@ -145,6 +233,7 @@ describe("repositories", () => {
 
     tasks.delete(task.id);
     expect(checklistItems.listByTask(task.id)).toEqual([]);
+    expect(mediaLinks.listForEntity("task", task.id)).toEqual([]);
   });
 
   it("persists manual ordering for categories, initiatives, and tasks", () => {

@@ -7,7 +7,7 @@ import { InitiativeRepository } from "../repositories/initiatives.js";
 import { TaskChecklistItemRepository } from "../repositories/task-checklist-items.js";
 import { TaskRepository } from "../repositories/tasks.js";
 
-const taskStatusSchema = z.enum(["open", "in_progress", "blocked", "done", "cancelled"]);
+const taskStatusSchema = z.enum(["open", "done"]);
 const taskPrioritySchema = z.enum(["low", "normal", "high", "urgent"]);
 const listTasksInput = z
   .object({

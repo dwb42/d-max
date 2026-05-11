@@ -55,6 +55,15 @@ GOOGLE_OAUTH_REDIRECT_URI=http://localhost:3088/api/config/google-calendar/oauth
 Then open `/config`, connect Google, and add the calendar IDs that should appear
 in `/calendar`.
 
+Media uploads default to local files under `data/media` with metadata in SQLite.
+Override with `DMAX_MEDIA_STORAGE_DIR` and `DMAX_MEDIA_MAX_UPLOAD_BYTES` when
+needed. Uploaded media is analyzed immediately when possible:
+text/Markdown locally, audio/video through `OPENAI_TRANSCRIBE_MODEL`, and
+images/PDFs through `OPENAI_MEDIA_ANALYSIS_MODEL` when `OPENAI_API_KEY` is set.
+Stored analysis text can be edited in the media modal, and media analysis can
+be regenerated with an optional user focus prompt. OpenClaw/app chat receives
+media metadata and derived text, not raw file bytes.
+
 ## OpenClaw Checks
 
 ```bash
@@ -77,6 +86,9 @@ openclaw agent --local \
 ```
 
 ## Verification
+
+Last context-sync verification: 2026-05-11. The commands below passed locally;
+`web:build` emitted only Vite's large JavaScript chunk warning.
 
 ```bash
 npm run typecheck

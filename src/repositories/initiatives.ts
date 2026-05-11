@@ -3,12 +3,14 @@ import { nowIso } from "../db/time.js";
 
 export type InitiativeType = "idea" | "project" | "habit";
 export type InitiativeStatus = "active" | "paused" | "completed" | "archived";
+export type ProjectPhase = "planning" | "doing";
 
 export type Initiative = {
   id: number;
   categoryId: number;
   parentId: number | null;
   type: InitiativeType;
+  projectPhase: ProjectPhase;
   name: string;
   status: InitiativeStatus;
   summary: string | null;
@@ -26,6 +28,7 @@ type InitiativeRow = {
   category_id: number;
   parent_id: number | null;
   type: InitiativeType;
+  project_phase: ProjectPhase;
   name: string;
   status: InitiativeStatus;
   summary: string | null;
@@ -42,6 +45,7 @@ export type CreateInitiativeInput = {
   categoryId: number;
   parentId?: number | null;
   type?: InitiativeType;
+  projectPhase?: ProjectPhase;
   name: string;
   summary?: string | null;
   markdown?: string;
@@ -55,6 +59,7 @@ export type UpdateInitiativeInput = {
   categoryId?: number;
   parentId?: number | null;
   type?: InitiativeType;
+  projectPhase?: ProjectPhase;
   name?: string;
   status?: InitiativeStatus;
   summary?: string | null;
@@ -69,6 +74,7 @@ function toInitiative(row: InitiativeRow): Initiative {
     categoryId: row.category_id,
     parentId: row.parent_id,
     type: row.type,
+    projectPhase: row.project_phase,
     name: row.name,
     status: row.status,
     summary: row.summary,
@@ -122,12 +128,13 @@ export class InitiativeRepository {
 
     const result = this.db
       .prepare(
-        "insert into initiatives (category_id, parent_id, type, name, status, summary, markdown, start_date, end_date, sort_order, is_system, created_at, updated_at) values (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)"
+        "insert into initiatives (category_id, parent_id, type, project_phase, name, status, summary, markdown, start_date, end_date, sort_order, is_system, created_at, updated_at) values (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)"
       )
       .run(
         input.categoryId,
         input.parentId ?? null,
         input.type ?? "project",
+        input.projectPhase ?? "doing",
         input.name,
         input.summary ?? null,
         input.markdown ?? "",
@@ -155,12 +162,13 @@ export class InitiativeRepository {
 
     this.db
       .prepare(
-        "update initiatives set category_id = ?, parent_id = ?, type = ?, name = ?, status = ?, summary = ?, markdown = ?, start_date = ?, end_date = ?, updated_at = ? where id = ?"
+        "update initiatives set category_id = ?, parent_id = ?, type = ?, project_phase = ?, name = ?, status = ?, summary = ?, markdown = ?, start_date = ?, end_date = ?, updated_at = ? where id = ?"
       )
       .run(
         input.categoryId ?? existing.categoryId,
         input.parentId === undefined ? existing.parentId : input.parentId,
         input.type ?? existing.type,
+        input.projectPhase ?? existing.projectPhase,
         input.name ?? existing.name,
         input.status ?? existing.status,
         input.summary === undefined ? existing.summary : input.summary,

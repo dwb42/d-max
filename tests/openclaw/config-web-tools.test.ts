@@ -30,6 +30,10 @@ describe("OpenClaw web config tools", () => {
       "d-max__updateInitiative",
       "d-max__archiveInitiative",
       "d-max__updateInitiativeMarkdown",
+      "d-max__listInitiativeRelations",
+      "d-max__createInitiativeRelation",
+      "d-max__deleteInitiativeRelation",
+      "d-max__getInitiativeGraph",
       "d-max__listTasks",
       "d-max__createTask",
       "d-max__updateTask",
@@ -39,7 +43,12 @@ describe("OpenClaw web config tools", () => {
       "d-max__createTaskChecklistItem",
       "d-max__updateTaskChecklistItem",
       "d-max__deleteTaskChecklistItem",
-      "d-max__reorderTaskChecklistItems"
+      "d-max__reorderTaskChecklistItems",
+      "d-max__listMediaAttachments",
+      "d-max__attachMediaToEntity",
+      "d-max__updateMediaAttachment",
+      "d-max__deleteMediaAttachment",
+      "d-max__reorderMediaAttachments"
     ]);
     expect([...allowedTools].filter((tool) => tool.startsWith("d-max__")).sort()).toEqual([...expectedTools].sort());
   });

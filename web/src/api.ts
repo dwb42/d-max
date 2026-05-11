@@ -13,11 +13,19 @@ import type {
   GoogleCalendarAuthStatus,
   GoogleCalendarListItem,
   LiveKitVoiceSession,
+  MediaAttachment,
+  MediaAsset,
+  MediaEntityType,
   OpenClawStatus,
   PersistedChatMessage,
   Initiative,
   InitiativeDetail,
+  InitiativeGraph,
+  InitiativeRelationWithInitiatives,
   InitiativeType,
+  ProjectPhase,
+  PlanningCanvasNode,
+  PlanningCanvasViewData,
   PromptTemplateDefinition,
   StateEvent,
   Task,
@@ -198,7 +206,9 @@ export async function fetchInitiatives(): Promise<Initiative[]> {
 
 export async function createInitiative(input: {
   categoryId: number;
+  parentId?: number | null;
   type: InitiativeType;
+  projectPhase?: ProjectPhase;
   name: string;
   summary?: string | null;
   markdown?: string;
@@ -219,6 +229,7 @@ export async function updateInitiative(
     categoryId?: number;
     parentId?: number | null;
     type?: InitiativeType;
+    projectPhase?: ProjectPhase;
     name?: string;
     status?: Initiative["status"];
     summary?: string | null;
@@ -256,6 +267,91 @@ export async function fetchInitiativeDetail(initiativeId: number): Promise<Initi
   return request<InitiativeDetail>(`/api/initiatives/${initiativeId}`);
 }
 
+export async function createInitiativeRelation(input: {
+  predecessorInitiativeId: number;
+  successorInitiativeId: number;
+  relationType?: "precedes";
+}): Promise<InitiativeRelationWithInitiatives> {
+  const response = await request<{ relation: InitiativeRelationWithInitiatives }>("/api/initiative-relations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.relation;
+}
+
+export async function deleteInitiativeRelation(id: number): Promise<void> {
+  await request(`/api/initiative-relations/${id}`, { method: "DELETE" });
+}
+
+export async function fetchInitiativeGraph(input: { initiativeId?: number; maxDepth?: number } = {}): Promise<InitiativeGraph> {
+  const params = new URLSearchParams();
+  if (input.initiativeId !== undefined) params.set("initiativeId", String(input.initiativeId));
+  if (input.maxDepth !== undefined) params.set("maxDepth", String(input.maxDepth));
+  const query = params.toString();
+  const response = await request<{ graph: InitiativeGraph }>(`/api/initiative-graph${query ? `?${query}` : ""}`);
+  return response.graph;
+}
+
+export async function fetchPlanningCanvas(input: {
+  canvasId?: number;
+  search?: string;
+  categoryId?: number;
+  type?: InitiativeType;
+  status?: Initiative["status"];
+  includeArchived?: boolean;
+} = {}): Promise<PlanningCanvasViewData> {
+  const params = new URLSearchParams();
+  if (input.canvasId !== undefined) params.set("canvasId", String(input.canvasId));
+  if (input.search?.trim()) params.set("search", input.search.trim());
+  if (input.categoryId !== undefined) params.set("categoryId", String(input.categoryId));
+  if (input.type !== undefined) params.set("type", input.type);
+  if (input.status !== undefined) params.set("status", input.status);
+  if (input.includeArchived) params.set("includeArchived", "true");
+  const query = params.toString();
+  const response = await request<{ view: PlanningCanvasViewData }>(`/api/planning-canvas${query ? `?${query}` : ""}`);
+  return response.view;
+}
+
+export async function createPlanningCanvasNode(input: {
+  canvasId?: number;
+  initiativeId: number;
+  x: number;
+  y: number;
+  width?: number | null;
+  height?: number | null;
+  collapsed?: boolean;
+}): Promise<PlanningCanvasNode> {
+  const response = await request<{ node: PlanningCanvasNode }>("/api/planning-canvas/nodes", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.node;
+}
+
+export async function updatePlanningCanvasNode(
+  id: number,
+  input: {
+    x?: number;
+    y?: number;
+    width?: number | null;
+    height?: number | null;
+    collapsed?: boolean;
+  }
+): Promise<PlanningCanvasNode> {
+  const response = await request<{ node: PlanningCanvasNode }>(`/api/planning-canvas/nodes/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.node;
+}
+
+export async function deletePlanningCanvasNode(id: number): Promise<void> {
+  await request(`/api/planning-canvas/nodes/${id}`, { method: "DELETE" });
+}
+
 export async function fetchTaskDetail(taskId: number): Promise<TaskDetail> {
   return request<TaskDetail>(`/api/tasks/${taskId}`);
 }
@@ -264,7 +360,11 @@ export async function completeTask(id: number) {
   return request(`/api/tasks/${id}/complete`, { method: "POST" });
 }
 
-export async function updateTaskStatus(id: number, status: string) {
+export async function deleteTask(id: number): Promise<void> {
+  await request(`/api/tasks/${id}`, { method: "DELETE" });
+}
+
+export async function updateTaskStatus(id: number, status: Task["status"]) {
   return request(`/api/tasks/${id}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
@@ -323,6 +423,64 @@ export async function reorderTaskChecklistItems(taskId: number, itemIds: number[
     body: JSON.stringify({ itemIds })
   });
   return response.items;
+}
+
+export async function uploadMediaAttachment(entityType: MediaEntityType, entityId: number, file: File): Promise<MediaAttachment> {
+  const response = await request<{ attachment: MediaAttachment }>(
+    `/api/media/attachments?entityType=${encodeURIComponent(entityType)}&entityId=${entityId}`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": file.type || "application/octet-stream",
+        "x-file-name": encodeURIComponent(file.name)
+      },
+      body: file
+    }
+  );
+  return response.attachment;
+}
+
+export async function updateMediaAttachment(linkId: number, input: { caption?: string | null; role?: string | null }): Promise<MediaAttachment> {
+  const response = await request<{ attachment: MediaAttachment }>(`/api/media/links/${linkId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.attachment;
+}
+
+export async function updateMediaAssetAnalysis(
+  assetId: number,
+  input: { summary?: string | null; textExcerpt?: string | null; transcript?: string | null }
+): Promise<MediaAsset> {
+  const response = await request<{ asset: MediaAsset }>(`/api/media/assets/${assetId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.asset;
+}
+
+export async function reanalyzeMediaAsset(assetId: number, input: { prompt?: string | null }): Promise<MediaAsset> {
+  const response = await request<{ asset: MediaAsset }>(`/api/media/assets/${assetId}/analyze`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.asset;
+}
+
+export async function deleteMediaAttachment(linkId: number): Promise<void> {
+  await request(`/api/media/links/${linkId}`, { method: "DELETE" });
+}
+
+export async function reorderMediaAttachments(entityType: MediaEntityType, entityId: number, linkIds: number[]): Promise<MediaAttachment[]> {
+  const response = await request<{ attachments: MediaAttachment[] }>("/api/media/links/order", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ entityType, entityId, linkIds })
+  });
+  return response.attachments;
 }
 
 export async function createVoiceSession(input: { mode: "drive" }): Promise<LiveKitVoiceSession> {

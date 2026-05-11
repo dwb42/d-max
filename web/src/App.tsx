@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, DragEvent, MutableRefObject, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type {
+  CSSProperties,
+  DragEvent,
+  MouseEvent as ReactMouseEvent,
+  MutableRefObject,
+  PointerEvent as ReactPointerEvent,
+  FocusEvent as ReactFocusEvent,
+  ReactNode,
+  WheelEvent as ReactWheelEvent
+} from "react";
 import {
   Blocks,
   CalendarDays,
@@ -11,28 +20,35 @@ import {
   ClipboardList,
   Clock,
   Copy,
+  ExternalLink,
   FileText,
   GitPullRequestArrow,
   GripVertical,
+  Image,
   Lightbulb,
   ListTree,
   LayoutGrid,
   Mic,
   Mic2,
+  Paperclip,
   Pause,
+  Pencil,
   Play,
   Plus,
+  RefreshCw,
   Repeat2,
   Send,
   Settings,
   Square,
   Trash2,
-  X
+  Upload,
+  X,
+  ZoomIn,
+  ZoomOut
 } from "lucide-react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import type { RemoteTrack } from "livekit-client";
 import {
-  completeTask,
   completeCalendarEntry,
   createCalendarEntry,
   createCategory,
@@ -40,10 +56,15 @@ import {
   createCalendarSource,
   createChatConversation,
   createInitiative,
+  createInitiativeRelation,
+  createPlanningCanvasNode,
   createTask,
   createTaskChecklistItem,
   createVoiceSession,
   deleteCalendarEntry,
+  deleteInitiativeRelation,
+  deleteTask,
+  deleteMediaAttachment,
   deleteTaskChecklistItem,
   disconnectGoogleCalendar,
   fetchChatActivity,
@@ -53,16 +74,20 @@ import {
   fetchCalendarView,
   fetchGoogleCalendars,
   fetchGoogleCalendarAuthStatus,
+  fetchInitiativeGraph,
   fetchOpenClawStatus,
   fetchOverview,
   fetchInitiatives,
+  fetchPlanningCanvas,
   fetchPromptLogs,
   fetchPromptTemplates,
   fetchInitiativeDetail,
   fetchTaskDetail,
   prewarmOpenClaw,
+  reanalyzeMediaAsset,
   reorderCategories,
   reorderInitiatives,
+  reorderMediaAttachments,
   reorderTaskChecklistItems,
   reorderTasks,
   subscribeStateEvents,
@@ -72,13 +97,18 @@ import {
   updateCalendarSource,
   updateCategory,
   updateInitiative,
+  updateMediaAssetAnalysis,
+  updateMediaAttachment,
+  updatePlanningCanvasNode,
   updateTask,
   updateTaskChecklistItem,
-  updateTaskStatus
+  updateTaskStatus,
+  uploadMediaAttachment
 } from "./api.js";
 import type {
   AppOverview,
   AppConversation,
+  Category,
   CalendarSource,
   CalendarViewData,
   CalendarViewEvent,
@@ -89,9 +119,17 @@ import type {
   AppPromptLog,
   PersistedChatMessage,
   OpenClawStatus,
+  MediaAttachment,
+  MediaAsset,
+  MediaEntityType,
   Initiative,
   InitiativeDetail,
+  InitiativeRelationWithInitiatives,
   InitiativeType,
+  ProjectPhase,
+  PlanningCanvasInitiativeNode,
+  PlanningCanvasRelationEdge,
+  PlanningCanvasViewData,
   PromptTemplateDefinition,
   StateEvent,
   Task,
@@ -101,7 +139,20 @@ import type {
 import "./styles.css";
 
 type CollectionView = "ideas" | "projects" | "habits";
-type View = "drive" | "lifeAreas" | "lifeArea" | "calendar" | "timeline" | "config" | CollectionView | "initiative" | "tasks" | "task" | "promptTemplates" | "prompts";
+type View =
+  | "drive"
+  | "lifeAreas"
+  | "lifeArea"
+  | "calendar"
+  | "timeline"
+  | "planningCanvas"
+  | "config"
+  | CollectionView
+  | "initiative"
+  | "tasks"
+  | "task"
+  | "promptTemplates"
+  | "prompts";
 type RouteState = {
   view: View;
   initiativeId: number | null;
@@ -132,7 +183,9 @@ type AudioMeterHandle = {
 };
 type CreateInitiativeInput = {
   categoryId: number;
+  parentId?: number | null;
   type: InitiativeType;
+  projectPhase?: ProjectPhase;
   name: string;
   summary?: string | null;
   markdown?: string;
@@ -143,6 +196,7 @@ type UpdateInitiativeInput = {
   categoryId?: number;
   parentId?: number | null;
   type?: InitiativeType;
+  projectPhase?: ProjectPhase;
   name?: string;
   status?: Initiative["status"];
   summary?: string | null;
@@ -157,6 +211,38 @@ type UpdateTaskInput = {
   notes?: string | null;
   dueAt?: string | null;
 };
+type RelationshipCreateSlot = "parent" | "child" | "predecessor" | "successor";
+type RelationshipCreateDraft = {
+  name: string;
+  type: Exclude<InitiativeType, "habit">;
+  categoryId: string;
+};
+type PlanningCanvasRelatedProjectDirection = "predecessor" | "successor";
+type PlanningCanvasTimeDragMode = "move" | "resize-start" | "resize-end" | "move-start" | "move-end";
+type PlanningCanvasTimeDragState = {
+  nodeId: number;
+  initiativeId: number;
+  pointerId: number;
+  mode: PlanningCanvasTimeDragMode;
+  startClientX: number;
+  startClientY: number;
+  originY: number;
+  originStartDate: string | null;
+  originEndDate: string | null;
+  draftY: number;
+  draftStartDate: string | null;
+  draftEndDate: string | null;
+  moved: boolean;
+};
+type PlanningCanvasGroupDragState = {
+  pointerId: number;
+  startClientY: number;
+  nodeIds: number[];
+  openOnClickInitiativeId?: number;
+  originYByNodeId: Record<number, number>;
+  draftYByNodeId: Record<number, number>;
+  moved: boolean;
+};
 
 type NavItem = { id: Exclude<View, "initiative" | "task">; label: string; icon: typeof Mic; path: string };
 
@@ -167,7 +253,8 @@ const primaryNavItems: NavItem[] = [
   { id: "habits", label: "Gewohnheiten", icon: Repeat2, path: "/habits" },
   { id: "tasks", label: "Massnahmen", icon: ClipboardList, path: "/tasks" },
   { id: "calendar", label: "Kalender", icon: CalendarDays, path: "/calendar" },
-  { id: "timeline", label: "Timeline", icon: ListTree, path: "/calendar/timeline" }
+  { id: "timeline", label: "Timeline", icon: ListTree, path: "/calendar/timeline" },
+  { id: "planningCanvas", label: "Planning Canvas", icon: GitPullRequestArrow, path: "/planning-canvas" }
 ];
 
 const secondaryNavItems: NavItem[] = [
@@ -208,6 +295,7 @@ function routeFromPath(path: string): RouteState {
   if (pathname === "/categories" || pathname === "/lebensbereiche") return { view: "lifeAreas", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/calendar") return { view: "calendar", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/calendar/timeline") return { view: "timeline", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/planning-canvas") return { view: "planningCanvas", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/chat" || pathname === "/") return { view: "lifeAreas", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/ideas") return { view: "ideas", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/projects") return { view: "projects", initiativeId: null, taskId: null, categoryName: null };
@@ -225,6 +313,7 @@ function pathForRoute(view: View, initiativeId?: number | null): string {
   if (view === "lifeAreas") return "/categories";
   if (view === "calendar") return "/calendar";
   if (view === "timeline") return "/calendar/timeline";
+  if (view === "planningCanvas") return "/planning-canvas";
   if (view === "config") return "/config";
   if (view === "promptTemplates") return "/prompt-vorlagen";
   return `/${view}`;
@@ -263,7 +352,7 @@ function getRouteConversationContext(
     return { context: { type: "categories" }, label: titleForView(route.view) };
   }
 
-  if (route.view === "timeline") {
+  if (route.view === "timeline" || route.view === "planningCanvas") {
     return { context: { type: "initiatives" }, label: titleForView(route.view) };
   }
 
@@ -1268,6 +1357,13 @@ export default function App() {
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
           />
           )}
+          {!isEmptyState && view === "planningCanvas" && (
+          <PlanningCanvasView
+            categories={overview?.categories ?? []}
+            onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+            onAfterChange={refresh}
+          />
+          )}
           {!isEmptyState && view === "calendar" && (
           <CalendarPlannerView
             categories={overview?.categories ?? []}
@@ -1315,14 +1411,17 @@ export default function App() {
           {!isEmptyState && view === "initiative" && (
           <InitiativeDetailView
             detail={initiativeDetail}
+            allInitiatives={overview?.initiatives ?? []}
+            categories={overview?.categories ?? []}
+            onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
-            onComplete={async (taskId) => {
-              await completeTask(taskId);
+            onToggleTaskStatus={async (task) => {
+              await updateTaskStatus(task.id, task.status === "done" ? "open" : "done");
               await refresh();
               if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
             }}
-            onStatus={async (taskId, status) => {
-              await updateTaskStatus(taskId, status);
+            onDeleteTask={async (task) => {
+              await deleteTask(task.id);
               await refresh();
               if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
             }}
@@ -1336,8 +1435,55 @@ export default function App() {
               await refresh();
               if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
             }}
+            onCreateInitiative={async (input) => {
+              try {
+                setError(null);
+                const initiative = await createInitiative(input);
+                await refresh();
+                if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
+                return initiative;
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Eintrag konnte nicht angelegt werden.");
+                throw err;
+              }
+            }}
             onUpdateInitiative={async (initiativeId, input) => {
               await updateInitiative(initiativeId, input);
+              await refresh();
+              setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId ?? initiativeId));
+            }}
+            onCreateRelation={async (predecessorInitiativeId, successorInitiativeId) => {
+              try {
+                await createInitiativeRelation({ predecessorInitiativeId, successorInitiativeId });
+                await refresh();
+                if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Beziehung konnte nicht angelegt werden.");
+                throw err;
+              }
+            }}
+            onDeleteRelation={async (relationId) => {
+              await deleteInitiativeRelation(relationId);
+              await refresh();
+              if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
+            }}
+            onUploadMedia={async (initiativeId, file) => {
+              await uploadMediaAttachment("initiative", initiativeId, file);
+              await refresh();
+              setInitiativeDetail(await fetchInitiativeDetail(initiativeId));
+            }}
+            onUpdateMedia={async (linkId, input) => {
+              await updateMediaAttachment(linkId, input);
+              await refresh();
+              if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
+            }}
+            onDeleteMedia={async (linkId) => {
+              await deleteMediaAttachment(linkId);
+              await refresh();
+              if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
+            }}
+            onReorderMedia={async (initiativeId, linkIds) => {
+              await reorderMediaAttachments("initiative", initiativeId, linkIds);
               await refresh();
               setInitiativeDetail(await fetchInitiativeDetail(initiativeId));
             }}
@@ -1373,18 +1519,38 @@ export default function App() {
               await refresh();
               setTaskDetail(await fetchTaskDetail(taskId));
             }}
+            onUploadMedia={async (taskId, file) => {
+              await uploadMediaAttachment("task", taskId, file);
+              await refresh();
+              setTaskDetail(await fetchTaskDetail(taskId));
+            }}
+            onUpdateMedia={async (linkId, input) => {
+              await updateMediaAttachment(linkId, input);
+              await refresh();
+              if (route.taskId) setTaskDetail(await fetchTaskDetail(route.taskId));
+            }}
+            onDeleteMedia={async (linkId) => {
+              await deleteMediaAttachment(linkId);
+              await refresh();
+              if (route.taskId) setTaskDetail(await fetchTaskDetail(route.taskId));
+            }}
+            onReorderMedia={async (taskId, linkIds) => {
+              await reorderMediaAttachments("task", taskId, linkIds);
+              await refresh();
+              setTaskDetail(await fetchTaskDetail(taskId));
+            }}
           />
           )}
           {!isEmptyState && view === "tasks" && (
           <TasksView
             tasks={overview?.tasks ?? []}
             initiatives={overview?.initiatives ?? []}
-            onComplete={async (taskId) => {
-              await completeTask(taskId);
+            onToggleTaskStatus={async (task) => {
+              await updateTaskStatus(task.id, task.status === "done" ? "open" : "done");
               await refresh();
             }}
-            onStatus={async (taskId, status) => {
-              await updateTaskStatus(taskId, status);
+            onDeleteTask={async (task) => {
+              await deleteTask(task.id);
               await refresh();
             }}
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
@@ -1493,18 +1659,28 @@ function renderNavItem(
     || (view === "task" && item.id === "tasks");
 
   return (
-    <button
+    <a
       key={item.id}
-      type="button"
+      href={item.path}
       className={`nav-item ${active ? "active" : ""}`}
       title={item.label}
       aria-current={active ? "page" : undefined}
-      onClick={() => navigate(item.path)}
+      onClick={(event) => {
+        if (isModifiedNavigationClick(event)) {
+          return;
+        }
+        event.preventDefault();
+        navigate(item.path);
+      }}
     >
       <Icon size={18} />
       <span>{item.label}</span>
-    </button>
+    </a>
   );
+}
+
+function isModifiedNavigationClick(event: ReactMouseEvent<HTMLAnchorElement>): boolean {
+  return event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
 }
 
 function DmaxAgentButton(props: { status: OpenClawStatus | null; active: boolean; onClick: () => void }) {
@@ -1630,8 +1806,8 @@ function ChatView(props: {
             </span>
             <div className="pending-turn-status">
               <p>DMAX denkt... <span>{formatElapsedSeconds(elapsedSeconds)}</span></p>
-              <button type="button" className="icon-button danger" onClick={props.onAbortTurn} title="Turn abbrechen" aria-label="Turn abbrechen">
-                <Square size={16} />
+              <button type="button" className="pending-abort-button" onClick={props.onAbortTurn} title="Turn abbrechen" aria-label="Turn abbrechen">
+                <Square size={12} />
               </button>
             </div>
             {props.activities.length ? <ActivityTrail activities={props.activities} /> : null}
@@ -1963,12 +2139,9 @@ const initiativeStatusOptions: Array<{ value: Initiative["status"]; label: strin
   { value: "archived", label: "Archiviert" }
 ];
 
-const taskStatusOptions: Array<{ value: Task["status"]; label: string }> = [
-  { value: "open", label: "Offen" },
-  { value: "in_progress", label: "In Arbeit" },
-  { value: "blocked", label: "Blockiert" },
-  { value: "done", label: "Erledigt" },
-  { value: "cancelled", label: "Abgebrochen" }
+const projectPhaseOptions: Array<{ value: ProjectPhase; label: string }> = [
+  { value: "planning", label: "Planning" },
+  { value: "doing", label: "Doing" }
 ];
 
 const taskPriorityOptions: Array<{ value: Task["priority"]; label: string }> = [
@@ -1980,6 +2153,10 @@ const taskPriorityOptions: Array<{ value: Task["priority"]; label: string }> = [
 
 function initiativeTypeLabel(type: InitiativeType): string {
   return initiativeTypeOptions.find((option) => option.value === type)?.label ?? "Eintrag";
+}
+
+function initiativeStatusLabel(status: Initiative["status"]): string {
+  return initiativeStatusOptions.find((option) => option.value === status)?.label ?? status;
 }
 
 function pluralLabelForInitiativeType(type: InitiativeType): string {
@@ -2011,8 +2188,89 @@ function InitiativeTypeBadge({ type }: { type: InitiativeType }) {
   return <span className={`type-badge ${type}`}>{initiativeTypeLabel(type)}</span>;
 }
 
+function InitiativeTypeInitial({ type }: { type: InitiativeType }) {
+  const label = initiativeTypeLabel(type);
+  return (
+    <span className={`type-initial ${type}`} title={label} aria-label={label}>
+      {type === "idea" ? "I" : type === "project" ? "P" : "H"}
+    </span>
+  );
+}
+
 function displayInitiativeName(project: Pick<Initiative, "name" | "isSystem">): string {
   return project.isSystem && project.name === "Inbox" ? "Task Inbox" : project.name;
+}
+
+function initiativeDescendantIds(initiatives: Initiative[], initiativeId: number): Set<number> {
+  const descendants = new Set<number>();
+  const childrenByParent = new Map<number, Initiative[]>();
+  for (const initiative of initiatives) {
+    if (!initiative.parentId) continue;
+    const children = childrenByParent.get(initiative.parentId) ?? [];
+    children.push(initiative);
+    childrenByParent.set(initiative.parentId, children);
+  }
+
+  const stack = [...(childrenByParent.get(initiativeId) ?? [])];
+  while (stack.length > 0) {
+    const child = stack.pop()!;
+    if (descendants.has(child.id)) continue;
+    descendants.add(child.id);
+    stack.push(...(childrenByParent.get(child.id) ?? []));
+  }
+  return descendants;
+}
+
+function initiativeAncestorIds(initiatives: Initiative[], initiativeId: number): Set<number> {
+  const byId = new Map(initiatives.map((initiative) => [initiative.id, initiative]));
+  const ancestors = new Set<number>();
+  let current = byId.get(initiativeId);
+  while (current?.parentId && !ancestors.has(current.parentId)) {
+    ancestors.add(current.parentId);
+    current = byId.get(current.parentId);
+  }
+  return ancestors;
+}
+
+function initiativeCandidateOptionGroups(
+  initiatives: Initiative[],
+  categories: AppOverview["categories"],
+  currentCategoryId: number
+): ReactNode[] {
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const categoryIds = [...new Set(initiatives.map((initiative) => initiative.categoryId))].sort((leftId, rightId) => {
+    if (leftId === currentCategoryId) return -1;
+    if (rightId === currentCategoryId) return 1;
+    const leftName = categoryById.get(leftId)?.name ?? "Uncategorized";
+    const rightName = categoryById.get(rightId)?.name ?? "Uncategorized";
+    return leftName.localeCompare(rightName) || leftId - rightId;
+  });
+
+  return categoryIds.map((categoryId) => {
+    const category = categoryById.get(categoryId);
+    const categoryInitiatives = initiatives
+      .filter((initiative) => initiative.categoryId === categoryId && initiative.type !== "habit")
+      .sort(compareInitiativeCandidates);
+    return (
+      <optgroup key={categoryId} label={category?.name ?? "Uncategorized"}>
+        {categoryInitiatives.map((initiative) => (
+          <option key={initiative.id} value={initiative.id}>
+            {initiativeCandidateOptionLabel(initiative)}
+          </option>
+        ))}
+      </optgroup>
+    );
+  });
+}
+
+function compareInitiativeCandidates(left: Initiative, right: Initiative): number {
+  const typeRank = { idea: 0, project: 1, habit: 2 };
+  return typeRank[left.type] - typeRank[right.type] || displayInitiativeName(left).localeCompare(displayInitiativeName(right)) || left.id - right.id;
+}
+
+function initiativeCandidateOptionLabel(initiative: Initiative): string {
+  const typeLabel = initiative.type === "idea" ? "Idea" : "Project";
+  return `[${typeLabel}] ${displayInitiativeName(initiative)}`;
 }
 
 function propsCountLabel(count: number, singularLabel: string, pluralLabel: string): string {
@@ -2312,6 +2570,7 @@ function InitiativesView({
   const [newInitiativeStartDate, setNewProjectStartDate] = useState("");
   const [newInitiativeEndDate, setNewProjectEndDate] = useState("");
   const [creatingInitiative, setCreatingProject] = useState(false);
+  const [projectRelations, setProjectRelations] = useState<InitiativeRelationWithInitiatives[]>([]);
   const visibleCategories = categoryFilterName
     ? categories.filter((category) => category.name.toLowerCase() === categoryFilterName.toLowerCase())
     : categories;
@@ -2327,7 +2586,7 @@ function InitiativesView({
     ? [...groupedInitiatives, { category: { id: 0, name: "Uncategorized", description: null, isSystem: false }, initiatives: uncategorizedInitiatives }]
     : groupedInitiatives;
   const reorderableCategoryIds = groups.map((group) => group.category.id).filter((id) => id > 0);
-  const canReorderVisibleInitiatives = true;
+  const canReorderVisibleInitiatives = initiativeType !== "project";
   const selectedCategoryId = categories.some((category) => category.id === newInitiativeCategoryId)
     ? newInitiativeCategoryId
     : preferredCategoryId(categories, categoryFilterName);
@@ -2340,6 +2599,24 @@ function InitiativesView({
       setNewProjectCategoryId(preferred);
     }
   }, [categories, categoryFilterName, newInitiativeCategoryId]);
+
+  useEffect(() => {
+    if (initiativeType !== "project") {
+      setProjectRelations([]);
+      return;
+    }
+    let cancelled = false;
+    fetchInitiativeGraph()
+      .then((graph) => {
+        if (!cancelled) setProjectRelations(graph.relations);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectRelations([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [initiativeType, initiatives]);
 
   return (
     <section className="initiative-grid">
@@ -2398,6 +2675,9 @@ function InitiativesView({
                 type="date"
                 value={newInitiativeEndDate}
                 min={newInitiativeStartDate || undefined}
+                onPointerDown={(event) => primeEmptyDatePickerMonth(event, newInitiativeStartDate, newInitiativeEndDate)}
+                onFocus={(event) => primeEmptyDatePickerMonth(event, newInitiativeStartDate, newInitiativeEndDate)}
+                onBlur={(event) => restorePrimedEmptyDateInput(event, newInitiativeEndDate)}
                 onChange={(event) => setNewProjectEndDate(event.target.value)}
                 aria-label="Enddatum"
               />
@@ -2462,61 +2742,187 @@ function InitiativesView({
             ) : null}
             <span>{group.initiatives.length} {propsCountLabel(group.initiatives.length, singularLabel, pluralLabel)}</span>
           </div>
-          <div className="initiative-category-list">
-            {group.initiatives.map((project) => {
-              const initiativeTasks = tasks.filter((task) => task.initiativeId === project.id);
-              return (
-                <article
-                  className={`initiative-row clickable ${canReorderVisibleInitiatives ? "draggable-row" : ""} ${draggedInitiative?.initiativeId === project.id ? "dragging" : ""} ${initiativeDropId === project.id ? "drag-over" : ""}`}
-                  key={project.id}
-                  draggable={canReorderVisibleInitiatives}
-                  onClick={() => onOpenInitiative(project.id)}
-                  onDragStart={(event) => {
-                    if (!canReorderVisibleInitiatives) return;
-                    event.dataTransfer.effectAllowed = "move";
-                    setDraggedProject({ categoryId: group.category.id, initiativeId: project.id });
-                  }}
-                  onDragOver={(event) => {
-                    if (!draggedInitiative || draggedInitiative.categoryId !== group.category.id) return;
-                    event.preventDefault();
-                    setProjectDropId(project.id);
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    if (!draggedInitiative || draggedInitiative.categoryId !== group.category.id) return;
-                    const initiativeIds = group.initiatives.map((candidate) => candidate.id);
-                    const nextIds = moveIdToDropPosition(initiativeIds, draggedInitiative.initiativeId, project.id, dropAfter(event));
-                    setDraggedProject(null);
-                    setProjectDropId(null);
-                    void onReorderInitiatives(group.category.id, nextIds);
-                  }}
-                  onDragEnd={() => {
-                    setDraggedProject(null);
-                    setProjectDropId(null);
-                  }}
-                >
-                  <div>
-                    <div className="initiative-title-line">
-                      <h3>{displayInitiativeName(project)}</h3>
-                      <InitiativeTypeBadge type={project.type} />
-                      {project.isSystem ? <span className="system-badge">System</span> : null}
+          {initiativeType === "project" ? (
+            <ProjectStructureList
+              projects={group.initiatives}
+              tasks={tasks}
+              relations={projectRelations}
+              onOpenInitiative={onOpenInitiative}
+            />
+          ) : (
+            <div className="initiative-category-list">
+              {group.initiatives.map((project) => {
+                const initiativeTasks = tasks.filter((task) => task.initiativeId === project.id);
+                return (
+                  <article
+                    className={`initiative-row clickable ${canReorderVisibleInitiatives ? "draggable-row" : ""} ${draggedInitiative?.initiativeId === project.id ? "dragging" : ""} ${initiativeDropId === project.id ? "drag-over" : ""}`}
+                    key={project.id}
+                    draggable={canReorderVisibleInitiatives}
+                    onClick={() => onOpenInitiative(project.id)}
+                    onDragStart={(event) => {
+                      if (!canReorderVisibleInitiatives) return;
+                      event.dataTransfer.effectAllowed = "move";
+                      setDraggedProject({ categoryId: group.category.id, initiativeId: project.id });
+                    }}
+                    onDragOver={(event) => {
+                      if (!draggedInitiative || draggedInitiative.categoryId !== group.category.id) return;
+                      event.preventDefault();
+                      setProjectDropId(project.id);
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      if (!draggedInitiative || draggedInitiative.categoryId !== group.category.id) return;
+                      const initiativeIds = group.initiatives.map((candidate) => candidate.id);
+                      const nextIds = moveIdToDropPosition(initiativeIds, draggedInitiative.initiativeId, project.id, dropAfter(event));
+                      setDraggedProject(null);
+                      setProjectDropId(null);
+                      void onReorderInitiatives(group.category.id, nextIds);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedProject(null);
+                      setProjectDropId(null);
+                    }}
+                  >
+                    <div>
+                      <div className="initiative-title-line">
+                        <h3>{displayInitiativeName(project)}</h3>
+                        <InitiativeTypeBadge type={project.type} />
+                        {project.isSystem ? <span className="system-badge">System</span> : null}
+                      </div>
+                      <p>{project.summary ?? firstMarkdownLine(project.markdown)}</p>
                     </div>
-                    <p>{project.summary ?? firstMarkdownLine(project.markdown)}</p>
-                  </div>
-                  <div className="row-meta">
-                    {project.type === "project" && formatInitiativeDateRangeForUi(project) ? <span>{formatInitiativeDateRangeForUi(project)}</span> : null}
-                    <span>{project.status}</span>
-                    <span>{initiativeTasks.length} Massnahmen</span>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
+                    <div className="row-meta">
+                      {project.type === "project" && formatInitiativeDateRangeForUi(project) ? <span>{formatInitiativeDateRangeForUi(project)}</span> : null}
+                      <span>{project.status}</span>
+                      <span>{initiativeTasks.length} Massnahmen</span>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </section>
       ))}
       {groups.length === 0 ? <EmptyState title={`Keine ${pluralLabel.toLowerCase()} in dieser Ansicht`} /> : null}
     </section>
   );
+}
+
+function ProjectStructureList(props: {
+  projects: Initiative[];
+  tasks: Task[];
+  relations: InitiativeRelationWithInitiatives[];
+  onOpenInitiative: (initiativeId: number) => void;
+}) {
+  const projectIds = new Set(props.projects.map((project) => project.id));
+  const childrenByParent = new Map<number, Initiative[]>();
+  for (const project of props.projects) {
+    if (!project.parentId || !projectIds.has(project.parentId)) continue;
+    const children = childrenByParent.get(project.parentId) ?? [];
+    children.push(project);
+    childrenByParent.set(project.parentId, sortInitiativesForDisplay(children));
+  }
+  const roots = sortInitiativesForDisplay(props.projects.filter((project) => !project.parentId || !projectIds.has(project.parentId)));
+  const relations = props.relations.filter((relation) => projectIds.has(relation.predecessorInitiativeId) && projectIds.has(relation.successorInitiativeId));
+
+  const renderProject = (project: Initiative, depth: number): ReactNode => {
+    const children = childrenByParent.get(project.id) ?? [];
+    return (
+      <div className="project-structure-node" key={project.id}>
+        <ProjectStructureCard
+          project={project}
+          tasks={props.tasks.filter((task) => task.initiativeId === project.id)}
+          onOpenInitiative={props.onOpenInitiative}
+        />
+        {children.length > 0 ? (
+          <div className="project-children" style={{ marginLeft: Math.min(depth + 1, 4) * 18 }}>
+            {renderRows(children, depth + 1)}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderRows = (projects: Initiative[], depth: number): ReactNode => (
+    <div className="project-structure-rows">
+      {buildProjectRelationRows(projects, relations).map((row, index) => (
+        <div className="project-relation-row" key={`${depth}-${index}-${row.map((project) => project.id).join("-")}`}>
+          {row.map((project) => renderProject(project, depth))}
+        </div>
+      ))}
+    </div>
+  );
+
+  return <div className="project-structure-list">{renderRows(roots, 0)}</div>;
+}
+
+function ProjectStructureCard(props: {
+  project: Initiative;
+  tasks: Task[];
+  onOpenInitiative: (initiativeId: number) => void;
+}) {
+  return (
+    <article className="initiative-row clickable project-structure-card" onClick={() => props.onOpenInitiative(props.project.id)}>
+      <div>
+        <div className="initiative-title-line">
+          <h3>{displayInitiativeName(props.project)}</h3>
+          <InitiativeTypeBadge type={props.project.type} />
+          {props.project.isSystem ? <span className="system-badge">System</span> : null}
+        </div>
+        <p>{props.project.summary ?? firstMarkdownLine(props.project.markdown)}</p>
+      </div>
+      <div className="row-meta">
+        {formatInitiativeDateRangeForUi(props.project) ? <span>{formatInitiativeDateRangeForUi(props.project)}</span> : null}
+        <span>{props.project.status}</span>
+        <span>{props.tasks.length} Massnahmen</span>
+      </div>
+    </article>
+  );
+}
+
+function buildProjectRelationRows(projects: Initiative[], relations: InitiativeRelationWithInitiatives[]): Initiative[][] {
+  const projectById = new Map(projects.map((project) => [project.id, project]));
+  const projectIds = new Set(projectById.keys());
+  const successorsByProject = new Map<number, number[]>();
+  const predecessors = new Set<number>();
+  for (const relation of relations) {
+    if (!projectIds.has(relation.predecessorInitiativeId) || !projectIds.has(relation.successorInitiativeId)) continue;
+    const successors = successorsByProject.get(relation.predecessorInitiativeId) ?? [];
+    successors.push(relation.successorInitiativeId);
+    successorsByProject.set(relation.predecessorInitiativeId, successors);
+    predecessors.add(relation.successorInitiativeId);
+  }
+  for (const [projectId, successors] of successorsByProject) {
+    successorsByProject.set(projectId, sortInitiativesForDisplay(successors.map((id) => projectById.get(id)).filter(isInitiative)).map((project) => project.id));
+  }
+
+  const visited = new Set<number>();
+  const starts = sortInitiativesForDisplay(projects.filter((project) => !predecessors.has(project.id)));
+  const orderedStarts = [...starts, ...sortInitiativesForDisplay(projects.filter((project) => predecessors.has(project.id)))];
+  const rows: Initiative[][] = [];
+
+  for (const start of orderedStarts) {
+    if (visited.has(start.id)) continue;
+    const row: Initiative[] = [];
+    let current: Initiative | undefined = start;
+    while (current && !visited.has(current.id)) {
+      visited.add(current.id);
+      row.push(current);
+      const nextId: number | undefined = (successorsByProject.get(current.id) ?? []).find((id) => !visited.has(id));
+      current = nextId ? projectById.get(nextId) : undefined;
+    }
+    if (row.length > 0) rows.push(row);
+  }
+
+  return rows;
+}
+
+function sortInitiativesForDisplay(initiatives: Initiative[]): Initiative[] {
+  return [...initiatives].sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name) || left.id - right.id);
+}
+
+function isInitiative(value: Initiative | undefined): value is Initiative {
+  return value !== undefined;
 }
 
 const timelineMonthOptions = [3, 6, 12, 18];
@@ -2589,7 +2995,7 @@ function CalendarPlannerView(props: {
   const gridHeight = (endHour * 60 - calendarStartHour * 60) * calendarPixelsPerMinute;
   const activeProjects = props.initiatives.filter((initiative) => initiative.type === "project" && initiative.status === "active");
   const tasksByInitiative = new Map<number, Task[]>();
-  for (const task of props.tasks.filter((task) => task.status === "open" || task.status === "in_progress" || task.status === "blocked")) {
+  for (const task of props.tasks.filter((task) => task.status === "open")) {
     const current = tasksByInitiative.get(task.initiativeId) ?? [];
     current.push(task);
     tasksByInitiative.set(task.initiativeId, current);
@@ -2599,7 +3005,7 @@ function CalendarPlannerView(props: {
     for (const initiative of props.initiatives.filter((candidate) => candidate.type === "project")) {
       const category = props.categories.find((candidate) => candidate.id === initiative.categoryId);
       const openTaskCount = props.tasks.filter((task) =>
-        task.initiativeId === initiative.id && task.status !== "done" && task.status !== "cancelled"
+        task.initiativeId === initiative.id && task.status !== "done"
       ).length;
       const summary = initiative.summary?.trim() || firstMarkdownLine(initiative.markdown);
       infoById.set(initiative.id, {
@@ -3258,6 +3664,970 @@ function ConfigView() {
   );
 }
 
+function PlanningCanvasView(props: {
+  categories: Category[];
+  onOpenInitiative: (initiativeId: number) => void;
+  onAfterChange: () => Promise<void>;
+}) {
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const canvasZoomRef = useRef(1);
+  const parkingDragRef = useRef(false);
+  const canvasGesturePointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const canvasGestureRef = useRef<
+    | { mode: "pan"; pointerId: number; lastX: number; lastY: number }
+    | { mode: "pinch"; distance: number; zoom: number; centerX: number; centerY: number }
+    | null
+  >(null);
+  const [view, setView] = useState<PlanningCanvasViewData | null>(null);
+  const [editingNode, setEditingNode] = useState<PlanningCanvasInitiativeNode | null>(null);
+  const [creatingRelatedProject, setCreatingRelatedProject] = useState<{
+    anchor: PlanningCanvasInitiativeNode;
+    direction: PlanningCanvasRelatedProjectDirection;
+  } | null>(null);
+  const [search, setSearch] = useState("");
+  const [categoryId, setCategoryId] = useState<number | "all">("all");
+  const [canvasZoom, setCanvasZoom] = useState(1);
+  const [timeDrag, setTimeDrag] = useState<PlanningCanvasTimeDragState | null>(null);
+  const [groupDrag, setGroupDrag] = useState<PlanningCanvasGroupDragState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadCanvas = async () => {
+    try {
+      setError(null);
+      const next = await fetchPlanningCanvas({
+        search,
+        categoryId: categoryId === "all" ? undefined : categoryId
+      });
+      setView(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Planning Canvas konnte nicht geladen werden.");
+    }
+  };
+
+  useEffect(() => {
+    void loadCanvas();
+  }, [search, categoryId]);
+
+  const nodes = view?.nodes ?? [];
+  const nodeByInitiative = useMemo(() => new Map(nodes.map((node) => [node.initiativeId, node])), [nodes]);
+  const canvasRange = useMemo(() => planningCanvasRange(view?.canvas.defaultStartDate ?? null, PLANNING_CANVAS_MONTH_COUNT), [view?.canvas.defaultStartDate]);
+  const monthLabels = useMemo(() => planningCanvasMonths(canvasRange), [canvasRange]);
+  const weekLabels = useMemo(() => planningCanvasWeeks(canvasRange), [canvasRange]);
+  const weekendSpans = useMemo(() => planningCanvasWeekends(canvasRange), [canvasRange]);
+  const todayX = useMemo(() => planningCanvasDateX(dateOnlyLocal(new Date()), canvasRange), [canvasRange]);
+  const timeVisuals = useMemo(() => nodes.map((node) => planningCanvasTimeVisual(node, canvasRange)).filter(isPlanningCanvasTimeVisual), [nodes, canvasRange]);
+  const timeVisualByInitiative = useMemo(() => new Map(timeVisuals.map((visual) => [visual.initiativeId, visual])), [timeVisuals]);
+  const visibleUnmappedInitiatives = useMemo(
+    () => (view?.unmappedInitiatives ?? []).filter(({ initiative }) => initiative.status !== "completed" && initiative.status !== "archived"),
+    [view?.unmappedInitiatives]
+  );
+  const stageWidth = canvasRange.width * canvasZoom;
+  const stageHeight = Math.max(980, Math.max(0, ...nodes.map((node) => planningCanvasTimeLaneTop(node.y) + PLANNING_CANVAS_TIME_BAR_HEIGHT + 160)));
+  const edges = view?.relationEdges ?? [];
+  const relationGroups = useMemo(() => buildPlanningCanvasRelationGroups(nodes, edges), [nodes, edges]);
+
+  useEffect(() => {
+    canvasZoomRef.current = canvasZoom;
+  }, [canvasZoom]);
+
+  const setZoomAroundPoint = (nextZoomInput: number, clientX?: number, clientY?: number) => {
+    const wrap = stageRef.current;
+    const currentZoom = canvasZoomRef.current;
+    const nextZoom = clampCanvasZoom(nextZoomInput);
+    if (!wrap || nextZoom === currentZoom) {
+      setCanvasZoom(nextZoom);
+      canvasZoomRef.current = nextZoom;
+      return;
+    }
+
+    const rect = wrap.getBoundingClientRect();
+    const focusX = clientX === undefined ? wrap.clientWidth / 2 : clientX - rect.left;
+    const canvasX = (wrap.scrollLeft + focusX) / currentZoom;
+
+    canvasZoomRef.current = nextZoom;
+    setCanvasZoom(nextZoom);
+    window.requestAnimationFrame(() => {
+      wrap.scrollLeft = canvasX * nextZoom - focusX;
+    });
+  };
+
+  const addInitiativeToCanvas = async (initiativeId: number, x: number, y: number) => {
+    if (!view) return;
+    try {
+      setError(null);
+      const parked = view.unmappedInitiatives.find((item) => item.initiative.id === initiativeId);
+      const dropDate = planningCanvasDateFromX(x, canvasRange) ?? dateOnlyLocal(new Date());
+      const startDate = parked?.initiative.startDate ?? dropDate;
+      const endDate = parked?.initiative.endDate && parked.initiative.endDate >= startDate ? parked.initiative.endDate : shiftDate(startDate, 6);
+      if (parked && (parked.initiative.startDate !== startDate || parked.initiative.endDate !== endDate)) {
+        await updateInitiative(initiativeId, { startDate, endDate });
+      }
+      const node = await createPlanningCanvasNode({
+        canvasId: view.canvas.id,
+        initiativeId,
+        x: clampCanvasCoordinate(planningCanvasDateX(startDate, canvasRange) ?? x),
+        y: clampCanvasCoordinate(y),
+        width: null,
+        height: null
+      });
+      await props.onAfterChange();
+      await loadCanvas();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Initiative konnte nicht platziert werden.");
+    }
+  };
+
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    const initiativeId = Number(event.dataTransfer.getData("application/x-dmax-initiative-id"));
+    if (!initiativeId || !stageRef.current) return;
+    event.preventDefault();
+    const rect = stageRef.current.getBoundingClientRect();
+    void addInitiativeToCanvas(
+      initiativeId,
+      (event.clientX - rect.left + stageRef.current.scrollLeft) / canvasZoom,
+      event.clientY - rect.top + stageRef.current.scrollTop
+    );
+  };
+
+  const onCanvasWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (!event.ctrlKey && !event.metaKey) {
+      return;
+    }
+    event.preventDefault();
+    const delta = event.deltaY > 0 ? -PLANNING_CANVAS_ZOOM_STEP : PLANNING_CANVAS_ZOOM_STEP;
+    setZoomAroundPoint(canvasZoomRef.current + delta, event.clientX, event.clientY);
+  };
+
+  const onCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" || (event.target as HTMLElement).closest(".planning-canvas-time-bar, .planning-canvas-time-marker, .planning-canvas-edge-hit")) {
+      return;
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+    canvasGesturePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const pointers = Array.from(canvasGesturePointersRef.current.values());
+    if (pointers.length >= 2) {
+      const [first, second] = pointers;
+      canvasGestureRef.current = {
+        mode: "pinch",
+        distance: pointerDistance(first, second),
+        zoom: canvasZoomRef.current,
+        centerX: (first.x + second.x) / 2,
+        centerY: (first.y + second.y) / 2
+      };
+      return;
+    }
+    canvasGestureRef.current = { mode: "pan", pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY };
+  };
+
+  const onCanvasPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const wrap = stageRef.current;
+    if (!wrap || !canvasGesturePointersRef.current.has(event.pointerId)) {
+      return;
+    }
+    canvasGesturePointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const gesture = canvasGestureRef.current;
+    if (!gesture) return;
+
+    if (gesture.mode === "pinch") {
+      const pointers = Array.from(canvasGesturePointersRef.current.values());
+      if (pointers.length < 2) return;
+      const [first, second] = pointers;
+      const nextDistance = pointerDistance(first, second);
+      const centerX = (first.x + second.x) / 2;
+      const centerY = (first.y + second.y) / 2;
+      wrap.scrollLeft -= centerX - gesture.centerX;
+      wrap.scrollTop -= centerY - gesture.centerY;
+      setZoomAroundPoint(gesture.zoom * (nextDistance / Math.max(1, gesture.distance)), centerX, centerY);
+      canvasGestureRef.current = { ...gesture, centerX, centerY };
+      return;
+    }
+
+    if (gesture.mode === "pan" && gesture.pointerId === event.pointerId) {
+      wrap.scrollLeft -= event.clientX - gesture.lastX;
+      wrap.scrollTop -= event.clientY - gesture.lastY;
+      canvasGestureRef.current = { ...gesture, lastX: event.clientX, lastY: event.clientY };
+    }
+  };
+
+  const endCanvasPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
+    canvasGesturePointersRef.current.delete(event.pointerId);
+    const pointers = Array.from(canvasGesturePointersRef.current.values());
+    if (pointers.length === 1) {
+      const [pointer] = pointers;
+      canvasGestureRef.current = { mode: "pan", pointerId: Array.from(canvasGesturePointersRef.current.keys())[0]!, lastX: pointer.x, lastY: pointer.y };
+    } else {
+      canvasGestureRef.current = null;
+    }
+  };
+
+  const applyTimeDragPreview = (drag: PlanningCanvasTimeDragState, clientX: number, clientY: number) => {
+    if (!view) return drag;
+    const dayDelta = planningCanvasDayDeltaFromPointer(drag.startClientX, clientX, canvasZoom);
+    const nextDates = planningCanvasShiftDatesForDrag(drag, dayDelta);
+    const nextY = planningCanvasYForTimeDrag(drag, clientY);
+    const moved = drag.moved || Math.abs(clientX - drag.startClientX) > 3 || Math.abs(clientY - drag.startClientY) > 3 || dayDelta !== 0 || nextY !== drag.originY;
+    setView({
+      ...view,
+      nodes: view.nodes.map((node) =>
+        node.id === drag.nodeId
+          ? {
+              ...node,
+              y: nextY,
+              initiative: {
+                ...node.initiative,
+                startDate: nextDates.startDate,
+                endDate: nextDates.endDate
+              }
+            }
+          : node
+      )
+    });
+    return { ...drag, draftY: nextY, draftStartDate: nextDates.startDate, draftEndDate: nextDates.endDate, moved };
+  };
+
+  const applyGroupDragPreview = (drag: PlanningCanvasGroupDragState, clientY: number) => {
+    if (!view) return drag;
+    const laneDelta = planningCanvasLaneDeltaFromPointer(drag.startClientY, clientY);
+    const draftYByNodeId = Object.fromEntries(
+      drag.nodeIds.map((nodeId) => [nodeId, planningCanvasClampLaneY((drag.originYByNodeId[nodeId] ?? 0) + laneDelta * PLANNING_CANVAS_TIME_LANE_HEIGHT)])
+    ) as Record<number, number>;
+    const moved = drag.moved || Math.abs(clientY - drag.startClientY) > 3 || drag.nodeIds.some((nodeId) => draftYByNodeId[nodeId] !== drag.originYByNodeId[nodeId]);
+    setView({
+      ...view,
+      nodes: view.nodes.map((node) => (draftYByNodeId[node.id] === undefined ? node : { ...node, y: draftYByNodeId[node.id]! }))
+    });
+    return { ...drag, draftYByNodeId, moved };
+  };
+
+  const startGroupDrag = (event: ReactPointerEvent<HTMLElement | SVGPathElement>, initiativeId: number, openOnClickInitiativeId?: number) => {
+    const group = relationGroups.byInitiativeId.get(initiativeId);
+    if (!group || group.nodeIds.length <= 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const groupNodeIds = new Set(group.nodeIds);
+    const originYByNodeId = Object.fromEntries(nodes.filter((node) => groupNodeIds.has(node.id)).map((node) => [node.id, node.y])) as Record<number, number>;
+    setGroupDrag({
+      pointerId: event.pointerId,
+      startClientY: event.clientY,
+      nodeIds: group.nodeIds,
+      openOnClickInitiativeId,
+      originYByNodeId,
+      draftYByNodeId: originYByNodeId,
+      moved: false
+    });
+  };
+
+  const onGroupPointerMove = (event: ReactPointerEvent<HTMLElement | SVGPathElement>) => {
+    if (!groupDrag || groupDrag.pointerId !== event.pointerId) return;
+    setGroupDrag(applyGroupDragPreview(groupDrag, event.clientY));
+  };
+
+  const finishGroupDrag = async (event: ReactPointerEvent<HTMLElement | SVGPathElement>) => {
+    if (!groupDrag || groupDrag.pointerId !== event.pointerId) return;
+    const finalDrag = applyGroupDragPreview(groupDrag, event.clientY);
+    setGroupDrag(null);
+    const changedNodeIds = finalDrag.nodeIds.filter((nodeId) => finalDrag.draftYByNodeId[nodeId] !== finalDrag.originYByNodeId[nodeId]);
+    if (changedNodeIds.length === 0) {
+      if (!finalDrag.moved && finalDrag.openOnClickInitiativeId) {
+        window.open(`/initiatives/${finalDrag.openOnClickInitiativeId}`, "_blank", "noopener,noreferrer");
+      }
+      return;
+    }
+    try {
+      setError(null);
+      await Promise.all(changedNodeIds.map((nodeId) => updatePlanningCanvasNode(nodeId, { y: finalDrag.draftYByNodeId[nodeId]! })));
+      await props.onAfterChange();
+      await loadCanvas();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Projektgruppe konnte nicht verschoben werden.");
+      await loadCanvas();
+    }
+  };
+
+  const cancelGroupDrag = () => {
+    if (!groupDrag) return;
+    setGroupDrag(null);
+    void loadCanvas();
+  };
+
+  const startTimeDrag = (event: ReactPointerEvent<HTMLElement>, visual: PlanningCanvasTimeVisual, mode: PlanningCanvasTimeDragMode) => {
+    const node = nodes.find((candidate) => candidate.id === visual.nodeId);
+    if (!node) return;
+    const group = relationGroups.byInitiativeId.get(visual.initiativeId);
+    if (mode === "move" && group && !group.hasPrecedes && group.parentInitiativeIds.has(visual.initiativeId)) {
+      startGroupDrag(event, visual.initiativeId, visual.initiativeId);
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setTimeDrag({
+      nodeId: node.id,
+      initiativeId: node.initiativeId,
+      pointerId: event.pointerId,
+      mode,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      originY: node.y,
+      originStartDate: node.initiative.startDate,
+      originEndDate: node.initiative.endDate,
+      draftY: node.y,
+      draftStartDate: node.initiative.startDate,
+      draftEndDate: node.initiative.endDate,
+      moved: false
+    });
+  };
+
+  const onTimePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    if (!timeDrag || timeDrag.pointerId !== event.pointerId) return;
+    const nextDrag = applyTimeDragPreview(timeDrag, event.clientX, event.clientY);
+    setTimeDrag(nextDrag);
+  };
+
+  const finishTimeDrag = async (event: ReactPointerEvent<HTMLElement>) => {
+    if (!timeDrag || timeDrag.pointerId !== event.pointerId) return;
+    const finalDrag = applyTimeDragPreview(timeDrag, event.clientX, event.clientY);
+    setTimeDrag(null);
+    const datesChanged = finalDrag.draftStartDate !== finalDrag.originStartDate || finalDrag.draftEndDate !== finalDrag.originEndDate;
+    const laneChanged = finalDrag.draftY !== finalDrag.originY;
+    if (!datesChanged && !laneChanged) {
+      if (finalDrag.mode === "move" && !finalDrag.moved) {
+        window.open(`/initiatives/${finalDrag.initiativeId}`, "_blank", "noopener,noreferrer");
+      }
+      return;
+    }
+    try {
+      setError(null);
+      if (datesChanged) {
+        await updateInitiative(finalDrag.initiativeId, {
+          startDate: finalDrag.draftStartDate,
+          endDate: finalDrag.draftEndDate
+        });
+      }
+      if (laneChanged) {
+        await updatePlanningCanvasNode(finalDrag.nodeId, { y: finalDrag.draftY });
+      }
+      await props.onAfterChange();
+      await loadCanvas();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Projektzeitraum oder Zeile konnte nicht gespeichert werden.");
+      await loadCanvas();
+    }
+  };
+
+  const cancelTimeDrag = () => {
+    if (!timeDrag) return;
+    setTimeDrag(null);
+    void loadCanvas();
+  };
+
+  return (
+    <section className="planning-canvas-view">
+      <aside className="planning-canvas-parking">
+        <div className="planning-canvas-toolbar">
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search initiatives" />
+          <select value={categoryId} onChange={(event) => setCategoryId(event.target.value === "all" ? "all" : Number(event.target.value))}>
+            <option value="all">All categories</option>
+            {props.categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="planning-canvas-zoom-controls" aria-label="Canvas zoom">
+          <button type="button" className="icon-button compact" onClick={() => setZoomAroundPoint(canvasZoomRef.current - PLANNING_CANVAS_ZOOM_STEP)} title="Zoom out">
+            <ZoomOut size={16} />
+          </button>
+          <input
+            type="range"
+            min={PLANNING_CANVAS_MIN_ZOOM}
+            max={PLANNING_CANVAS_MAX_ZOOM}
+            step={PLANNING_CANVAS_ZOOM_STEP}
+            value={canvasZoom}
+            onChange={(event) => setZoomAroundPoint(Number(event.target.value))}
+            aria-label="Canvas zoom"
+          />
+          <button type="button" className="icon-button compact" onClick={() => setZoomAroundPoint(canvasZoomRef.current + PLANNING_CANVAS_ZOOM_STEP)} title="Zoom in">
+            <ZoomIn size={16} />
+          </button>
+          <button type="button" className="secondary-action compact" onClick={() => setZoomAroundPoint(1)}>
+            {Math.round(canvasZoom * 100)}%
+          </button>
+        </div>
+        <div className="planning-canvas-parking-list">
+          {visibleUnmappedInitiatives.map(({ initiative, category, openTaskCount }) => (
+            <article
+              key={initiative.id}
+              draggable
+              role="button"
+              tabIndex={0}
+              onDragStart={(event) => {
+                parkingDragRef.current = true;
+                event.dataTransfer.setData("application/x-dmax-initiative-id", String(initiative.id));
+              }}
+              onDragEnd={() => {
+                window.setTimeout(() => {
+                  parkingDragRef.current = false;
+                }, 0);
+              }}
+              onClick={() => {
+                if (parkingDragRef.current) return;
+                window.open(`/initiatives/${initiative.id}`, "_blank", "noopener,noreferrer");
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                window.open(`/initiatives/${initiative.id}`, "_blank", "noopener,noreferrer");
+              }}
+              className="planning-canvas-parking-item"
+            >
+              <div>
+                <strong>{initiative.name}</strong>
+                <span>
+                  {category?.name ?? "No category"} · {initiative.status} · {openTaskCount} open
+                </span>
+              </div>
+            </article>
+          ))}
+          {view && visibleUnmappedInitiatives.length === 0 ? <EmptyState title="No unplaced initiatives" /> : null}
+        </div>
+      </aside>
+
+      <div
+        className="planning-canvas-stage-wrap"
+        ref={stageRef}
+        onWheel={onCanvasWheel}
+        onPointerDown={onCanvasPointerDown}
+        onPointerMove={onCanvasPointerMove}
+        onPointerUp={endCanvasPointer}
+        onPointerCancel={endCanvasPointer}
+        onPointerLeave={endCanvasPointer}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={onDrop}
+      >
+        {error ? <div className="error-banner">{error}</div> : null}
+        <div
+          className="planning-canvas-stage"
+          style={
+            {
+              width: stageWidth,
+              height: stageHeight,
+              "--planning-canvas-week-width": `${PLANNING_CANVAS_WEEK_WIDTH * canvasZoom}px`,
+              "--planning-canvas-time-lane-height": `${PLANNING_CANVAS_TIME_LANE_HEIGHT}px`,
+              "--planning-canvas-time-header-height": `${PLANNING_CANVAS_TIME_HEADER_HEIGHT}px`
+            } as CSSProperties
+          }
+        >
+          <div
+            className="planning-canvas-stage-content"
+            style={{
+              width: stageWidth,
+              height: stageHeight
+            }}
+          >
+            <div className="planning-canvas-time-header">
+              {monthLabels.map((month) => (
+                <div key={month.key} className="planning-canvas-month" style={{ left: month.left * canvasZoom, width: month.width * canvasZoom }}>
+                  {month.label}
+                </div>
+              ))}
+              {weekLabels.map((week, index) => (
+                <div
+                  key={week.key}
+                  className={`planning-canvas-week-label ${index % 2 === 0 ? "visible" : ""}`}
+                  style={{ left: week.left * canvasZoom, width: PLANNING_CANVAS_WEEK_WIDTH * canvasZoom }}
+                  title={week.title}
+                >
+                  {week.label}
+                </div>
+              ))}
+            </div>
+            <div className="planning-canvas-weekends" aria-hidden="true">
+              {weekendSpans.map((weekend) => (
+                <div
+                  key={weekend.key}
+                  className="planning-canvas-weekend"
+                  style={{ left: weekend.left * canvasZoom, width: weekend.width * canvasZoom }}
+                  title={weekend.title}
+                />
+              ))}
+            </div>
+            {todayX !== null ? (
+              <div className="planning-canvas-today-line" style={{ left: todayX * canvasZoom }} title={`Today · ${formatDateOnly(dateOnlyLocal(new Date()))}`}>
+              </div>
+            ) : null}
+            <div className="planning-canvas-time-layer">
+              {timeVisuals.map((visual) =>
+                visual.kind === "bar" ? (
+                  <div
+                    key={`time-${visual.nodeId}`}
+                    className={`planning-canvas-time-bar ${visual.projectPhase} ${visual.status === "completed" ? "completed" : ""}`}
+                    style={{ left: visual.left * canvasZoom, top: visual.top, width: visual.width * canvasZoom, backgroundColor: visual.color, color: visual.textColor }}
+                    title={visual.title}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Move dates for ${visual.name}`}
+                    onPointerDown={(event) => startTimeDrag(event, visual, "move")}
+                    onPointerMove={onTimePointerMove}
+                    onPointerUp={(event) => void finishTimeDrag(event)}
+                    onPointerCancel={cancelTimeDrag}
+                  >
+                    <span className="planning-canvas-time-bar-label">
+                      {visual.name}
+                    </span>
+                    <div className="planning-canvas-time-actions">
+                      <button
+                        type="button"
+                        className="icon-button compact"
+                        aria-label={`Edit ${visual.name}`}
+                        title="Edit project"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const node = nodeByInitiative.get(visual.initiativeId);
+                          if (node) setEditingNode(node);
+                        }}
+                      >
+                        <Pencil size={13} />
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      className="planning-canvas-time-relation-handle left"
+                      aria-label={`Create predecessor project for ${visual.name}`}
+                      title="Create predecessor project"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        const node = nodeByInitiative.get(visual.initiativeId);
+                        if (node) setCreatingRelatedProject({ anchor: node, direction: "predecessor" });
+                      }}
+                    >
+                      <Plus size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="planning-canvas-time-relation-handle right"
+                      aria-label={`Create successor project for ${visual.name}`}
+                      title="Create successor project"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        const node = nodeByInitiative.get(visual.initiativeId);
+                        if (node) setCreatingRelatedProject({ anchor: node, direction: "successor" });
+                      }}
+                    >
+                      <Plus size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="planning-canvas-time-handle start"
+                      aria-label={`Change start date for ${visual.name}`}
+                      title="Change start date"
+                      onPointerDown={(event) => startTimeDrag(event, visual, "resize-start")}
+                      onPointerMove={onTimePointerMove}
+                      onPointerUp={(event) => void finishTimeDrag(event)}
+                      onPointerCancel={cancelTimeDrag}
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                    <button
+                      type="button"
+                      className="planning-canvas-time-handle end"
+                      aria-label={`Change end date for ${visual.name}`}
+                      title="Change end date"
+                      onPointerDown={(event) => startTimeDrag(event, visual, "resize-end")}
+                      onPointerMove={onTimePointerMove}
+                      onPointerUp={(event) => void finishTimeDrag(event)}
+                      onPointerCancel={cancelTimeDrag}
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    key={`time-${visual.nodeId}`}
+                    className={`planning-canvas-time-marker ${visual.kind}`}
+                    style={{ left: visual.left * canvasZoom, top: visual.top, borderColor: visual.color, backgroundColor: visual.color, color: visual.color }}
+                    title={visual.title}
+                    aria-label={`${visual.kind === "start" ? "Move start date" : "Move end date"} for ${visual.name}`}
+                    onPointerDown={(event) => startTimeDrag(event, visual, visual.kind === "start" ? "move-start" : "move-end")}
+                    onPointerMove={onTimePointerMove}
+                    onPointerUp={(event) => void finishTimeDrag(event)}
+                    onPointerCancel={cancelTimeDrag}
+                  />
+                )
+              )}
+            </div>
+            <svg className="planning-canvas-edges" width={stageWidth} height={stageHeight} aria-hidden="true">
+              <defs>
+                <marker id="planning-canvas-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 z" />
+                </marker>
+              </defs>
+              {edges.map((edge, index) => {
+                const from = timeVisualByInitiative.get(edge.fromInitiativeId);
+                const to = timeVisualByInitiative.get(edge.toInitiativeId);
+                if (!from || !to) return null;
+                const edgeKey = `${edge.kind}-${edge.relationId ?? index}-${edge.fromInitiativeId}-${edge.toInitiativeId}`;
+                if (edge.kind === "parent_child") {
+                  const fromX = (from.left + from.width / 2) * canvasZoom;
+                  const fromY = from.top + PLANNING_CANVAS_TIME_BAR_HEIGHT;
+                  const toX = (to.left + to.width / 2) * canvasZoom;
+                  const toY = to.top;
+                  const midY = fromY + (toY - fromY) / 2;
+                  return (
+                    <g key={edgeKey} className="planning-canvas-edge-group parent_child">
+                      <path
+                        className="planning-canvas-edge parent_child"
+                        d={`M ${fromX} ${fromY} C ${fromX} ${midY}, ${toX} ${midY}, ${toX} ${toY}`}
+                      />
+                      <circle className="planning-canvas-edge-dot" cx={fromX} cy={fromY} r="4" />
+                      <circle className="planning-canvas-edge-dot" cx={toX} cy={toY} r="4" />
+                    </g>
+                  );
+                }
+                const fromX = (from.left + from.width) * canvasZoom;
+                const fromY = from.top + PLANNING_CANVAS_TIME_BAR_HEIGHT / 2;
+                const toX = to.left * canvasZoom;
+                const toY = to.top + PLANNING_CANVAS_TIME_BAR_HEIGHT / 2;
+                const curve = Math.max(80, Math.abs(toX - fromX) / 2);
+                return (
+                  <g key={edgeKey} className="planning-canvas-edge-group precedes">
+                    <path
+                      className="planning-canvas-edge precedes"
+                      d={`M ${fromX} ${fromY} C ${fromX + curve} ${fromY}, ${toX - curve} ${toY}, ${toX} ${toY}`}
+                    />
+                    <path
+                      className="planning-canvas-edge-hit precedes"
+                      d={`M ${fromX} ${fromY} C ${fromX + curve} ${fromY}, ${toX - curve} ${toY}, ${toX} ${toY}`}
+                      onPointerDown={(event) => startGroupDrag(event, edge.fromInitiativeId)}
+                      onPointerMove={onGroupPointerMove}
+                      onPointerUp={(event) => void finishGroupDrag(event)}
+                      onPointerCancel={cancelGroupDrag}
+                    />
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      {editingNode ? (
+        <PlanningCanvasProjectModal
+          node={editingNode}
+          categories={props.categories}
+          onClose={() => setEditingNode(null)}
+          onOpenInitiative={props.onOpenInitiative}
+          onSave={async (initiativeId, input) => {
+            await updateInitiative(initiativeId, input);
+            await props.onAfterChange();
+            await loadCanvas();
+            setEditingNode(null);
+          }}
+        />
+      ) : null}
+      {creatingRelatedProject && view ? (
+        <PlanningCanvasRelatedProjectModal
+          anchor={creatingRelatedProject.anchor}
+          direction={creatingRelatedProject.direction}
+          categories={props.categories}
+          onClose={() => setCreatingRelatedProject(null)}
+          onCreate={async (input) => {
+            const defaultDates = defaultRelatedProjectDates(creatingRelatedProject.anchor.initiative, creatingRelatedProject.direction);
+            const startDate = input.startDate || (input.endDate ? shiftDate(input.endDate, -6) : defaultDates.startDate);
+            const endDate = input.endDate || shiftDate(startDate, 6);
+            const created = await createInitiative({ ...input, startDate, endDate, type: "project", projectPhase: "planning" });
+            if (creatingRelatedProject.direction === "predecessor") {
+              await createInitiativeRelation({ predecessorInitiativeId: created.id, successorInitiativeId: creatingRelatedProject.anchor.initiativeId });
+            } else {
+              await createInitiativeRelation({ predecessorInitiativeId: creatingRelatedProject.anchor.initiativeId, successorInitiativeId: created.id });
+            }
+
+            const anchor = creatingRelatedProject.anchor;
+            await createPlanningCanvasNode({
+              canvasId: view.canvas.id,
+              initiativeId: created.id,
+              x: clampCanvasCoordinate(planningCanvasDateX(startDate, canvasRange) ?? anchor.x),
+              y: clampCanvasCoordinate(anchor.y),
+              width: null,
+              height: null
+            });
+
+            await props.onAfterChange();
+            await loadCanvas();
+            setCreatingRelatedProject(null);
+          }}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function PlanningCanvasProjectModal(props: {
+  node: PlanningCanvasInitiativeNode;
+  categories: Category[];
+  onClose: () => void;
+  onOpenInitiative: (initiativeId: number) => void;
+  onSave: (initiativeId: number, input: UpdateInitiativeInput) => Promise<void>;
+}) {
+  const { initiative } = props.node;
+  const [draft, setDraft] = useState({
+    name: initiative.name,
+    categoryId: initiative.categoryId,
+    status: initiative.status,
+    projectPhase: initiative.projectPhase,
+    startDate: initiative.startDate ?? "",
+    endDate: initiative.endDate ?? "",
+    summary: initiative.summary ?? ""
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") props.onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [props.onClose]);
+
+  const dateRangeInvalid = initiativeDateRangeInvalid(draft.startDate, draft.endDate);
+
+  const save = async () => {
+    if (busy || !draft.name.trim() || dateRangeInvalid) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await props.onSave(initiative.id, {
+        name: draft.name.trim(),
+        categoryId: draft.categoryId,
+        status: draft.status,
+        projectPhase: draft.projectPhase,
+        startDate: draft.startDate || null,
+        endDate: draft.endDate || null,
+        summary: nullableText(draft.summary)
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Project could not be saved.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="planning-canvas-modal-backdrop" role="presentation" onMouseDown={props.onClose}>
+      <section className="planning-canvas-modal" role="dialog" aria-modal="true" aria-label="Edit project" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="planning-canvas-modal-header">
+          <div>
+            <h2>Edit project</h2>
+            <p>{initiative.name}</p>
+          </div>
+          <button type="button" className="icon-button" onClick={props.onClose} title="Close">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="planning-canvas-modal-form">
+          <label>
+            Name
+            <input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
+          </label>
+          <label>
+            Category
+            <select value={draft.categoryId} onChange={(event) => setDraft((current) => ({ ...current, categoryId: Number(event.target.value) }))}>
+              {props.categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Status
+            <select value={draft.status} onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value as Initiative["status"] }))}>
+              <option value="active">active</option>
+              <option value="paused">paused</option>
+              <option value="completed">completed</option>
+              <option value="archived">archived</option>
+            </select>
+          </label>
+          <label>
+            Project phase
+            <select value={draft.projectPhase} onChange={(event) => setDraft((current) => ({ ...current, projectPhase: event.target.value as ProjectPhase }))}>
+              {projectPhaseOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="planning-canvas-modal-date-grid">
+            <label>
+              From
+              <input type="date" value={draft.startDate} onChange={(event) => setDraft((current) => ({ ...current, startDate: event.target.value }))} />
+            </label>
+            <label>
+              To
+              <input
+                type="date"
+                value={draft.endDate}
+                min={draft.startDate || undefined}
+                onPointerDown={(event) => primeEmptyDatePickerMonth(event, draft.startDate, draft.endDate)}
+                onFocus={(event) => primeEmptyDatePickerMonth(event, draft.startDate, draft.endDate)}
+                onBlur={(event) => restorePrimedEmptyDateInput(event, draft.endDate)}
+                onChange={(event) => setDraft((current) => ({ ...current, endDate: event.target.value }))}
+              />
+            </label>
+          </div>
+          <label>
+            Summary
+            <textarea value={draft.summary} onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))} rows={4} />
+          </label>
+        </div>
+
+        {dateRangeInvalid ? <div className="error-banner">From date cannot be after To date.</div> : null}
+        {error ? <div className="error-banner">{error}</div> : null}
+
+        <footer className="planning-canvas-modal-actions">
+          <button
+            type="button"
+            className="secondary-action compact"
+            onClick={() => {
+              props.onOpenInitiative(initiative.id);
+              props.onClose();
+            }}
+          >
+            <ExternalLink size={16} /> Full detail
+          </button>
+          <button type="button" className="secondary-action compact" onClick={props.onClose}>
+            Cancel
+          </button>
+          <button type="button" className="primary-action compact" disabled={busy || !draft.name.trim() || dateRangeInvalid} onClick={() => void save()}>
+            Save
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function PlanningCanvasRelatedProjectModal(props: {
+  anchor: PlanningCanvasInitiativeNode;
+  direction: PlanningCanvasRelatedProjectDirection;
+  categories: Category[];
+  onClose: () => void;
+  onCreate: (input: Omit<CreateInitiativeInput, "type">) => Promise<void>;
+}) {
+  const relationLabel = props.direction === "predecessor" ? "predecessor" : "successor";
+  const [draft, setDraft] = useState({
+    name: "",
+    categoryId: props.anchor.initiative.categoryId,
+    startDate: "",
+    endDate: "",
+    summary: ""
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const dateRangeInvalid = initiativeDateRangeInvalid(draft.startDate, draft.endDate);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") props.onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [props.onClose]);
+
+  const create = async () => {
+    if (busy || !draft.name.trim() || dateRangeInvalid) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await props.onCreate({
+        categoryId: draft.categoryId,
+        name: draft.name.trim(),
+        startDate: draft.startDate || null,
+        endDate: draft.endDate || null,
+        summary: nullableText(draft.summary)
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Project could not be created.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="planning-canvas-modal-backdrop" role="presentation" onMouseDown={props.onClose}>
+      <section className="planning-canvas-modal" role="dialog" aria-modal="true" aria-label={`Create ${relationLabel} project`} onMouseDown={(event) => event.stopPropagation()}>
+        <header className="planning-canvas-modal-header">
+          <div>
+            <h2>Create {relationLabel} project</h2>
+            <p>
+              {props.direction === "predecessor" ? "Before" : "After"} {props.anchor.initiative.name}
+            </p>
+          </div>
+          <button type="button" className="icon-button" onClick={props.onClose} title="Close">
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="planning-canvas-modal-form">
+          <label>
+            Name
+            <input autoFocus value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} />
+          </label>
+          <label>
+            Category
+            <select value={draft.categoryId} onChange={(event) => setDraft((current) => ({ ...current, categoryId: Number(event.target.value) }))}>
+              {props.categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="planning-canvas-modal-date-grid">
+            <label>
+              From
+              <input type="date" value={draft.startDate} onChange={(event) => setDraft((current) => ({ ...current, startDate: event.target.value }))} />
+            </label>
+            <label>
+              To
+              <input
+                type="date"
+                value={draft.endDate}
+                min={draft.startDate || undefined}
+                onPointerDown={(event) => primeEmptyDatePickerMonth(event, draft.startDate, draft.endDate)}
+                onFocus={(event) => primeEmptyDatePickerMonth(event, draft.startDate, draft.endDate)}
+                onBlur={(event) => restorePrimedEmptyDateInput(event, draft.endDate)}
+                onChange={(event) => setDraft((current) => ({ ...current, endDate: event.target.value }))}
+              />
+            </label>
+          </div>
+          <label>
+            Summary
+            <textarea value={draft.summary} onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))} rows={4} />
+          </label>
+        </div>
+
+        {dateRangeInvalid ? <div className="error-banner">From date cannot be after To date.</div> : null}
+        {error ? <div className="error-banner">{error}</div> : null}
+
+        <footer className="planning-canvas-modal-actions">
+          <button type="button" className="secondary-action compact" onClick={props.onClose}>
+            Cancel
+          </button>
+          <button type="button" className="primary-action compact" disabled={busy || !draft.name.trim() || dateRangeInvalid} onClick={() => void create()}>
+            Create {relationLabel}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function TimelineView(props: {
   categories: AppOverview["categories"];
   initiatives: Initiative[];
@@ -3421,12 +4791,22 @@ function TimelineGrid(props: {
 
 function InitiativeDetailView(props: {
   detail: InitiativeDetail | null;
+  allInitiatives: Initiative[];
+  categories: AppOverview["categories"];
+  onOpenInitiative: (initiativeId: number) => void;
   onOpenTask: (taskId: number) => void;
-  onComplete: (taskId: number) => Promise<void>;
-  onStatus: (taskId: number, status: string) => Promise<void>;
+  onToggleTaskStatus: (task: Task) => Promise<void>;
+  onDeleteTask: (task: Task) => Promise<void>;
   onReorderTasks?: (initiativeId: number, taskIds: number[]) => Promise<void>;
   onCreateTask: (initiativeId: number, title: string) => Promise<void>;
+  onCreateInitiative: (input: CreateInitiativeInput) => Promise<Initiative>;
   onUpdateInitiative: (initiativeId: number, input: UpdateInitiativeInput) => Promise<void>;
+  onCreateRelation: (predecessorInitiativeId: number, successorInitiativeId: number) => Promise<void>;
+  onDeleteRelation: (relationId: number) => Promise<void>;
+  onUploadMedia: (initiativeId: number, file: File) => Promise<void>;
+  onUpdateMedia: (linkId: number, input: { caption?: string | null; role?: string | null }) => Promise<void>;
+  onDeleteMedia: (linkId: number) => Promise<void>;
+  onReorderMedia: (initiativeId: number, linkIds: number[]) => Promise<void>;
 }) {
   if (!props.detail) {
     return <EmptyState title="Loading initiative..." />;
@@ -3437,6 +4817,15 @@ function InitiativeDetailView(props: {
   return (
     <section className="initiative-detail">
       <InitiativeMarkdownPanel initiative={initiative} onUpdateInitiative={props.onUpdateInitiative} />
+      <MediaAttachmentsPanel
+        entityType="initiative"
+        entityId={initiative.id}
+        attachments={props.detail.mediaAttachments ?? []}
+        onUpload={props.onUploadMedia}
+        onUpdate={props.onUpdateMedia}
+        onDelete={props.onDeleteMedia}
+        onReorder={props.onReorderMedia}
+      />
       <Panel title="Massnahmen">
         {props.detail.tasks.length === 0 ? (
           <EmptyState title="Noch keine Massnahmen" />
@@ -3444,8 +4833,8 @@ function InitiativeDetailView(props: {
           <TasksView
             tasks={props.detail.tasks}
             initiatives={[props.detail.initiative]}
-            onComplete={props.onComplete}
-            onStatus={props.onStatus}
+            onToggleTaskStatus={props.onToggleTaskStatus}
+            onDeleteTask={props.onDeleteTask}
             onOpenTask={props.onOpenTask}
             showInitiativeName={false}
             groupByCompletionStatus
@@ -3456,7 +4845,502 @@ function InitiativeDetailView(props: {
           onCreateTask={(title) => props.onCreateTask(initiativeId, title)}
         />
       </Panel>
+      <InitiativeRelationsPanel
+        initiative={initiative}
+        allInitiatives={props.allInitiatives}
+        categories={props.categories}
+        predecessors={props.detail.predecessors ?? []}
+        successors={props.detail.successors ?? []}
+        onOpenInitiative={props.onOpenInitiative}
+        onCreateInitiative={props.onCreateInitiative}
+        onUpdateInitiative={props.onUpdateInitiative}
+        onCreateRelation={props.onCreateRelation}
+        onDeleteRelation={props.onDeleteRelation}
+      />
     </section>
+  );
+}
+
+function InitiativeRelationsPanel(props: {
+  initiative: Initiative;
+  allInitiatives: Initiative[];
+  categories: AppOverview["categories"];
+  predecessors: InitiativeRelationWithInitiatives[];
+  successors: InitiativeRelationWithInitiatives[];
+  onOpenInitiative: (initiativeId: number) => void;
+  onCreateInitiative: (input: CreateInitiativeInput) => Promise<Initiative>;
+  onUpdateInitiative: (initiativeId: number, input: UpdateInitiativeInput) => Promise<void>;
+  onCreateRelation: (predecessorInitiativeId: number, successorInitiativeId: number) => Promise<void>;
+  onDeleteRelation: (relationId: number) => Promise<void>;
+}) {
+  const [predecessorDraft, setPredecessorDraft] = useState("");
+  const [successorDraft, setSuccessorDraft] = useState("");
+  const [parentDraft, setParentDraft] = useState("");
+  const [childDraft, setChildDraft] = useState("");
+  const [busyRelationId, setBusyRelationId] = useState<number | "predecessor" | "successor" | "parent" | "child" | null>(null);
+  const emptyCreateDraft = (): RelationshipCreateDraft => ({
+    name: "",
+    type: props.initiative.type === "idea" ? "idea" : "project",
+    categoryId: String(props.initiative.categoryId || props.categories[0]?.id || "")
+  });
+  const [createDrafts, setCreateDrafts] = useState<Record<RelationshipCreateSlot, RelationshipCreateDraft>>(() => ({
+    parent: emptyCreateDraft(),
+    child: emptyCreateDraft(),
+    predecessor: emptyCreateDraft(),
+    successor: emptyCreateDraft()
+  }));
+  const predecessorIds = useMemo(() => new Set(props.predecessors.map((relation) => relation.predecessorInitiativeId)), [props.predecessors]);
+  const successorIds = useMemo(() => new Set(props.successors.map((relation) => relation.successorInitiativeId)), [props.successors]);
+  const childInitiatives = useMemo(
+    () => props.allInitiatives.filter((initiative) => initiative.parentId === props.initiative.id),
+    [props.allInitiatives, props.initiative.id]
+  );
+  const parentInitiative = props.initiative.parentId ? props.allInitiatives.find((initiative) => initiative.id === props.initiative.parentId) ?? null : null;
+  const descendantIds = useMemo(() => initiativeDescendantIds(props.allInitiatives, props.initiative.id), [props.allInitiatives, props.initiative.id]);
+  const ancestorIds = useMemo(() => initiativeAncestorIds(props.allInitiatives, props.initiative.id), [props.allInitiatives, props.initiative.id]);
+  const hasRelations = props.predecessors.length > 0 || props.successors.length > 0 || Boolean(parentInitiative) || childInitiatives.length > 0;
+  const [expanded, setExpanded] = useState(hasRelations);
+  const selectableInitiatives = props.allInitiatives.filter((initiative) => initiative.type !== "habit");
+  const predecessorCandidates = selectableInitiatives.filter((initiative) => initiative.id !== props.initiative.id && !predecessorIds.has(initiative.id));
+  const successorCandidates = selectableInitiatives.filter((initiative) => initiative.id !== props.initiative.id && !successorIds.has(initiative.id));
+  const parentCandidates = selectableInitiatives.filter(
+    (initiative) => initiative.id !== props.initiative.id && initiative.id !== props.initiative.parentId && !descendantIds.has(initiative.id)
+  );
+  const childCandidates = selectableInitiatives.filter((initiative) => initiative.id !== props.initiative.id && initiative.parentId !== props.initiative.id && !ancestorIds.has(initiative.id));
+
+  useEffect(() => {
+    setPredecessorDraft("");
+    setSuccessorDraft("");
+    setParentDraft("");
+    setChildDraft("");
+    setCreateDrafts({
+      parent: emptyCreateDraft(),
+      child: emptyCreateDraft(),
+      predecessor: emptyCreateDraft(),
+      successor: emptyCreateDraft()
+    });
+    setBusyRelationId(null);
+    setExpanded(hasRelations);
+  }, [props.initiative.id, props.predecessors, props.successors, hasRelations]);
+
+  const updateCreateDraft = (slot: RelationshipCreateSlot, input: Partial<RelationshipCreateDraft>) => {
+    setCreateDrafts((current) => ({ ...current, [slot]: { ...current[slot], ...input } }));
+  };
+  const resetCreateDraft = (slot: RelationshipCreateSlot) => {
+    setCreateDrafts((current) => ({ ...current, [slot]: emptyCreateDraft() }));
+  };
+  const createRelatedInitiative = async (slot: RelationshipCreateSlot) => {
+    if (busyRelationId) return;
+    const draft = createDrafts[slot];
+    const name = draft.name.trim();
+    const categoryId = Number(draft.categoryId);
+    if (!name || !categoryId) return;
+    setBusyRelationId(slot);
+    try {
+      const created = await props.onCreateInitiative({
+        categoryId,
+        parentId: slot === "child" ? props.initiative.id : null,
+        type: draft.type,
+        projectPhase: draft.type === "project" ? "planning" : undefined,
+        name
+      });
+      if (slot === "parent") {
+        await props.onUpdateInitiative(props.initiative.id, { parentId: created.id });
+      } else if (slot === "predecessor") {
+        await props.onCreateRelation(created.id, props.initiative.id);
+      } else if (slot === "successor") {
+        await props.onCreateRelation(props.initiative.id, created.id);
+      }
+      resetCreateDraft(slot);
+    } finally {
+      setBusyRelationId(null);
+    }
+  };
+
+  const addPredecessor = async () => {
+    const predecessorId = Number(predecessorDraft);
+    if (!predecessorId || busyRelationId) return;
+    setBusyRelationId("predecessor");
+    try {
+      await props.onCreateRelation(predecessorId, props.initiative.id);
+      setPredecessorDraft("");
+    } finally {
+      setBusyRelationId(null);
+    }
+  };
+  const addSuccessor = async () => {
+    const successorId = Number(successorDraft);
+    if (!successorId || busyRelationId) return;
+    setBusyRelationId("successor");
+    try {
+      await props.onCreateRelation(props.initiative.id, successorId);
+      setSuccessorDraft("");
+    } finally {
+      setBusyRelationId(null);
+    }
+  };
+  const removeParent = async () => {
+    if (busyRelationId) return;
+    setBusyRelationId("parent");
+    try {
+      await props.onUpdateInitiative(props.initiative.id, { parentId: null });
+    } finally {
+      setBusyRelationId(null);
+    }
+  };
+  const removeRelation = async (relationId: number) => {
+    if (busyRelationId) return;
+    setBusyRelationId(relationId);
+    try {
+      await props.onDeleteRelation(relationId);
+    } finally {
+      setBusyRelationId(null);
+    }
+  };
+  const setParent = async () => {
+    const parentId = Number(parentDraft);
+    if (busyRelationId) return;
+    if (!parentId) return;
+    if (parentId === props.initiative.parentId) {
+      setParentDraft("");
+      return;
+    }
+    setBusyRelationId("parent");
+    try {
+      await props.onUpdateInitiative(props.initiative.id, { parentId });
+      setParentDraft("");
+    } finally {
+      setBusyRelationId(null);
+    }
+  };
+  const addChild = async () => {
+    const childId = Number(childDraft);
+    if (!childId || busyRelationId) return;
+    setBusyRelationId("child");
+    try {
+      await props.onUpdateInitiative(childId, { parentId: props.initiative.id });
+      setChildDraft("");
+    } finally {
+      setBusyRelationId(null);
+    }
+  };
+  const removeChild = async (childId: number) => {
+    if (busyRelationId) return;
+    setBusyRelationId(childId);
+    try {
+      await props.onUpdateInitiative(childId, { parentId: null });
+    } finally {
+      setBusyRelationId(null);
+    }
+  };
+
+  return (
+    <details
+      className="panel initiative-relations-panel"
+      open={expanded}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary>
+        <h3>Relations</h3>
+        <span>{hasRelations ? "Verknüpft" : "Keine Relations"}</span>
+      </summary>
+      <div className="initiative-relations-grid">
+        <div className="initiative-relation-group">
+          <InitiativeParentChildColumn
+            title="Parent"
+            emptyLabel="None"
+            initiatives={parentInitiative ? [parentInitiative] : []}
+            busyRelationId={busyRelationId}
+            onOpenInitiative={props.onOpenInitiative}
+            onRemove={() => void removeParent()}
+          />
+          <form
+            className="initiative-relation-control"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void setParent();
+            }}
+          >
+            <select
+              value={parentDraft}
+              disabled={busyRelationId !== null || parentCandidates.length === 0}
+              aria-label="Parent auswählen"
+              onChange={(event) => setParentDraft(event.target.value)}
+            >
+              <option value="">{parentInitiative ? "Change parent" : "Add parent"}</option>
+              {initiativeCandidateOptionGroups(parentCandidates, props.categories, props.initiative.categoryId)}
+            </select>
+            <button type="submit" className="icon-button compact" disabled={!parentDraft || busyRelationId !== null} title="Parent verknüpfen">
+              <Plus size={15} />
+            </button>
+          </form>
+          <InitiativeRelationCreateForm
+            label="Create parent"
+            namePlaceholder="New parent"
+            categories={props.categories}
+            draft={createDrafts.parent}
+            disabled={busyRelationId !== null}
+            onDraftChange={(input) => updateCreateDraft("parent", input)}
+            onSubmit={() => void createRelatedInitiative("parent")}
+          />
+        </div>
+        <div className="initiative-relation-group">
+          <InitiativeParentChildColumn
+            title="Children"
+            emptyLabel="None"
+            initiatives={childInitiatives}
+            busyRelationId={busyRelationId}
+            onOpenInitiative={props.onOpenInitiative}
+            onRemove={(initiativeId) => void removeChild(initiativeId)}
+          />
+          <form
+            className="initiative-relation-control"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void addChild();
+            }}
+          >
+            <select
+              value={childDraft}
+              disabled={busyRelationId !== null || childCandidates.length === 0}
+              aria-label="Child auswählen"
+              onChange={(event) => setChildDraft(event.target.value)}
+            >
+              <option value="">Add child</option>
+              {initiativeCandidateOptionGroups(childCandidates, props.categories, props.initiative.categoryId)}
+            </select>
+            <button type="submit" className="icon-button compact" disabled={!childDraft || busyRelationId !== null} title="Child verknüpfen">
+              <Plus size={15} />
+            </button>
+          </form>
+          <InitiativeRelationCreateForm
+            label="Create child"
+            namePlaceholder="New child"
+            categories={props.categories}
+            draft={createDrafts.child}
+            disabled={busyRelationId !== null}
+            onDraftChange={(input) => updateCreateDraft("child", input)}
+            onSubmit={() => void createRelatedInitiative("child")}
+          />
+        </div>
+        <div className="initiative-relation-group">
+          <InitiativeRelationColumn
+            title="Predecessors"
+            emptyLabel="None"
+            relations={props.predecessors}
+            direction="predecessor"
+            busyRelationId={busyRelationId}
+            onOpenInitiative={props.onOpenInitiative}
+            onDeleteRelation={removeRelation}
+          />
+          <form
+            className="initiative-relation-control"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void addPredecessor();
+            }}
+          >
+            <select
+              value={predecessorDraft}
+              disabled={busyRelationId !== null || predecessorCandidates.length === 0}
+              aria-label="Vorgänger auswählen"
+              onChange={(event) => setPredecessorDraft(event.target.value)}
+            >
+              <option value="">Add predecessor</option>
+              {initiativeCandidateOptionGroups(predecessorCandidates, props.categories, props.initiative.categoryId)}
+            </select>
+            <button type="submit" className="icon-button compact" disabled={!predecessorDraft || busyRelationId !== null} title="Vorgänger verknüpfen">
+              <Plus size={15} />
+            </button>
+          </form>
+          <InitiativeRelationCreateForm
+            label="Create predecessor"
+            namePlaceholder="New predecessor"
+            categories={props.categories}
+            draft={createDrafts.predecessor}
+            disabled={busyRelationId !== null}
+            onDraftChange={(input) => updateCreateDraft("predecessor", input)}
+            onSubmit={() => void createRelatedInitiative("predecessor")}
+          />
+        </div>
+        <div className="initiative-relation-group">
+          <InitiativeRelationColumn
+            title="Successors"
+            emptyLabel="None"
+            relations={props.successors}
+            direction="successor"
+            busyRelationId={busyRelationId}
+            onOpenInitiative={props.onOpenInitiative}
+            onDeleteRelation={removeRelation}
+          />
+          <form
+            className="initiative-relation-control"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void addSuccessor();
+            }}
+          >
+            <select
+              value={successorDraft}
+              disabled={busyRelationId !== null || successorCandidates.length === 0}
+              aria-label="Nachfolger auswählen"
+              onChange={(event) => setSuccessorDraft(event.target.value)}
+            >
+              <option value="">Add successor</option>
+              {initiativeCandidateOptionGroups(successorCandidates, props.categories, props.initiative.categoryId)}
+            </select>
+            <button type="submit" className="icon-button compact" disabled={!successorDraft || busyRelationId !== null} title="Nachfolger verknüpfen">
+              <Plus size={15} />
+            </button>
+          </form>
+          <InitiativeRelationCreateForm
+            label="Create successor"
+            namePlaceholder="New successor"
+            categories={props.categories}
+            draft={createDrafts.successor}
+            disabled={busyRelationId !== null}
+            onDraftChange={(input) => updateCreateDraft("successor", input)}
+            onSubmit={() => void createRelatedInitiative("successor")}
+          />
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function InitiativeRelationCreateForm(props: {
+  label: string;
+  namePlaceholder: string;
+  categories: AppOverview["categories"];
+  draft: RelationshipCreateDraft;
+  disabled: boolean;
+  onDraftChange: (input: Partial<RelationshipCreateDraft>) => void;
+  onSubmit: () => void;
+}) {
+  const canSubmit = props.draft.name.trim().length > 0 && Boolean(props.draft.categoryId) && !props.disabled;
+  return (
+    <form
+      className="initiative-relation-create-control"
+      aria-label={props.label}
+      onSubmit={(event) => {
+        event.preventDefault();
+        props.onSubmit();
+      }}
+    >
+      <input
+        value={props.draft.name}
+        disabled={props.disabled}
+        placeholder={props.namePlaceholder}
+        aria-label={`${props.label} name`}
+        onChange={(event) => props.onDraftChange({ name: event.target.value })}
+      />
+      <select
+        value={props.draft.type}
+        disabled={props.disabled}
+        aria-label={`${props.label} type`}
+        onChange={(event) => props.onDraftChange({ type: event.target.value === "idea" ? "idea" : "project" })}
+      >
+        <option value="project">Project</option>
+        <option value="idea">Idea</option>
+      </select>
+      <select
+        value={props.draft.categoryId}
+        disabled={props.disabled || props.categories.length === 0}
+        aria-label={`${props.label} category`}
+        onChange={(event) => props.onDraftChange({ categoryId: event.target.value })}
+      >
+        {props.categories.map((category) => (
+          <option key={category.id} value={category.id}>
+            {category.name}
+          </option>
+        ))}
+      </select>
+      <button type="submit" className="icon-button compact" disabled={!canSubmit} title={props.label}>
+        <Plus size={15} />
+      </button>
+    </form>
+  );
+}
+
+function InitiativeParentChildColumn(props: {
+  title: string;
+  emptyLabel: string;
+  initiatives: Initiative[];
+  busyRelationId: number | string | null;
+  onOpenInitiative: (initiativeId: number) => void;
+  onRemove: (initiativeId: number) => void;
+}) {
+  return (
+    <div className="initiative-relation-column">
+      <h4>{props.title}</h4>
+      {props.initiatives.length === 0 ? (
+        <p>{props.emptyLabel}</p>
+      ) : (
+        <div className="initiative-relation-list">
+          {props.initiatives.map((initiative) => (
+            <div className="initiative-relation-row" key={initiative.id}>
+              <button type="button" className="initiative-relation-link" onClick={() => props.onOpenInitiative(initiative.id)}>
+                <InitiativeTypeInitial type={initiative.type} />
+                <span>{displayInitiativeName(initiative)}</span>
+                <small>{initiativeStatusLabel(initiative.status)}</small>
+              </button>
+              <button
+                type="button"
+                className="icon-button compact"
+                disabled={props.busyRelationId !== null}
+                onClick={() => props.onRemove(initiative.id)}
+                title="Parent/Child-Verknüpfung entfernen"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InitiativeRelationColumn(props: {
+  title: string;
+  emptyLabel: string;
+  relations: InitiativeRelationWithInitiatives[];
+  direction: "predecessor" | "successor";
+  busyRelationId: number | string | null;
+  onOpenInitiative: (initiativeId: number) => void;
+  onDeleteRelation: (relationId: number) => Promise<void>;
+}) {
+  return (
+    <div className="initiative-relation-column">
+      <h4>{props.title}</h4>
+      {props.relations.length === 0 ? (
+        <p>{props.emptyLabel}</p>
+      ) : (
+        <div className="initiative-relation-list">
+          {props.relations.map((relation) => {
+            const linkedInitiative = props.direction === "predecessor" ? relation.predecessor : relation.successor;
+            return (
+              <div className="initiative-relation-row" key={relation.id}>
+                <button type="button" className="initiative-relation-link" onClick={() => props.onOpenInitiative(linkedInitiative.id)}>
+                  <InitiativeTypeInitial type={linkedInitiative.type} />
+                  <span>{displayInitiativeName(linkedInitiative)}</span>
+                  <small>{initiativeStatusLabel(linkedInitiative.status)}</small>
+                </button>
+                <button
+                  type="button"
+                  className="icon-button compact"
+                  disabled={props.busyRelationId !== null}
+                  onClick={() => void props.onDeleteRelation(relation.id)}
+                  title="Verknüpfung entfernen"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -3465,14 +5349,24 @@ function InitiativeDetailHeader(props: {
   onUpdateInitiative: (initiativeId: number, input: UpdateInitiativeInput) => Promise<void>;
 }) {
   const [editingName, setEditingName] = useState(false);
+  const [editingDateRange, setEditingDateRange] = useState(false);
   const [name, setName] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [dateRangeError, setDateRangeError] = useState<string | null>(null);
+  const [headerError, setHeaderError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setName(props.initiative?.name ?? "");
+    setStartDate(props.initiative?.startDate ?? "");
+    setEndDate(props.initiative?.endDate ?? "");
     setEditingName(false);
+    setEditingDateRange(false);
+    setDateRangeError(null);
+    setHeaderError(null);
     setBusy(false);
-  }, [props.initiative?.id, props.initiative?.name]);
+  }, [props.initiative?.id, props.initiative?.name, props.initiative?.startDate, props.initiative?.endDate]);
 
   if (!props.initiative) {
     return (
@@ -3485,6 +5379,13 @@ function InitiativeDetailHeader(props: {
   }
 
   const initiative = props.initiative;
+  const dateRange = initiative.type === "project" ? formatInitiativeDateRangeForUi(initiative) : null;
+  const resetDateRangeDraft = () => {
+    setStartDate(initiative.startDate ?? "");
+    setEndDate(initiative.endDate ?? "");
+    setDateRangeError(null);
+    setEditingDateRange(false);
+  };
   const saveName = async () => {
     const trimmedName = name.trim();
     if (!trimmedName || busy) return;
@@ -3496,6 +5397,45 @@ function InitiativeDetailHeader(props: {
     try {
       await props.onUpdateInitiative(initiative.id, { name: trimmedName });
       setEditingName(false);
+      setHeaderError(null);
+    } catch (err) {
+      setHeaderError(err instanceof Error ? err.message : "Eintrag konnte nicht gespeichert werden.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const saveHeaderPatch = async (input: UpdateInitiativeInput) => {
+    if (busy) return;
+    setBusy(true);
+    setHeaderError(null);
+    try {
+      await props.onUpdateInitiative(initiative.id, input);
+    } catch (err) {
+      setHeaderError(err instanceof Error ? err.message : "Eintrag konnte nicht gespeichert werden.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const saveDateRange = async () => {
+    if (busy) return;
+    if (initiativeDateRangeInvalid(startDate, endDate)) {
+      setDateRangeError("Start darf nicht nach Ende liegen.");
+      return;
+    }
+    const nextStartDate = startDate || null;
+    const nextEndDate = endDate || null;
+    if (nextStartDate === initiative.startDate && nextEndDate === initiative.endDate) {
+      setEditingDateRange(false);
+      return;
+    }
+    setBusy(true);
+    setDateRangeError(null);
+    try {
+      await props.onUpdateInitiative(initiative.id, { startDate: nextStartDate, endDate: nextEndDate });
+      setEditingDateRange(false);
+      setHeaderError(null);
+    } catch (err) {
+      setHeaderError(err instanceof Error ? err.message : "Zeitraum konnte nicht gespeichert werden.");
     } finally {
       setBusy(false);
     }
@@ -3539,7 +5479,7 @@ function InitiativeDetailHeader(props: {
                 value={initiative.type}
                 disabled={busy}
                 aria-label="Initiative-Typ"
-                onChange={(event) => void props.onUpdateInitiative(initiative.id, { type: event.target.value as InitiativeType })}
+                onChange={(event) => void saveHeaderPatch({ type: event.target.value as InitiativeType })}
               >
                 {initiativeTypeOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -3553,7 +5493,7 @@ function InitiativeDetailHeader(props: {
                 value={initiative.status}
                 disabled={busy}
                 aria-label="Initiative-Status"
-                onChange={(event) => void props.onUpdateInitiative(initiative.id, { status: event.target.value as Initiative["status"] })}
+                onChange={(event) => void saveHeaderPatch({ status: event.target.value as Initiative["status"] })}
               >
                 {initiativeStatusOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -3562,7 +5502,62 @@ function InitiativeDetailHeader(props: {
                 ))}
               </select>
             </label>
+            {initiative.type === "project" ? (
+              <label className={`detail-pill-select phase ${initiative.projectPhase}`} title="Projektphase ändern">
+                <select
+                  value={initiative.projectPhase}
+                  disabled={busy}
+                  aria-label="Projektphase"
+                  onChange={(event) => void saveHeaderPatch({ projectPhase: event.target.value as ProjectPhase })}
+                >
+                  {projectPhaseOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {initiative.type === "project" ? (
+              editingDateRange ? (
+                <form
+                  className="initiative-date-editor"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void saveDateRange();
+                  }}
+                >
+                  <CalendarDays size={14} />
+                  <input type="date" value={startDate} disabled={busy} aria-label="Projektstart" onChange={(event) => setStartDate(event.target.value)} />
+                  <span>-</span>
+                  <input
+                    type="date"
+                    value={endDate}
+                    min={startDate || undefined}
+                    disabled={busy}
+                    aria-label="Projektende"
+                    onPointerDown={(event) => primeEmptyDatePickerMonth(event, startDate, endDate)}
+                    onFocus={(event) => primeEmptyDatePickerMonth(event, startDate, endDate)}
+                    onBlur={(event) => restorePrimedEmptyDateInput(event, endDate)}
+                    onChange={(event) => setEndDate(event.target.value)}
+                  />
+                  <button type="submit" className="icon-button compact" disabled={busy} title="Zeitraum speichern">
+                    <CheckCircle2 size={15} />
+                  </button>
+                  <button type="button" className="icon-button compact" disabled={busy} onClick={resetDateRangeDraft} title="Abbrechen">
+                    <X size={15} />
+                  </button>
+                  {dateRangeError ? <span className="initiative-date-error">{dateRangeError}</span> : null}
+                </form>
+              ) : (
+                <button type="button" className="initiative-date-pill" onClick={() => setEditingDateRange(true)} title="Projektzeitraum bearbeiten">
+                  <CalendarDays size={14} />
+                  {dateRange ?? "Zeitraum setzen"}
+                </button>
+              )
+            ) : null}
             {initiative.isSystem ? <span className="system-badge">System</span> : null}
+            {headerError ? <span className="initiative-date-error">{headerError}</span> : null}
           </>
         ) : null}
       </div>
@@ -3644,20 +5639,16 @@ function TaskDetailHeader(props: {
         )}
         {!editingTitle ? (
           <>
-            <label className={`detail-pill-select task-status ${task.status}`} title="Status ändern">
-              <select
-                value={task.status}
-                disabled={busy}
-                aria-label="Task-Status"
-                onChange={(event) => void props.onUpdateTask(task.id, { status: event.target.value as Task["status"] })}
-              >
-                {taskStatusOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <button
+              type="button"
+              className={`task-status-toggle ${task.status}`}
+              disabled={busy}
+              onClick={() => void props.onUpdateTask(task.id, { status: task.status === "done" ? "open" : "done" })}
+              title={task.status === "done" ? "Wieder öffnen" : "Als erledigt markieren"}
+            >
+              {task.status === "done" ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+              {task.status === "done" ? "Erledigt" : "Open"}
+            </button>
             <label className={`detail-pill-select priority ${task.priority}`} title="Priorität ändern">
               <select
                 value={task.priority}
@@ -3777,6 +5768,10 @@ function TaskDetailView(props: {
   onUpdateChecklistItem: (taskId: number, itemId: number, input: { name?: string; status?: TaskChecklistItem["status"] }) => Promise<void>;
   onDeleteChecklistItem: (taskId: number, itemId: number) => Promise<void>;
   onReorderChecklistItems: (taskId: number, itemIds: number[]) => Promise<void>;
+  onUploadMedia: (taskId: number, file: File) => Promise<void>;
+  onUpdateMedia: (linkId: number, input: { caption?: string | null; role?: string | null }) => Promise<void>;
+  onDeleteMedia: (linkId: number) => Promise<void>;
+  onReorderMedia: (taskId: number, linkIds: number[]) => Promise<void>;
 }) {
   if (!props.detail) {
     return <EmptyState title="Loading task..." />;
@@ -3803,6 +5798,15 @@ function TaskDetailView(props: {
       </section>
 
       <TaskNotesPanel task={task} onUpdateTask={props.onUpdateTask} />
+      <MediaAttachmentsPanel
+        entityType="task"
+        entityId={task.id}
+        attachments={props.detail.mediaAttachments ?? []}
+        onUpload={props.onUploadMedia}
+        onUpdate={props.onUpdateMedia}
+        onDelete={props.onDeleteMedia}
+        onReorder={props.onReorderMedia}
+      />
       <TaskChecklistPanel
         task={task}
         items={props.detail.checklistItems ?? []}
@@ -3812,6 +5816,650 @@ function TaskDetailView(props: {
         onReorderItems={props.onReorderChecklistItems}
       />
     </section>
+  );
+}
+
+function MediaAttachmentsPanel(props: {
+  entityType: Extract<MediaEntityType, "initiative" | "task">;
+  entityId: number;
+  attachments: MediaAttachment[];
+  onUpload: (entityId: number, file: File) => Promise<void>;
+  onUpdate: (linkId: number, input: { caption?: string | null; role?: string | null }) => Promise<void>;
+  onDelete: (linkId: number) => Promise<void>;
+  onReorder: (entityId: number, linkIds: number[]) => Promise<void>;
+}) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [draggedLinkId, setDraggedLinkId] = useState<number | null>(null);
+  const [dropLinkId, setDropLinkId] = useState<number | null>(null);
+  const [modalMedia, setModalMedia] = useState<MediaAttachment | null>(null);
+  const linkIds = props.attachments.map((attachment) => attachment.id);
+
+  useEffect(() => {
+    setBusy(false);
+    setError(null);
+    setDragActive(false);
+    setDraggedLinkId(null);
+    setDropLinkId(null);
+    setModalMedia(null);
+  }, [props.entityType, props.entityId]);
+
+  useEffect(() => {
+    setModalMedia((current) => {
+      if (!current) return current;
+      return props.attachments.find((attachment) => attachment.id === current.id) ?? current;
+    });
+  }, [props.attachments]);
+
+  const uploadFiles = async (files: FileList | File[]) => {
+    const selected = Array.from(files);
+    if (selected.length === 0 || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      for (const file of selected) {
+        await props.onUpload(props.entityId, file);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload fehlgeschlagen.");
+    } finally {
+      setBusy(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const reorderAttachments = async (targetId: number, placeAfter: boolean) => {
+    if (!draggedLinkId || draggedLinkId === targetId || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await props.onReorder(props.entityId, moveIdToDropPosition(linkIds, draggedLinkId, targetId, placeAfter));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reihenfolge konnte nicht gespeichert werden.");
+    } finally {
+      setBusy(false);
+      setDraggedLinkId(null);
+      setDropLinkId(null);
+    }
+  };
+
+  return (
+    <section
+      className={`panel media-panel ${dragActive ? "drag-active" : ""}`}
+      onDragOver={(event) => {
+        if (draggedLinkId || event.dataTransfer.types.includes("application/x-dmax-media-link")) {
+          return;
+        }
+        event.preventDefault();
+        setDragActive(true);
+      }}
+      onDragLeave={() => setDragActive(false)}
+      onDrop={(event) => {
+        if (draggedLinkId || event.dataTransfer.types.includes("application/x-dmax-media-link")) {
+          return;
+        }
+        event.preventDefault();
+        setDragActive(false);
+        void uploadFiles(event.dataTransfer.files);
+      }}
+    >
+      <div className="media-panel-header">
+        <div>
+          <h2>Medien</h2>
+          <span>{props.attachments.length} Dateien</span>
+        </div>
+        <button type="button" className="icon-button" disabled={busy} onClick={() => fileInputRef.current?.click()} title="Dateien hinzufügen">
+          <Upload size={17} />
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden-file-input"
+          onChange={(event) => {
+            if (event.target.files) {
+              void uploadFiles(event.target.files);
+            }
+          }}
+        />
+      </div>
+
+      <button type="button" className="media-drop-empty" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+        <Paperclip size={18} />
+        <span>{busy ? "Upload und Analyse laufen..." : "Dateien hier ablegen oder auswählen"}</span>
+      </button>
+
+      {props.attachments.length > 0 ? (
+        <div className="media-grid">
+          {props.attachments.map((attachment) => (
+            <MediaAttachmentCard
+              key={attachment.id}
+              attachment={attachment}
+              busy={busy}
+              dragging={draggedLinkId === attachment.id}
+              dragOver={dropLinkId === attachment.id}
+              onUpdate={props.onUpdate}
+              onDelete={props.onDelete}
+              onOpen={setModalMedia}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("application/x-dmax-media-link", String(attachment.id));
+                setDraggedLinkId(attachment.id);
+              }}
+              onDragOver={(event) => {
+                if (!draggedLinkId || draggedLinkId === attachment.id) return;
+                event.preventDefault();
+                event.stopPropagation();
+                setDropLinkId(attachment.id);
+              }}
+              onDrop={(event) => {
+                if (!draggedLinkId) return;
+                event.preventDefault();
+                event.stopPropagation();
+                void reorderAttachments(attachment.id, dropAfter(event));
+              }}
+              onDragEnd={() => {
+                setDraggedLinkId(null);
+                setDropLinkId(null);
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
+      {error ? <p className="inline-error">{error}</p> : null}
+      {modalMedia ? (
+        <MediaModal
+          attachment={modalMedia}
+          onClose={() => setModalMedia(null)}
+          onUpdateLink={async (linkId, input) => {
+            await props.onUpdate(linkId, input);
+            setModalMedia((current) => (current && current.id === modalMedia.id ? { ...current, ...input } : current));
+          }}
+          onUpdateAsset={async (assetId, input) => {
+            const updated = await updateMediaAssetAnalysis(assetId, input);
+            setModalMedia((current) => (current && current.asset.id === assetId ? { ...current, asset: updated } : current));
+            return updated;
+          }}
+          onReanalyzeAsset={async (assetId, input) => {
+            const updated = await reanalyzeMediaAsset(assetId, input);
+            setModalMedia((current) => (current && current.asset.id === assetId ? { ...current, asset: updated } : current));
+            return updated;
+          }}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function MediaAttachmentCard(props: {
+  attachment: MediaAttachment;
+  busy: boolean;
+  dragging: boolean;
+  dragOver: boolean;
+  onUpdate: (linkId: number, input: { caption?: string | null; role?: string | null }) => Promise<void>;
+  onDelete: (linkId: number) => Promise<void>;
+  onDragStart: (event: DragEvent<HTMLElement>) => void;
+  onDragOver: (event: DragEvent<HTMLElement>) => void;
+  onDrop: (event: DragEvent<HTMLElement>) => void;
+  onDragEnd: () => void;
+  onOpen: (attachment: MediaAttachment) => void;
+}) {
+  const { attachment } = props;
+  const [caption, setCaption] = useState(attachment.caption ?? "");
+  const [editingCaption, setEditingCaption] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const suppressClickRef = useRef(false);
+
+  useEffect(() => {
+    setCaption(attachment.caption ?? "");
+    setEditingCaption(false);
+    setBusy(false);
+  }, [attachment.id, attachment.caption]);
+
+  const saveCaption = async () => {
+    if (busy) return;
+    const nextCaption = caption.trim() ? caption : null;
+    if (nextCaption === attachment.caption) {
+      setEditingCaption(false);
+      return;
+    }
+    setBusy(true);
+    try {
+      await props.onUpdate(attachment.id, { caption: nextCaption });
+      setEditingCaption(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteAttachment = async () => {
+    if (busy || props.busy) return;
+    setBusy(true);
+    try {
+      await props.onDelete(attachment.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <article
+      className={`media-card ${attachment.asset.kind} ${props.dragging ? "dragging" : ""} ${props.dragOver ? "drag-over" : ""}`}
+      draggable={!editingCaption && !busy && !props.busy}
+      role="button"
+      tabIndex={0}
+      onClick={() => {
+        if (suppressClickRef.current || editingCaption || busy || props.busy) return;
+        props.onOpen(attachment);
+      }}
+      onKeyDown={(event) => {
+        if ((event.key === "Enter" || event.key === " ") && !editingCaption && !busy && !props.busy) {
+          event.preventDefault();
+          props.onOpen(attachment);
+        }
+      }}
+      onDragStart={(event) => {
+        suppressClickRef.current = true;
+        props.onDragStart(event);
+      }}
+      onDragOver={props.onDragOver}
+      onDrop={props.onDrop}
+      onDragEnd={() => {
+        props.onDragEnd();
+        window.setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
+      }}
+    >
+      <div className="media-preview">
+        <MediaPreview attachment={attachment} />
+      </div>
+      <div className="media-card-body">
+        <div className="media-file-line">
+          <strong title={attachment.asset.originalName}>{attachment.asset.originalName}</strong>
+          <span>{formatBytes(attachment.asset.byteSize)}</span>
+        </div>
+        <span className="media-kind-line">{attachment.asset.mimeType}</span>
+        {attachment.asset.summary ? <p className="media-analysis-text">{attachment.asset.summary}</p> : null}
+        {!attachment.asset.summary && attachment.asset.textExcerpt ? <p className="media-analysis-text">{attachment.asset.textExcerpt}</p> : null}
+        {editingCaption ? (
+          <form
+            className="media-caption-form"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveCaption();
+            }}
+          >
+            <input
+              autoFocus
+              value={caption}
+              disabled={busy}
+              placeholder="Caption"
+              onChange={(event) => setCaption(event.target.value)}
+              onBlur={() => void saveCaption()}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setCaption(attachment.caption ?? "");
+                  setEditingCaption(false);
+                }
+              }}
+            />
+          </form>
+        ) : (
+          <button
+            type="button"
+            className="media-caption-button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setEditingCaption(true);
+            }}
+            title="Caption bearbeiten"
+          >
+            {attachment.caption || "Caption hinzufügen"}
+          </button>
+        )}
+      </div>
+      <button
+        type="button"
+        className="icon-button danger media-delete"
+        disabled={busy || props.busy}
+        onClick={(event) => {
+          event.stopPropagation();
+          void deleteAttachment();
+        }}
+        title="Anhang entfernen"
+      >
+        <Trash2 size={16} />
+      </button>
+    </article>
+  );
+}
+
+function MediaPreview(props: { attachment: MediaAttachment }) {
+  const { asset } = props.attachment;
+  if (asset.kind === "image") {
+    return (
+      <div className="media-image-button" title="Medium öffnen">
+        <img src={asset.fileUrl} alt={props.attachment.caption ?? asset.originalName} loading="lazy" draggable={false} />
+      </div>
+    );
+  }
+  if (asset.kind === "audio") {
+    return (
+      <div className="media-document-link">
+        <Mic2 size={30} />
+        <strong>AUDIO</strong>
+        <span>{asset.summary || "Audio öffnen"}</span>
+      </div>
+    );
+  }
+  if (asset.kind === "video") {
+    return <video src={asset.fileUrl} muted playsInline preload="metadata" />;
+  }
+  if (asset.kind === "document") {
+    if (asset.mimeType === "application/pdf") {
+      return (
+        <div className="media-pdf-preview" title="PDF öffnen">
+          <iframe src={`${asset.fileUrl}#toolbar=0&navpanes=0&scrollbar=0`} title={asset.originalName} />
+        </div>
+      );
+    }
+    if (asset.mimeType === "text/plain" || asset.mimeType === "text/markdown") {
+      return (
+        <div className="media-text-preview" title="Dokument öffnen">
+          <FileText size={24} />
+          <span>{asset.textExcerpt || asset.summary || asset.originalName}</span>
+        </div>
+      );
+    }
+    return (
+      <div className="media-document-link" title="Dokument öffnen">
+        <FileText size={30} />
+        <strong>{documentExtension(asset.originalName).toUpperCase() || "DOC"}</strong>
+        <span>{asset.summary || "Dokument öffnen"}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="media-document-link">
+      <Image size={30} />
+      <span>Öffnen</span>
+    </div>
+  );
+}
+
+function MediaModal(props: {
+  attachment: MediaAttachment;
+  onClose: () => void;
+  onUpdateLink: (linkId: number, input: { caption?: string | null; role?: string | null }) => Promise<void>;
+  onUpdateAsset: (assetId: number, input: { summary?: string | null; textExcerpt?: string | null; transcript?: string | null }) => Promise<MediaAsset>;
+  onReanalyzeAsset: (assetId: number, input: { prompt?: string | null }) => Promise<MediaAsset>;
+}) {
+  const { attachment } = props;
+  const { asset } = attachment;
+  const [caption, setCaption] = useState(attachment.caption ?? "");
+  const [summary, setSummary] = useState(asset.summary ?? "");
+  const [textExcerpt, setTextExcerpt] = useState(asset.textExcerpt ?? "");
+  const [transcript, setTranscript] = useState(asset.transcript ?? "");
+  const [editingAnalysis, setEditingAnalysis] = useState(false);
+  const [reanalyzePrompt, setReanalyzePrompt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCaption(attachment.caption ?? "");
+    setSummary(asset.summary ?? "");
+    setTextExcerpt(asset.textExcerpt ?? "");
+    setTranscript(asset.transcript ?? "");
+    setEditingAnalysis(false);
+    setReanalyzePrompt("");
+    setBusy(false);
+    setError(null);
+  }, [attachment.id, attachment.caption, asset.id, asset.summary, asset.textExcerpt, asset.transcript]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        props.onClose();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [props.onClose]);
+
+  const saveCaption = async () => {
+    if (busy) return;
+    const nextCaption = nullableText(caption);
+    if (nextCaption === attachment.caption) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await props.onUpdateLink(attachment.id, { caption: nextCaption });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Caption konnte nicht gespeichert werden.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveAnalysis = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await props.onUpdateAsset(asset.id, {
+        summary: nullableText(summary),
+        textExcerpt: nullableText(textExcerpt),
+        transcript: nullableText(transcript)
+      });
+      setSummary(updated.summary ?? "");
+      setTextExcerpt(updated.textExcerpt ?? "");
+      setTranscript(updated.transcript ?? "");
+      setEditingAnalysis(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Analyse konnte nicht gespeichert werden.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runReanalysis = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await props.onReanalyzeAsset(asset.id, { prompt: nullableText(reanalyzePrompt) });
+      setSummary(updated.summary ?? "");
+      setTextExcerpt(updated.textExcerpt ?? "");
+      setTranscript(updated.transcript ?? "");
+      setEditingAnalysis(false);
+      setReanalyzePrompt("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Analyse konnte nicht neu erstellt werden.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="media-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label={attachment.caption ?? asset.originalName}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          props.onClose();
+        }
+      }}
+    >
+      <div className="media-modal">
+        <div className="media-modal-header">
+          <div>
+            <strong>{asset.originalName}</strong>
+            <span>{asset.mimeType} · {formatBytes(asset.byteSize)}</span>
+          </div>
+          <button type="button" className="icon-button" onClick={props.onClose} title="Schließen">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="media-modal-content">
+          <div className="media-modal-viewer">
+            <MediaModalViewer attachment={attachment} />
+          </div>
+          <aside className="media-modal-meta">
+            <section className="media-meta-section">
+              <h3>Metadaten</h3>
+              <dl className="media-meta-list">
+                <div>
+                  <dt>Typ</dt>
+                  <dd>{asset.kind}</dd>
+                </div>
+                <div>
+                  <dt>MIME</dt>
+                  <dd>{asset.mimeType}</dd>
+                </div>
+                <div>
+                  <dt>Größe</dt>
+                  <dd>{formatBytes(asset.byteSize)}</dd>
+                </div>
+                <div>
+                  <dt>Hochgeladen</dt>
+                  <dd>{formatMediaTimestamp(asset.createdAt)}</dd>
+                </div>
+              </dl>
+            </section>
+
+            <section className="media-meta-section">
+              <h3>Caption</h3>
+              <input
+                value={caption}
+                disabled={busy}
+                placeholder="Warum ist dieses Medium hier relevant?"
+                onChange={(event) => setCaption(event.target.value)}
+                onBlur={() => void saveCaption()}
+              />
+            </section>
+
+            <section className="media-meta-section">
+              <div className="media-section-title-row">
+                <h3>Analyse</h3>
+                <button type="button" className="small-text-button" disabled={busy} onClick={() => setEditingAnalysis((value) => !value)}>
+                  {editingAnalysis ? "Abbrechen" : "Bearbeiten"}
+                </button>
+              </div>
+
+              {editingAnalysis ? (
+                <div className="media-analysis-form">
+                  <label>
+                    Zusammenfassung
+                    <textarea value={summary} disabled={busy} rows={4} onChange={(event) => setSummary(event.target.value)} />
+                  </label>
+                  <label>
+                    Textauszug / Inhaltsnotiz
+                    <textarea value={textExcerpt} disabled={busy} rows={7} onChange={(event) => setTextExcerpt(event.target.value)} />
+                  </label>
+                  {asset.kind === "audio" || asset.kind === "video" ? (
+                    <label>
+                      Transkript
+                      <textarea value={transcript} disabled={busy} rows={7} onChange={(event) => setTranscript(event.target.value)} />
+                    </label>
+                  ) : null}
+                  <button type="button" className="primary-action compact" disabled={busy} onClick={() => void saveAnalysis()}>
+                    Speichern
+                  </button>
+                </div>
+              ) : (
+                <div className="media-analysis-read">
+                  <ExpandableText title="Zusammenfassung" text={asset.summary} emptyLabel="Keine Zusammenfassung gespeichert." />
+                  <ExpandableText title="Textauszug / Inhaltsnotiz" text={asset.textExcerpt} emptyLabel="Kein Textauszug gespeichert." />
+                  {asset.transcript ? <ExpandableText title="Transkript" text={asset.transcript} emptyLabel="Kein Transkript gespeichert." /> : null}
+                </div>
+              )}
+            </section>
+
+            <section className="media-meta-section">
+              <h3>Analyse neu erstellen</h3>
+              <textarea
+                value={reanalyzePrompt}
+                disabled={busy}
+                rows={3}
+                placeholder="Optionaler Fokus, z.B. bitte ausführlicher, nur Reisedaten extrahieren, auf Kosten achten..."
+                onChange={(event) => setReanalyzePrompt(event.target.value)}
+              />
+              <button type="button" className="secondary-action compact" disabled={busy} onClick={() => void runReanalysis()}>
+                <RefreshCw size={15} />
+                {busy ? "Analysiere..." : "Neu analysieren"}
+              </button>
+            </section>
+
+            {error ? <p className="inline-error">{error}</p> : null}
+          </aside>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MediaModalViewer(props: { attachment: MediaAttachment }) {
+  const { asset } = props.attachment;
+  if (asset.kind === "image") {
+    return <img src={asset.fileUrl} alt={props.attachment.caption ?? asset.originalName} />;
+  }
+  if (asset.kind === "audio") {
+    return (
+      <div className="media-player-shell">
+        <Mic2 size={34} />
+        <strong>{asset.originalName}</strong>
+        <audio controls src={asset.fileUrl} />
+      </div>
+    );
+  }
+  if (asset.kind === "video") {
+    return <video controls src={asset.fileUrl} />;
+  }
+  if (asset.mimeType === "application/pdf") {
+    return <iframe className="media-document-frame" src={`${asset.fileUrl}#toolbar=1&navpanes=0`} title={asset.originalName} />;
+  }
+  if (asset.mimeType === "text/plain" || asset.mimeType === "text/markdown") {
+    return <pre className="media-text-document">{asset.textExcerpt || asset.summary || "Kein Textauszug gespeichert."}</pre>;
+  }
+  return (
+    <div className="media-player-shell">
+      <FileText size={40} />
+      <strong>{asset.originalName}</strong>
+      <span>{asset.summary || "Für diesen Dokumenttyp gibt es aktuell keine eingebettete Seitenvorschau."}</span>
+      <a className="secondary-action compact" href={asset.fileUrl} target="_blank" rel="noreferrer">
+        <ExternalLink size={15} />
+        Datei öffnen
+      </a>
+    </div>
+  );
+}
+
+function ExpandableText(props: { title: string; text: string | null; emptyLabel: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const text = props.text?.trim();
+  const limit = 420;
+  const canExpand = Boolean(text && text.length > limit);
+  const visibleText = text && canExpand && !expanded ? `${text.slice(0, limit).trimEnd()}...` : text;
+
+  return (
+    <div className="media-expandable-text">
+      <strong>{props.title}</strong>
+      <p>{visibleText || props.emptyLabel}</p>
+      {canExpand ? (
+        <button type="button" className="small-text-button" onClick={() => setExpanded((value) => !value)}>
+          {expanded ? "Weniger anzeigen" : "Mehr anzeigen"}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -4143,8 +6791,8 @@ function TaskNotesPanel(props: { task: Task; onUpdateTask: (taskId: number, inpu
 function TasksView(props: {
   tasks: Task[];
   initiatives: Initiative[];
-  onComplete: (taskId: number) => Promise<void>;
-  onStatus: (taskId: number, status: string) => Promise<void>;
+  onToggleTaskStatus: (task: Task) => Promise<void>;
+  onDeleteTask?: (task: Task) => Promise<void>;
   onOpenTask?: (taskId: number) => void;
   onReorderTasks?: (taskIds: number[]) => void;
   showInitiativeName?: boolean;
@@ -4156,6 +6804,22 @@ function TasksView(props: {
   const visibleTasks = props.groupByCompletionStatus ? sortTasksByCompletionAndRank(props.tasks) : props.tasks;
   const taskIds = visibleTasks.map((task) => task.id);
   const showInitiativeName = props.showInitiativeName ?? true;
+  const confirmDeleteTask = (task: Task) => {
+    if (!props.onDeleteTask) return;
+    const confirmed = window.confirm(
+      [
+        `Bist du sicher, dass du die Aufgabe „${task.title}“ löschen möchtest?`,
+        "",
+        "Beim Löschen werden ebenfalls entfernt:",
+        "- Beschreibung (Description)",
+        "- Checkliste (falls vorhanden)",
+        "- angehängte Medien (z. B. Bilder, Videos)"
+      ].join("\n")
+    );
+    if (confirmed) {
+      void props.onDeleteTask(task);
+    }
+  };
   return (
     <section className="task-list">
       {visibleTasks.map((task) => (
@@ -4190,30 +6854,42 @@ function TasksView(props: {
             className="icon-button"
             onClick={(event) => {
               event.stopPropagation();
-              void props.onComplete(task.id);
+              void props.onToggleTaskStatus(task);
             }}
-            title="Complete task"
+            title={task.status === "done" ? "Wieder öffnen" : "Als erledigt markieren"}
           >
             {task.status === "done" ? <CheckCircle2 size={18} /> : <Circle size={18} />}
           </button>
           <div>
             <h2>{task.title}</h2>
-            {showInitiativeName ? (
-              <p>{initiativeById.get(task.initiativeId) ? displayInitiativeName(initiativeById.get(task.initiativeId)!) : `Initiative ${task.initiativeId}`}</p>
+            {showInitiativeName || task.dueAt ? (
+              <p className="task-row-meta">
+                {showInitiativeName ? (
+                  <span>{initiativeById.get(task.initiativeId) ? displayInitiativeName(initiativeById.get(task.initiativeId)!) : `Initiative ${task.initiativeId}`}</span>
+                ) : null}
+                {task.dueAt ? (
+                  <span className="task-due-pill" title="Due Date">
+                    <CalendarDays size={13} />
+                    Fällig {formatTaskDueDate(task.dueAt)}
+                  </span>
+                ) : null}
+              </p>
             ) : null}
           </div>
-          <select
-            value={task.status}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(event) => void props.onStatus(task.id, event.target.value)}
-          >
-            <option value="open">open</option>
-            <option value="in_progress">in progress</option>
-            <option value="blocked">blocked</option>
-            <option value="done">done</option>
-            <option value="cancelled">cancelled</option>
-          </select>
           <span className={`priority ${task.priority}`}>{task.priority}</span>
+          {props.onDeleteTask ? (
+            <button
+              type="button"
+              className="icon-button subtle-danger task-delete-button"
+              title="Aufgabe löschen"
+              onClick={(event) => {
+                event.stopPropagation();
+                confirmDeleteTask(task);
+              }}
+            >
+              <Trash2 size={15} />
+            </button>
+          ) : null}
         </article>
       ))}
     </section>
@@ -4719,6 +7395,7 @@ function titleForView(view: View): string {
     lifeArea: "Lebensbereich",
     calendar: "Kalender",
     timeline: "Timeline",
+    planningCanvas: "Planning Canvas",
     config: "Config",
     ideas: "Ideen",
     projects: "Projekte",
@@ -4738,6 +7415,7 @@ function subtitleForView(view: View): string {
     lifeArea: "Beschreibung, Kontext und Initiatives.",
     calendar: "",
     timeline: "Aktive Projekte entlang der Zeitachse.",
+    planningCanvas: "",
     config: "Integrationen und Systemkonfiguration.",
     ideas: "",
     projects: "",
@@ -4757,8 +7435,61 @@ function firstMarkdownLine(markdown: string): string {
     .find(Boolean) ?? "No initiative memory yet";
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kilobytes = bytes / 1024;
+  if (kilobytes < 1024) return `${kilobytes.toFixed(kilobytes >= 100 ? 0 : 1)} KB`;
+  const megabytes = kilobytes / 1024;
+  return `${megabytes.toFixed(megabytes >= 100 ? 0 : 1)} MB`;
+}
+
+function nullableText(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function formatMediaTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function documentExtension(name: string): string {
+  const match = name.toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match?.[1] ?? "";
+}
+
 function initiativeDateRangeInvalid(startDate: string, endDate: string): boolean {
   return Boolean(startDate && endDate && startDate > endDate);
+}
+
+function primeEmptyDatePickerMonth(
+  event: ReactPointerEvent<HTMLInputElement> | ReactFocusEvent<HTMLInputElement>,
+  preferredDate: string,
+  committedValue: string
+): void {
+  if (!preferredDate || committedValue) return;
+  const input = event.currentTarget;
+  input.dataset.primedEmptyDate = "true";
+  input.dataset.primedDateValue = preferredDate;
+  input.value = preferredDate;
+}
+
+function restorePrimedEmptyDateInput(event: ReactFocusEvent<HTMLInputElement>, committedValue: string): void {
+  const input = event.currentTarget;
+  const primedDate = input.dataset.primedDateValue;
+  const shouldRestoreEmpty = input.dataset.primedEmptyDate === "true" && !committedValue && primedDate && input.value === primedDate;
+  delete input.dataset.primedEmptyDate;
+  delete input.dataset.primedDateValue;
+  if (shouldRestoreEmpty) {
+    input.value = "";
+  }
 }
 
 function formatInitiativeDateRangeForUi(project: Pick<Initiative, "startDate" | "endDate">): string | null {
@@ -4772,6 +7503,384 @@ function formatInitiativeDateRangeForUi(project: Pick<Initiative, "startDate" | 
     return `bis ${formatDateOnly(project.endDate)}`;
   }
   return null;
+}
+
+const PLANNING_CANVAS_MONTH_COUNT = 10;
+const PLANNING_CANVAS_WEEK_WIDTH = 88;
+const PLANNING_CANVAS_MIN_ZOOM = 0.1;
+const PLANNING_CANVAS_MAX_ZOOM = 1.5;
+const PLANNING_CANVAS_ZOOM_STEP = 0.1;
+const PLANNING_CANVAS_TIME_HEADER_HEIGHT = 52;
+const PLANNING_CANVAS_TIME_LANE_HEIGHT = 52;
+const PLANNING_CANVAS_TIME_BAR_TOP_OFFSET = 10;
+const PLANNING_CANVAS_TIME_BAR_HEIGHT = 32;
+const PLANNING_CANVAS_TIME_MARKER_WIDTH = 10;
+
+type PlanningCanvasRange = {
+  start: Date;
+  end: Date;
+  totalDays: number;
+  weekCount: number;
+  width: number;
+};
+
+type PlanningCanvasTimeVisual = {
+  nodeId: number;
+  initiativeId: number;
+  name: string;
+  nodeX: number;
+  nodeY: number;
+  kind: "bar" | "start" | "end";
+  status: Initiative["status"];
+  projectPhase: ProjectPhase;
+  left: number;
+  width: number;
+  top: number;
+  color: string;
+  textColor: string;
+  title: string;
+};
+type PlanningCanvasRelationGroup = {
+  initiativeIds: Set<number>;
+  nodeIds: number[];
+  hasPrecedes: boolean;
+  parentInitiativeIds: Set<number>;
+};
+
+function buildPlanningCanvasRelationGroups(
+  nodes: PlanningCanvasInitiativeNode[],
+  edges: PlanningCanvasRelationEdge[]
+): { byInitiativeId: Map<number, PlanningCanvasRelationGroup> } {
+  const nodeByInitiativeId = new Map(nodes.map((node) => [node.initiativeId, node]));
+  const adjacency = new Map<number, Set<number>>();
+  const relatedInitiativeIds = new Set<number>();
+  const componentMetaByEdgeKey = new Map<string, { hasPrecedes: boolean; parentInitiativeIds: Set<number> }>();
+
+  const addNeighbor = (fromId: number, toId: number) => {
+    const neighbors = adjacency.get(fromId) ?? new Set<number>();
+    neighbors.add(toId);
+    adjacency.set(fromId, neighbors);
+  };
+
+  for (const edge of edges) {
+    if (!nodeByInitiativeId.has(edge.fromInitiativeId) || !nodeByInitiativeId.has(edge.toInitiativeId)) continue;
+    addNeighbor(edge.fromInitiativeId, edge.toInitiativeId);
+    addNeighbor(edge.toInitiativeId, edge.fromInitiativeId);
+    relatedInitiativeIds.add(edge.fromInitiativeId);
+    relatedInitiativeIds.add(edge.toInitiativeId);
+    const key = `${edge.fromInitiativeId}:${edge.toInitiativeId}`;
+    componentMetaByEdgeKey.set(key, {
+      hasPrecedes: edge.kind === "precedes",
+      parentInitiativeIds: edge.kind === "parent_child" ? new Set([edge.fromInitiativeId]) : new Set()
+    });
+  }
+
+  const visited = new Set<number>();
+  const byInitiativeId = new Map<number, PlanningCanvasRelationGroup>();
+  for (const startId of relatedInitiativeIds) {
+    if (visited.has(startId)) continue;
+    const stack = [startId];
+    const initiativeIds = new Set<number>();
+    let hasPrecedes = false;
+    const parentInitiativeIds = new Set<number>();
+    visited.add(startId);
+
+    while (stack.length > 0) {
+      const currentId = stack.pop()!;
+      initiativeIds.add(currentId);
+      for (const nextId of adjacency.get(currentId) ?? []) {
+        const forward = componentMetaByEdgeKey.get(`${currentId}:${nextId}`);
+        const backward = componentMetaByEdgeKey.get(`${nextId}:${currentId}`);
+        const meta = forward ?? backward;
+        if (meta?.hasPrecedes) hasPrecedes = true;
+        meta?.parentInitiativeIds.forEach((id) => parentInitiativeIds.add(id));
+        if (!visited.has(nextId)) {
+          visited.add(nextId);
+          stack.push(nextId);
+        }
+      }
+    }
+
+    const nodeIds = [...initiativeIds]
+      .map((initiativeId) => nodeByInitiativeId.get(initiativeId)?.id)
+      .filter((nodeId): nodeId is number => nodeId !== undefined);
+    if (nodeIds.length <= 1) continue;
+    const group: PlanningCanvasRelationGroup = { initiativeIds, nodeIds, hasPrecedes, parentInitiativeIds };
+    initiativeIds.forEach((initiativeId) => byInitiativeId.set(initiativeId, group));
+  }
+
+  return { byInitiativeId };
+}
+
+function planningCanvasRange(defaultStartDate: string | null, monthCount: number): PlanningCanvasRange {
+  const start = defaultStartDate ? parseDateOnlyUtc(defaultStartDate) ?? startOfUtcDay(new Date()) : startOfUtcDay(new Date());
+  const firstMonth = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+  const lastMonthEnd = new Date(Date.UTC(firstMonth.getUTCFullYear(), firstMonth.getUTCMonth() + monthCount, 0));
+  const rangeStart = startOfUtcWeek(firstMonth);
+  const rangeEnd = endOfUtcWeek(lastMonthEnd);
+  const totalDays = daysBetween(rangeStart, rangeEnd) + 1;
+  const weekCount = Math.ceil(totalDays / 7);
+  return {
+    start: rangeStart,
+    end: rangeEnd,
+    totalDays,
+    weekCount,
+    width: weekCount * PLANNING_CANVAS_WEEK_WIDTH
+  };
+}
+
+function planningCanvasMonths(range: PlanningCanvasRange): Array<{ key: string; label: string; left: number; width: number }> {
+  const months: Array<{ key: string; label: string; left: number; width: number }> = [];
+  let cursor = new Date(Date.UTC(range.start.getUTCFullYear(), range.start.getUTCMonth(), 1));
+  if (cursor < range.start) {
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+  }
+
+  while (cursor <= range.end) {
+    const monthStart = cursor < range.start ? range.start : cursor;
+    const monthEndCandidate = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0));
+    const monthEnd = monthEndCandidate > range.end ? range.end : monthEndCandidate;
+    months.push({
+      key: `${cursor.getUTCFullYear()}-${cursor.getUTCMonth()}`,
+      label: cursor.toLocaleDateString("de-DE", { month: "short", year: "numeric", timeZone: "UTC" }),
+      left: planningCanvasDateX(dateOnlyFromUtc(monthStart), range) ?? 0,
+      width: ((daysBetween(monthStart, monthEnd) + 1) / 7) * PLANNING_CANVAS_WEEK_WIDTH
+    });
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+  }
+
+  return months;
+}
+
+function planningCanvasWeeks(range: PlanningCanvasRange): Array<{ key: string; label: string; left: number; title: string }> {
+  return Array.from({ length: range.weekCount }, (_, index) => {
+    const weekStart = new Date(Date.UTC(range.start.getUTCFullYear(), range.start.getUTCMonth(), range.start.getUTCDate() + index * 7));
+    return {
+      key: dateOnlyFromUtc(weekStart),
+      label: weekStart.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", timeZone: "UTC" }),
+      left: index * PLANNING_CANVAS_WEEK_WIDTH,
+      title: `Week of ${formatDateOnly(dateOnlyFromUtc(weekStart))}`
+    };
+  });
+}
+
+function planningCanvasWeekends(range: PlanningCanvasRange): Array<{ key: string; left: number; width: number; title: string }> {
+  return Array.from({ length: range.weekCount }, (_, index) => {
+    const saturday = new Date(Date.UTC(range.start.getUTCFullYear(), range.start.getUTCMonth(), range.start.getUTCDate() + index * 7 + 5));
+    const sunday = new Date(Date.UTC(saturday.getUTCFullYear(), saturday.getUTCMonth(), saturday.getUTCDate() + 1));
+    return {
+      key: dateOnlyFromUtc(saturday),
+      left: index * PLANNING_CANVAS_WEEK_WIDTH + (PLANNING_CANVAS_WEEK_WIDTH / 7) * 5,
+      width: (PLANNING_CANVAS_WEEK_WIDTH / 7) * 2,
+      title: `${formatDateOnly(dateOnlyFromUtc(saturday))} - ${formatDateOnly(dateOnlyFromUtc(sunday))}`
+    };
+  });
+}
+
+function planningCanvasDateX(date: string, range: PlanningCanvasRange): number | null {
+  const parsed = parseDateOnlyUtc(date);
+  if (!parsed) return null;
+  const dayOffset = daysBetween(range.start, parsed);
+  if (dayOffset < 0 || dayOffset > range.totalDays) {
+    return null;
+  }
+  return (dayOffset / 7) * PLANNING_CANVAS_WEEK_WIDTH;
+}
+
+function planningCanvasDateFromX(x: number, range: PlanningCanvasRange): string | null {
+  const dayOffset = Math.round((x / PLANNING_CANVAS_WEEK_WIDTH) * 7);
+  if (dayOffset < 0 || dayOffset > range.totalDays) return null;
+  return dateOnlyFromUtc(new Date(Date.UTC(range.start.getUTCFullYear(), range.start.getUTCMonth(), range.start.getUTCDate() + dayOffset)));
+}
+
+function planningCanvasPhaseColor(color: string, projectPhase: ProjectPhase): string {
+  if (projectPhase !== "planning") return color;
+  return mixHexColor(color, "#ffffff", 0.58) ?? color;
+}
+
+function mixHexColor(color: string, mixWith: string, mixRatio: number): string | null {
+  const from = parseHexColor(color);
+  const to = parseHexColor(mixWith);
+  if (!from || !to) return null;
+  const ratio = Math.max(0, Math.min(1, mixRatio));
+  const mixed = from.map((channel, index) => Math.round(channel * (1 - ratio) + to[index]! * ratio));
+  return `#${mixed.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function parseHexColor(color: string): [number, number, number] | null {
+  const value = color.trim();
+  const short = value.match(/^#([0-9a-f]{3})$/i);
+  if (short) {
+    return short[1]!.split("").map((part) => Number.parseInt(`${part}${part}`, 16)) as [number, number, number];
+  }
+  const full = value.match(/^#([0-9a-f]{6})$/i);
+  if (!full) return null;
+  const hex = full[1]!;
+  return [0, 2, 4].map((index) => Number.parseInt(hex.slice(index, index + 2), 16)) as [number, number, number];
+}
+
+function planningCanvasTimeVisual(node: PlanningCanvasInitiativeNode, range: PlanningCanvasRange): PlanningCanvasTimeVisual | null {
+  const start = node.initiative.startDate ? parseDateOnlyUtc(node.initiative.startDate) : null;
+  const end = node.initiative.endDate ? parseDateOnlyUtc(node.initiative.endDate) : null;
+  if (!start && !end) return null;
+
+  const top = planningCanvasTimeLaneTop(node.y);
+  const color = planningCanvasPhaseColor(node.category?.color ?? "#27806f", node.initiative.projectPhase);
+  const base = {
+    nodeId: node.id,
+    initiativeId: node.initiativeId,
+    name: node.initiative.name,
+    nodeX: node.x,
+    nodeY: node.y,
+    status: node.initiative.status,
+    projectPhase: node.initiative.projectPhase,
+    top,
+    color,
+    textColor: node.initiative.projectPhase === "planning" ? "#17211c" : "#ffffff"
+  };
+
+  if (start && end) {
+    if (end < range.start || start > range.end) return null;
+    const clippedStart = start < range.start ? range.start : start;
+    const clippedEnd = end > range.end ? range.end : end;
+    const left = planningCanvasDateX(dateOnlyFromUtc(clippedStart), range);
+    const endExclusive = new Date(Date.UTC(clippedEnd.getUTCFullYear(), clippedEnd.getUTCMonth(), clippedEnd.getUTCDate() + 1));
+    const right = planningCanvasDateX(dateOnlyFromUtc(endExclusive), range) ?? range.width;
+    if (left === null) return null;
+    return {
+      ...base,
+      kind: "bar",
+      left,
+      width: Math.max(1, right - left),
+      title: `${node.initiative.name}: ${formatDateOnly(node.initiative.startDate!)} - ${formatDateOnly(node.initiative.endDate!)}`
+    };
+  }
+
+  const markerDate = start ?? end;
+  const left = markerDate ? planningCanvasDateX(dateOnlyFromUtc(markerDate), range) : null;
+  if (left === null) return null;
+  return {
+    ...base,
+    kind: start ? "start" : "end",
+    left,
+    width: PLANNING_CANVAS_TIME_MARKER_WIDTH,
+    title: `${node.initiative.name}: ${start ? "starts" : "ends"} ${formatDateOnly(node.initiative.startDate ?? node.initiative.endDate ?? "")}`
+  };
+}
+
+function isPlanningCanvasTimeVisual(value: PlanningCanvasTimeVisual | null): value is PlanningCanvasTimeVisual {
+  return value !== null;
+}
+
+function planningCanvasTimeLaneTop(y: number): number {
+  const laneIndex = Math.max(0, Math.round(Math.max(0, y - PLANNING_CANVAS_TIME_HEADER_HEIGHT) / PLANNING_CANVAS_TIME_LANE_HEIGHT));
+  return PLANNING_CANVAS_TIME_HEADER_HEIGHT + laneIndex * PLANNING_CANVAS_TIME_LANE_HEIGHT + PLANNING_CANVAS_TIME_BAR_TOP_OFFSET;
+}
+
+function planningCanvasYForTimeDrag(
+  drag: {
+    startClientY: number;
+    originY: number;
+  },
+  clientY: number
+): number {
+  const nextY = drag.originY + (clientY - drag.startClientY);
+  return planningCanvasClampLaneY(nextY);
+}
+
+function planningCanvasClampLaneY(y: number): number {
+  const laneIndex = Math.max(0, Math.round(Math.max(0, y - PLANNING_CANVAS_TIME_HEADER_HEIGHT) / PLANNING_CANVAS_TIME_LANE_HEIGHT));
+  return PLANNING_CANVAS_TIME_HEADER_HEIGHT + laneIndex * PLANNING_CANVAS_TIME_LANE_HEIGHT;
+}
+
+function planningCanvasLaneDeltaFromPointer(startClientY: number, clientY: number): number {
+  return Math.round((clientY - startClientY) / PLANNING_CANVAS_TIME_LANE_HEIGHT);
+}
+
+function planningCanvasDayDeltaFromPointer(startClientX: number, clientX: number, zoom: number): number {
+  const dayWidth = (PLANNING_CANVAS_WEEK_WIDTH * zoom) / 7;
+  return Math.round((clientX - startClientX) / dayWidth);
+}
+
+function planningCanvasShiftDatesForDrag(
+  drag: {
+    mode: PlanningCanvasTimeDragMode;
+    originStartDate: string | null;
+    originEndDate: string | null;
+  },
+  dayDelta: number
+): { startDate: string | null; endDate: string | null } {
+  if (dayDelta === 0) {
+    return { startDate: drag.originStartDate, endDate: drag.originEndDate };
+  }
+
+  if (drag.mode === "move") {
+    return {
+      startDate: drag.originStartDate ? shiftDate(drag.originStartDate, dayDelta) : null,
+      endDate: drag.originEndDate ? shiftDate(drag.originEndDate, dayDelta) : null
+    };
+  }
+
+  if (drag.mode === "resize-start" || drag.mode === "move-start") {
+    const shiftedStart = drag.originStartDate ? shiftDate(drag.originStartDate, dayDelta) : null;
+    const startDate = shiftedStart && drag.originEndDate && shiftedStart > drag.originEndDate ? drag.originEndDate : shiftedStart;
+    return { startDate, endDate: drag.originEndDate };
+  }
+
+  const shiftedEnd = drag.originEndDate ? shiftDate(drag.originEndDate, dayDelta) : null;
+  const endDate = shiftedEnd && drag.originStartDate && shiftedEnd < drag.originStartDate ? drag.originStartDate : shiftedEnd;
+  return { startDate: drag.originStartDate, endDate };
+}
+
+function defaultRelatedProjectDates(
+  anchor: Pick<Initiative, "startDate" | "endDate">,
+  direction: PlanningCanvasRelatedProjectDirection
+): { startDate: string; endDate: string } {
+  if (direction === "predecessor") {
+    const anchorStart = anchor.startDate ?? anchor.endDate ?? dateOnlyLocal(new Date());
+    const startDate = shiftDate(anchorStart, -7);
+    return { startDate, endDate: shiftDate(startDate, 6) };
+  }
+
+  const anchorEnd = anchor.endDate ?? anchor.startDate ?? dateOnlyLocal(new Date());
+  const startDate = shiftDate(anchorEnd, 1);
+  return { startDate, endDate: shiftDate(startDate, 6) };
+}
+
+function startOfUtcWeek(date: Date): Date {
+  const day = date.getUTCDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + mondayOffset));
+}
+
+function endOfUtcWeek(date: Date): Date {
+  const start = startOfUtcWeek(date);
+  return new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate() + 6));
+}
+
+function clampCanvasCoordinate(value: number): number {
+  return Math.max(0, Math.min(100000, value));
+}
+
+function clampCanvasZoom(value: number): number {
+  return Math.max(PLANNING_CANVAS_MIN_ZOOM, Math.min(PLANNING_CANVAS_MAX_ZOOM, Number(value.toFixed(2))));
+}
+
+function formatPlanningCanvasDateRange(initiative: Pick<Initiative, "startDate" | "endDate">): string | null {
+  if (initiative.startDate && initiative.endDate) {
+    return `from ${formatDateOnly(initiative.startDate)} · to ${formatDateOnly(initiative.endDate)}`;
+  }
+  if (initiative.startDate) {
+    return `from ${formatDateOnly(initiative.startDate)}`;
+  }
+  if (initiative.endDate) {
+    return `to ${formatDateOnly(initiative.endDate)}`;
+  }
+  return null;
+}
+
+function pointerDistance(first: { x: number; y: number }, second: { x: number; y: number }): number {
+  return Math.hypot(first.x - second.x, first.y - second.y);
 }
 
 function visibleTimelineRange(today: Date, monthsAhead: number): { start: Date; end: Date } {
@@ -4856,6 +7965,10 @@ function formatTimelineRange(start: Date, end: Date): string {
 function formatDateOnly(value: string): string {
   const [year, month, day] = value.split("-");
   return day && month && year ? `${day}.${month}.${year}` : value;
+}
+
+function formatTaskDueDate(value: string): string {
+  return formatDateOnly(datePart(value));
 }
 
 type CalendarEventLayout = {

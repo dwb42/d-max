@@ -8,6 +8,8 @@ const STATE_MUTATING_TOOLS = new Set<ToolName>([
   "updateInitiative",
   "archiveInitiative",
   "updateInitiativeMarkdown",
+  "createInitiativeRelation",
+  "deleteInitiativeRelation",
   "createTask",
   "updateTask",
   "completeTask",
@@ -15,7 +17,11 @@ const STATE_MUTATING_TOOLS = new Set<ToolName>([
   "createTaskChecklistItem",
   "updateTaskChecklistItem",
   "deleteTaskChecklistItem",
-  "reorderTaskChecklistItems"
+  "reorderTaskChecklistItems",
+  "attachMediaToEntity",
+  "updateMediaAttachment",
+  "deleteMediaAttachment",
+  "reorderMediaAttachments"
 ]);
 
 export function isStateMutatingTool(name: ToolName): boolean {
@@ -50,6 +56,16 @@ export function stateEventFromToolResult(name: ToolName, input: unknown, result:
     };
   }
 
+  if (name === "createInitiativeRelation" || name === "deleteInitiativeRelation") {
+    const relationId = numberValue(dataRecord?.id) ?? numberValue(inputRecord?.id);
+    return {
+      ...base,
+      entityType: "initiative_relation",
+      entityId: relationId,
+      initiativeId: numberValue(dataRecord?.successorInitiativeId) ?? numberValue(inputRecord?.successorInitiativeId)
+    };
+  }
+
   if (name === "createTask" || name === "updateTask" || name === "completeTask" || name === "deleteTask") {
     const taskId = numberValue(dataRecord?.id) ?? numberValue(inputRecord?.id);
     return {
@@ -76,6 +92,20 @@ export function stateEventFromToolResult(name: ToolName, input: unknown, result:
     };
   }
 
+  if (name === "attachMediaToEntity" || name === "updateMediaAttachment" || name === "deleteMediaAttachment" || name === "reorderMediaAttachments") {
+    const linkId = numberValue(dataRecord?.id) ?? numberValue(inputRecord?.id);
+    const entityType = stringValue(dataRecord?.entityType) ?? stringValue(inputRecord?.entityType);
+    const entityId = numberValue(dataRecord?.entityId) ?? numberValue(inputRecord?.entityId);
+    return {
+      ...base,
+      entityType: "media_link",
+      entityId: linkId,
+      categoryId: entityType === "category" ? entityId : undefined,
+      initiativeId: entityType === "initiative" ? entityId : undefined,
+      taskId: entityType === "task" ? entityId : undefined
+    };
+  }
+
   return null;
 }
 
@@ -85,4 +115,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function numberValue(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
 }

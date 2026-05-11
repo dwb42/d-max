@@ -11,6 +11,10 @@ export type ToolName =
   | "updateInitiative"
   | "archiveInitiative"
   | "updateInitiativeMarkdown"
+  | "listInitiativeRelations"
+  | "createInitiativeRelation"
+  | "deleteInitiativeRelation"
+  | "getInitiativeGraph"
   | "listTasks"
   | "createTask"
   | "updateTask"
@@ -20,7 +24,12 @@ export type ToolName =
   | "createTaskChecklistItem"
   | "updateTaskChecklistItem"
   | "deleteTaskChecklistItem"
-  | "reorderTaskChecklistItems";
+  | "reorderTaskChecklistItems"
+  | "listMediaAttachments"
+  | "attachMediaToEntity"
+  | "updateMediaAttachment"
+  | "deleteMediaAttachment"
+  | "reorderMediaAttachments";
 
 export type ToolContext = {
   db?: Database.Database;

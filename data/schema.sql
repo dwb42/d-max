@@ -17,6 +17,7 @@ create table if not exists initiatives (
   category_id integer not null references categories(id),
   parent_id integer references initiatives(id),
   type text not null default 'project' check (type in ('idea', 'project', 'habit')),
+  project_phase text not null default 'doing' check (project_phase in ('planning', 'doing')),
   name text not null,
   status text not null default 'active' check (status in ('active', 'paused', 'completed', 'archived')),
   summary text,
@@ -29,11 +30,46 @@ create table if not exists initiatives (
   updated_at text not null
 );
 
+create table if not exists initiative_relations (
+  id integer primary key,
+  predecessor_initiative_id integer not null references initiatives(id) on delete cascade,
+  successor_initiative_id integer not null references initiatives(id) on delete cascade,
+  relation_type text not null default 'precedes' check (relation_type in ('precedes')),
+  created_at text not null,
+  updated_at text not null,
+  check (predecessor_initiative_id <> successor_initiative_id),
+  unique(predecessor_initiative_id, successor_initiative_id, relation_type)
+);
+
+create table if not exists planning_canvases (
+  id integer primary key,
+  name text not null unique,
+  description text,
+  default_start_date text,
+  default_zoom text not null default 'month' check (default_zoom in ('month', 'week')),
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists planning_canvas_nodes (
+  id integer primary key,
+  canvas_id integer not null references planning_canvases(id) on delete cascade,
+  initiative_id integer not null references initiatives(id) on delete cascade,
+  x real not null,
+  y real not null,
+  width real,
+  height real,
+  collapsed integer not null default 0 check (collapsed in (0, 1)),
+  created_at text not null,
+  updated_at text not null,
+  unique(canvas_id, initiative_id)
+);
+
 create table if not exists tasks (
   id integer primary key,
   initiative_id integer not null references initiatives(id),
   title text not null,
-  status text not null default 'open' check (status in ('open', 'in_progress', 'blocked', 'done', 'cancelled')),
+  status text not null default 'open' check (status in ('open', 'done')),
   priority text not null default 'normal' check (priority in ('low', 'normal', 'high', 'urgent')),
   notes text,
   due_at text,
@@ -79,6 +115,37 @@ create table if not exists calendar_sources (
   created_at text not null,
   updated_at text not null,
   unique(provider, calendar_id)
+);
+
+create table if not exists media_assets (
+  id integer primary key,
+  kind text not null check (kind in ('image', 'audio', 'video', 'document', 'other')),
+  mime_type text not null,
+  original_name text not null,
+  storage_path text not null unique,
+  sha256 text not null,
+  byte_size integer not null,
+  width integer,
+  height integer,
+  duration_ms integer,
+  transcript text,
+  text_excerpt text,
+  summary text,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists media_links (
+  id integer primary key,
+  asset_id integer not null references media_assets(id) on delete cascade,
+  entity_type text not null check (entity_type in ('category', 'initiative', 'task', 'calendar_entry', 'app_chat_message')),
+  entity_id integer not null,
+  caption text,
+  role text,
+  sort_order integer not null default 0,
+  created_at text not null,
+  updated_at text not null,
+  unique(asset_id, entity_type, entity_id)
 );
 
 create table if not exists app_chat_messages (
@@ -128,7 +195,7 @@ create table if not exists app_state_events (
   id integer primary key,
   source text not null check (source in ('api', 'tool')),
   operation text not null,
-  entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'task', 'calendar_entry', 'calendar_source')),
+  entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'calendar_entry', 'calendar_source', 'media_asset', 'media_link')),
   entity_id integer,
   category_id integer,
   initiative_id integer,
@@ -140,6 +207,11 @@ create index if not exists idx_initiatives_category_id on initiatives(category_i
 create index if not exists idx_initiatives_type on initiatives(type);
 create index if not exists idx_initiatives_start_date on initiatives(start_date);
 create index if not exists idx_initiatives_end_date on initiatives(end_date);
+create index if not exists idx_initiative_relations_predecessor on initiative_relations(predecessor_initiative_id, relation_type, successor_initiative_id);
+create index if not exists idx_initiative_relations_successor on initiative_relations(successor_initiative_id, relation_type, predecessor_initiative_id);
+create index if not exists idx_initiative_relations_type on initiative_relations(relation_type, id);
+create index if not exists idx_planning_canvas_nodes_canvas on planning_canvas_nodes(canvas_id, y, x, id);
+create index if not exists idx_planning_canvas_nodes_initiative on planning_canvas_nodes(initiative_id);
 create index if not exists idx_categories_sort_order on categories(sort_order, id);
 create index if not exists idx_initiatives_category_sort_order on initiatives(category_id, sort_order, id);
 create index if not exists idx_initiatives_parent_id on initiatives(parent_id);
@@ -156,6 +228,10 @@ create index if not exists idx_calendar_entries_status on calendar_entries(statu
 create index if not exists idx_calendar_entries_initiative_id on calendar_entries(initiative_id);
 create index if not exists idx_calendar_entries_task_id on calendar_entries(task_id);
 create index if not exists idx_calendar_sources_enabled on calendar_sources(enabled, provider);
+create index if not exists idx_media_assets_kind on media_assets(kind);
+create index if not exists idx_media_assets_sha256 on media_assets(sha256);
+create index if not exists idx_media_links_entity on media_links(entity_type, entity_id, sort_order, id);
+create index if not exists idx_media_links_asset_id on media_links(asset_id);
 create index if not exists idx_app_chat_messages_created_at on app_chat_messages(created_at, id);
 create index if not exists idx_app_chat_messages_conversation_id on app_chat_messages(conversation_id, created_at, id);
 create index if not exists idx_app_conversations_context on app_conversations(context_type, context_entity_id, updated_at);

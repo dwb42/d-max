@@ -1,6 +1,6 @@
 # d-max Memory Map
 
-Date: 2026-05-01
+Date: 2026-05-08
 
 This file defines where Markdown-based memory and configuration belongs.
 
@@ -13,6 +13,8 @@ This file defines where Markdown-based memory and configuration belongs.
 | `docs/current-state.md` | Implemented-state source of truth | Current runtime, routes, schema, API surface, known hardening | Aspirational plans, historical decisions |
 | `docs/app-ui-plan.md` | Active UI notes | Current UI direction and near-term UI work | Implemented-state duplication |
 | `docs/realtime-voice-plan.md` | Active voice hardening notes | Current voice path and remaining hardening | Product-wide memory or obsolete architecture |
+| `docs/media-attachments-plan.md` | Media attachment implementation notes and follow-up map | Attachment architecture decisions, current v1 capabilities, and remaining media follow-ups | Source-of-truth implemented state that belongs in `docs/current-state.md` |
+| `docs/archive/` | Historical docs archive | Superseded plans, dated handoffs, and old spec packs kept for background context | Active source-of-truth state, current implementation instructions, or runtime rules |
 
 ## OpenClaw Workspace Memory
 
@@ -28,6 +30,9 @@ This file defines where Markdown-based memory and configuration belongs.
 ## Rules
 
 - `docs/current-state.md` wins over older plans.
+- Treat `docs/archive/` as historical background only. Do not rely on archived
+  specs or handoffs as current behavior without checking code and
+  `docs/current-state.md`.
 - Code wins over Markdown when they disagree; update Markdown after code
   changes that alter routes, schema, tools, or runtime boundaries.
 - Keep OpenClaw workspace files short because they affect runtime behavior.

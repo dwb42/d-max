@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { nowIso } from "../db/time.js";
 
-export type TaskStatus = "open" | "in_progress" | "blocked" | "done" | "cancelled";
+export type TaskStatus = "open" | "done";
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
 
 export type Task = {
@@ -145,6 +145,7 @@ export class TaskRepository {
   }
 
   delete(id: number): void {
+    this.db.prepare("delete from media_links where entity_type = 'task' and entity_id = ?").run(id);
     this.db.prepare("delete from tasks where id = ?").run(id);
   }
 

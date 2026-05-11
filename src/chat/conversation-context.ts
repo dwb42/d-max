@@ -1,8 +1,12 @@
 import { z } from "zod";
 import type Database from "better-sqlite3";
 import { CategoryRepository } from "../repositories/categories.js";
+import { InitiativeRelationRepository } from "../repositories/initiative-relations.js";
+import type { InitiativeRelationWithInitiatives } from "../repositories/initiative-relations.js";
 import { InitiativeRepository } from "../repositories/initiatives.js";
 import type { Initiative } from "../repositories/initiatives.js";
+import { MediaLinkRepository } from "../repositories/media-links.js";
+import type { MediaAttachment } from "../repositories/media-links.js";
 import { TaskChecklistItemRepository } from "../repositories/task-checklist-items.js";
 import type { TaskChecklistItem } from "../repositories/task-checklist-items.js";
 import { TaskRepository } from "../repositories/tasks.js";
@@ -86,6 +90,9 @@ const promptTemplateSpecs: Array<{
       "  - #{{initiative_id}} [{{initiative_type}}] {{initiative_name}}; status: {{initiative_status}}: {{initiative_summary_or_memory}}",
       "Active initiatives ({{active_initiative_count}}):",
       "- #{{initiative_id}} [{{initiative_type}}] {{initiative_name}} ({{date_range}}): {{initiative_summary_or_memory}}",
+      "Initiative precedence relations ({{initiative_relation_count}}):",
+      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}} -> #{{successor_initiative_id}} {{successor_initiative_name}}",
+      "Planning canvas: {{placed_initiative_count}} placed initiatives; {{unplaced_initiative_count}} unplaced non-archived initiatives.",
       "Open execution surface ({{open_task_count}} tasks, showing highest-signal first):",
       "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}; initiative: #{{initiative_id}}"
     ]
@@ -108,6 +115,8 @@ const promptTemplateSpecs: Array<{
       "- #{{project_id}} {{project_name}}; status: {{project_status}}; Zeitraum: {{project_date_range}}",
       "  Markdown:",
       "  {{project_markdown}}",
+      "Initiative-Reihenfolge in/mit diesem Lebensbereich ({{initiative_relation_count}}):",
+      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}} -> #{{successor_initiative_id}} {{successor_initiative_name}}",
       "Gewohnheiten in diesem Lebensbereich ({{habit_count}}):",
       "- #{{habit_id}} {{habit_name}}; status: {{habit_status}}",
       "  Markdown:",
@@ -125,6 +134,8 @@ const promptTemplateSpecs: Array<{
     contextDataLines: [
       "Ideas grouped by life area ({{idea_count}}):",
       "- #{{initiative_id}} {{initiative_name}}; status: {{initiative_status}}: {{initiative_summary_or_memory}}",
+      "Idea precedence relations ({{initiative_relation_count}}):",
+      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}} -> #{{successor_initiative_id}} {{successor_initiative_name}}",
       "Open tasks connected to ideas ({{open_task_count}}, showing highest-signal first):",
       "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
     ]
@@ -140,6 +151,12 @@ const promptTemplateSpecs: Array<{
       "Category: #{{category_id}} {{category_name}} ({{category_color}})",
       "Initiative memory markdown:",
       "{{initiative_markdown}}",
+      "Predecessors ({{predecessor_count}}):",
+      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}}",
+      "Successors ({{successor_count}}):",
+      "- #{{successor_initiative_id}} {{successor_initiative_name}}",
+      "Media attachments ({{media_attachment_count}}):",
+      "- #{{media_asset_id}} [{{media_kind}}/{{media_mime_type}}, {{media_byte_size}}] {{media_original_name}}; caption: {{media_caption}}; summary/excerpt: {{media_summary_or_excerpt}}",
       "Tasks ({{task_count}}, open/high-signal first):",
       "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
     ]
@@ -153,6 +170,8 @@ const promptTemplateSpecs: Array<{
     contextDataLines: [
       "Projects grouped by life area ({{project_count}}):",
       "- #{{initiative_id}} {{initiative_name}}; status: {{initiative_status}}; time span: {{date_range}}: {{initiative_summary_or_memory}}",
+      "Project precedence relations ({{initiative_relation_count}}):",
+      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}} -> #{{successor_initiative_id}} {{successor_initiative_name}}",
       "Open tasks connected to projects ({{open_task_count}}, showing highest-signal first):",
       "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
     ]
@@ -168,6 +187,12 @@ const promptTemplateSpecs: Array<{
       "Category: #{{category_id}} {{category_name}} ({{category_color}})",
       "Initiative memory markdown:",
       "{{initiative_markdown}}",
+      "Predecessors ({{predecessor_count}}):",
+      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}}",
+      "Successors ({{successor_count}}):",
+      "- #{{successor_initiative_id}} {{successor_initiative_name}}",
+      "Media attachments ({{media_attachment_count}}):",
+      "- #{{media_asset_id}} [{{media_kind}}/{{media_mime_type}}, {{media_byte_size}}] {{media_original_name}}; caption: {{media_caption}}; summary/excerpt: {{media_summary_or_excerpt}}",
       "Tasks ({{task_count}}, open/high-signal first):",
       "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
     ]
@@ -181,6 +206,8 @@ const promptTemplateSpecs: Array<{
     contextDataLines: [
       "Habits grouped by life area ({{habit_count}}):",
       "- #{{initiative_id}} {{initiative_name}}; status: {{initiative_status}}: {{initiative_summary_or_memory}}",
+      "Habit precedence relations ({{initiative_relation_count}}):",
+      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}} -> #{{successor_initiative_id}} {{successor_initiative_name}}",
       "Open tasks connected to habits ({{open_task_count}}, showing highest-signal first):",
       "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
     ]
@@ -196,6 +223,12 @@ const promptTemplateSpecs: Array<{
       "Category: #{{category_id}} {{category_name}} ({{category_color}})",
       "Initiative memory markdown:",
       "{{initiative_markdown}}",
+      "Predecessors ({{predecessor_count}}):",
+      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}}",
+      "Successors ({{successor_count}}):",
+      "- #{{successor_initiative_id}} {{successor_initiative_name}}",
+      "Media attachments ({{media_attachment_count}}):",
+      "- #{{media_asset_id}} [{{media_kind}}/{{media_mime_type}}, {{media_byte_size}}] {{media_original_name}}; caption: {{media_caption}}; summary/excerpt: {{media_summary_or_excerpt}}",
       "Tasks ({{task_count}}, open/high-signal first):",
       "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
     ]
@@ -223,10 +256,16 @@ const promptTemplateSpecs: Array<{
       "Checklist ({{checklist_item_count}}):",
       "- #{{checklist_item_id}} [{{checklist_item_status}}] {{checklist_item_name}}",
       "Notes: {{task_notes}}",
+      "Media attachments ({{media_attachment_count}}):",
+      "- #{{media_asset_id}} [{{media_kind}}/{{media_mime_type}}, {{media_byte_size}}] {{media_original_name}}; caption: {{media_caption}}; summary/excerpt: {{media_summary_or_excerpt}}",
       "Initiative: #{{initiative_id}} {{initiative_name}}; type: {{initiative_type}}; status: {{initiative_status}}; time span: {{initiative_time_span}}; summary: {{initiative_summary}}",
       "Category: #{{category_id}} {{category_name}} ({{category_color}})",
       "Initiative memory excerpt:",
       "{{initiative_markdown_excerpt}}",
+      "Initiative predecessors ({{predecessor_count}}):",
+      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}}",
+      "Initiative successors ({{successor_count}}):",
+      "- #{{successor_initiative_id}} {{successor_initiative_name}}",
       "Sibling tasks in same initiative ({{sibling_task_count}}, showing highest-signal first):",
       "- #{{sibling_task_id}} {{sibling_task_title}}; status: {{sibling_task_status}}; priority: {{sibling_task_priority}}"
     ]
@@ -301,6 +340,8 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   const storage = storageForConversationContext(context);
   const categories = new CategoryRepository(db);
   const initiatives = new InitiativeRepository(db);
+  const initiativeRelations = new InitiativeRelationRepository(db);
+  const mediaLinks = new MediaLinkRepository(db);
   const tasks = new TaskRepository(db);
   const taskChecklistItems = new TaskChecklistItemRepository(db);
 
@@ -319,8 +360,9 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   if (context.type === "categories" || context.type === "initiatives") {
     const categoryList = categories.list();
     const allInitiatives = initiatives.list();
+    const allRelations = initiativeRelations.list({ relationType: "precedes" });
     const activeInitiatives = allInitiatives.filter((initiative) => initiative.status === "active");
-    const activeTasks = tasks.list().filter((task) => task.status !== "done" && task.status !== "cancelled");
+    const activeTasks = tasks.list().filter((task) => task.status !== "done");
     const lines = [
       `Life areas / categories (${categoryList.length}):`,
       ...categoryList.flatMap((category) => {
@@ -333,7 +375,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
             .slice(0, 20)
             .map(
               (initiative) =>
-                `  - #${initiative.id} [${formatInitiativeType(initiative.type)}] ${initiative.name}; status: ${initiative.status}${formatInitiativeDateRange(initiative)}: ${initiative.summary ?? firstMarkdownLine(initiative.markdown)}`
+                `  - #${initiative.id} [${formatInitiativeType(initiative.type)}] ${initiative.name}; status: ${initiative.status}${formatInitiativeProjectPhase(initiative)}${formatInitiativeDateRange(initiative)}: ${initiative.summary ?? firstMarkdownLine(initiative.markdown)}`
             )
         ];
       }),
@@ -342,8 +384,11 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
         .slice(0, 30)
         .map(
           (initiative) =>
-            `- #${initiative.id} [${formatInitiativeType(initiative.type)}] ${initiative.name}${formatInitiativeDateRange(initiative)}: ${initiative.summary ?? firstMarkdownLine(initiative.markdown)}`
+            `- #${initiative.id} [${formatInitiativeType(initiative.type)}] ${initiative.name}${formatInitiativeProjectPhase(initiative)}${formatInitiativeDateRange(initiative)}: ${initiative.summary ?? firstMarkdownLine(initiative.markdown)}`
         ),
+      `Initiative precedence relations (${allRelations.length}):`,
+      ...allRelations.slice(0, 40).map(formatInitiativeRelation),
+      formatPlanningCanvasSummary(db),
       `Open execution surface (${activeTasks.length} tasks, showing highest-signal first):`,
       ...rankTasks(activeTasks).slice(0, 25).map(formatTask)
     ];
@@ -361,7 +406,10 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     const categoryList = categories.list();
     const typedInitiatives = initiatives.list().filter((initiative) => initiative.type === initiativeType);
     const initiativeIds = new Set(typedInitiatives.map((initiative) => initiative.id));
-    const typedTasks = tasks.list().filter((task) => initiativeIds.has(task.initiativeId) && task.status !== "done" && task.status !== "cancelled");
+    const typedRelations = initiativeRelations
+      .list({ relationType: "precedes" })
+      .filter((relation) => initiativeIds.has(relation.predecessorInitiativeId) || initiativeIds.has(relation.successorInitiativeId));
+    const typedTasks = tasks.list().filter((task) => initiativeIds.has(task.initiativeId) && task.status !== "done");
     const lines = [
       `${formatInitiativeType(initiativeType)}s grouped by life area (${typedInitiatives.length}):`,
       ...categoryList.flatMap((category) => {
@@ -373,10 +421,12 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
           `- #${category.id} ${category.name} (${category.color})`,
           ...categoryInitiatives.map(
             (initiative) =>
-              `  - #${initiative.id} ${initiative.name}; status: ${initiative.status}${formatInitiativeDateRange(initiative)}: ${initiative.summary ?? firstMarkdownLine(initiative.markdown)}`
+              `  - #${initiative.id} ${initiative.name}; status: ${initiative.status}${formatInitiativeProjectPhase(initiative)}${formatInitiativeDateRange(initiative)}: ${initiative.summary ?? firstMarkdownLine(initiative.markdown)}`
           )
         ];
       }),
+      `Initiative precedence relations touching these ${context.type} (${typedRelations.length}):`,
+      ...typedRelations.slice(0, 35).map(formatInitiativeRelation),
       `Open tasks connected to ${context.type} (${typedTasks.length}, showing highest-signal first):`,
       ...rankTasks(typedTasks).slice(0, 25).map(formatTask)
     ];
@@ -390,7 +440,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   }
 
   if (context.type === "tasks") {
-    const allTasks = tasks.list().filter((task) => task.status !== "done" && task.status !== "cancelled");
+    const allTasks = tasks.list().filter((task) => task.status !== "done");
     const allInitiatives = initiatives.list();
     const allCategories = categories.list();
     const lines = [
@@ -422,7 +472,10 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
 
     const categoryInitiatives = initiatives.list({ categoryId: category.id });
     const initiativeIds = new Set(categoryInitiatives.map((initiative) => initiative.id));
-    const categoryTasks = tasks.list().filter((task) => initiativeIds.has(task.initiativeId) && task.status !== "done" && task.status !== "cancelled");
+    const categoryTasks = tasks.list().filter((task) => initiativeIds.has(task.initiativeId) && task.status !== "done");
+    const categoryRelations = initiativeRelations
+      .list({ relationType: "precedes" })
+      .filter((relation) => initiativeIds.has(relation.predecessorInitiativeId) || initiativeIds.has(relation.successorInitiativeId));
     const categoryIdeas = categoryInitiatives.filter((initiative) => initiative.type === "idea");
     const categoryProjects = categoryInitiatives.filter((initiative) => initiative.type === "project");
     const categoryHabits = categoryInitiatives.filter((initiative) => initiative.type === "habit");
@@ -433,6 +486,8 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       ...categoryIdeas.flatMap(formatInitiativeMarkdownContext),
       `Projekte in diesem Lebensbereich (${categoryProjects.length}):`,
       ...categoryProjects.flatMap(formatInitiativeMarkdownContext),
+      `Initiative-Reihenfolge in/mit diesem Lebensbereich (${categoryRelations.length}):`,
+      ...categoryRelations.slice(0, 30).map(formatInitiativeRelation),
       `Gewohnheiten in diesem Lebensbereich (${categoryHabits.length}):`,
       ...categoryHabits.flatMap(formatInitiativeMarkdownContext),
       `Offene Aufgaben in diesem Lebensbereich (${categoryTasks.length}, wichtigste zuerst):`,
@@ -459,10 +514,19 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
 
     const category = categories.findById(initiative.categoryId);
     const initiativeTasks = tasks.list({ initiativeId: initiative.id });
+    const initiativeMedia = mediaLinks.listForEntity("initiative", initiative.id);
+    const predecessors = initiativeRelations.getInitiativePredecessors(initiative.id);
+    const successors = initiativeRelations.getInitiativeSuccessors(initiative.id);
     const lines = [
       formatInitiativeHeader(initiative),
       `Category: ${category ? `#${category.id} ${category.name} (${category.color})` : "unknown"}`,
       `Initiative memory markdown:\n${truncate(initiative.markdown || "No initiative markdown yet.", 7000)}`,
+      `Predecessors (${predecessors.length}):`,
+      ...predecessors.map((relation) => formatInitiativeRelationEndpoint(relation, "predecessor")),
+      `Successors (${successors.length}):`,
+      ...successors.map((relation) => formatInitiativeRelationEndpoint(relation, "successor")),
+      `Media attachments (${initiativeMedia.length}):`,
+      ...initiativeMedia.slice(0, 20).map(formatMediaAttachment),
       `Tasks (${initiativeTasks.length}, open/high-signal first):`,
       ...rankTasks(initiativeTasks).slice(0, 30).map(formatTask)
     ];
@@ -487,16 +551,25 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   const initiative = initiatives.findById(task.initiativeId);
   const category = initiative ? categories.findById(initiative.categoryId) : null;
   const siblingTasks = initiative ? tasks.list({ initiativeId: initiative.id }).filter((candidate) => candidate.id !== task.id) : [];
+  const predecessors = initiative ? initiativeRelations.getInitiativePredecessors(initiative.id) : [];
+  const successors = initiative ? initiativeRelations.getInitiativeSuccessors(initiative.id) : [];
   const checklistItems = taskChecklistItems.listByTask(task.id);
+  const taskMedia = mediaLinks.listForEntity("task", task.id);
   const lines = [
     `Task: #${task.id} ${task.title}`,
     `Status: ${task.status}; priority: ${task.priority}; due: ${task.dueAt ?? "none"}; completed: ${task.completedAt ?? "no"}`,
     `Checklist (${checklistItems.length}):`,
     ...checklistItems.map(formatChecklistItem),
     `Notes: ${task.notes ?? "none"}`,
+    `Media attachments (${taskMedia.length}):`,
+    ...taskMedia.slice(0, 20).map(formatMediaAttachment),
     initiative ? formatInitiativeHeader(initiative) : `Initiative: #${task.initiativeId} not found`,
     category ? `Category: #${category.id} ${category.name} (${category.color})` : "Category: unknown",
     initiative ? `Initiative memory excerpt:\n${truncate(initiative.markdown || "No initiative markdown yet.", 3500)}` : "",
+    `Initiative predecessors (${predecessors.length}):`,
+    ...predecessors.map((relation) => formatInitiativeRelationEndpoint(relation, "predecessor")),
+    `Initiative successors (${successors.length}):`,
+    ...successors.map((relation) => formatInitiativeRelationEndpoint(relation, "successor")),
     `Sibling tasks in same initiative (${siblingTasks.length}, showing highest-signal first):`,
     ...rankTasks(siblingTasks).slice(0, 18).map(formatTask)
   ];
@@ -670,7 +743,11 @@ function instructionsForContextType(type: string): string[] {
 }
 
 function formatInitiativeHeader(initiative: Initiative): string {
-  return `Initiative: #${initiative.id} ${initiative.name}; type: ${initiative.type} (${formatInitiativeType(initiative.type)}); status: ${initiative.status}; time span: ${formatInitiativeDateRangeValue(initiative)}; summary: ${initiative.summary ?? "none"}`;
+  return `Initiative: #${initiative.id} ${initiative.name}; type: ${initiative.type} (${formatInitiativeType(initiative.type)}); status: ${initiative.status}; project phase: ${initiative.type === "project" ? initiative.projectPhase : "n/a"}; time span: ${formatInitiativeDateRangeValue(initiative)}; summary: ${initiative.summary ?? "none"}`;
+}
+
+function formatInitiativeProjectPhase(initiative: Initiative): string {
+  return initiative.type === "project" ? `; phase: ${initiative.projectPhase}` : "";
 }
 
 function formatInitiativeDateRange(initiative: Initiative): string {
@@ -718,7 +795,7 @@ function formatContextEntityName(type: "idea" | "project" | "habit" | "initiativ
 
 function formatInitiativeMarkdownContext(initiative: Initiative): string[] {
   return [
-    `- #${initiative.id} ${initiative.name}; status: ${initiative.status}${formatInitiativeDateRange(initiative)}`,
+    `- #${initiative.id} ${initiative.name}; status: ${initiative.status}${formatInitiativeProjectPhase(initiative)}${formatInitiativeDateRange(initiative)}`,
     `  Markdown:\n${indentMultiline(truncate(initiative.markdown || "Noch kein Markdown vorhanden.", 3000), "  ")}`
   ];
 }
@@ -731,9 +808,40 @@ function formatChecklistItem(item: TaskChecklistItem): string {
   return `- #${item.id} [${item.status}] ${item.name}`;
 }
 
+function formatMediaAttachment(attachment: MediaAttachment): string {
+  const derivedText = attachment.asset.summary ?? attachment.asset.textExcerpt ?? attachment.asset.transcript ?? "none";
+  return `- #${attachment.asset.id} [${attachment.asset.kind}/${attachment.asset.mimeType}, ${formatBytes(attachment.asset.byteSize)}] ${attachment.asset.originalName}; caption: ${attachment.caption ?? "none"}; summary/excerpt: ${truncate(derivedText, 240)}`;
+}
+
+function formatInitiativeRelation(relation: InitiativeRelationWithInitiatives): string {
+  return `- #${relation.predecessorInitiativeId} ${relation.predecessor.name} -> #${relation.successorInitiativeId} ${relation.successor.name}`;
+}
+
+function formatInitiativeRelationEndpoint(relation: InitiativeRelationWithInitiatives, endpoint: "predecessor" | "successor"): string {
+  const initiative = endpoint === "predecessor" ? relation.predecessor : relation.successor;
+  return `- #${initiative.id} [${formatInitiativeType(initiative.type)}] ${initiative.name}; status: ${initiative.status}${formatInitiativeProjectPhase(initiative)}${formatInitiativeDateRange(initiative)}`;
+}
+
+function formatPlanningCanvasSummary(db: Database.Database): string {
+  const row = db
+    .prepare(
+      `select
+        count(distinct n.initiative_id) as placed,
+        (
+          select count(*)
+          from initiatives i
+          where i.status != 'archived'
+            and not exists (select 1 from planning_canvas_nodes pn where pn.initiative_id = i.id)
+        ) as unplaced
+       from planning_canvas_nodes n`
+    )
+    .get() as { placed: number; unplaced: number } | undefined;
+  return `Planning canvas: ${row?.placed ?? 0} placed initiatives; ${row?.unplaced ?? 0} unplaced non-archived initiatives.`;
+}
+
 function rankTasks(tasks: Task[]): Task[] {
   const priorityRank = { urgent: 0, high: 1, normal: 2, low: 3 };
-  const statusRank = { blocked: 0, in_progress: 1, open: 2, done: 3, cancelled: 4 };
+  const statusRank = { open: 0, done: 1 };
   return [...tasks].sort((left, right) => {
     const statusDelta = statusRank[left.status] - statusRank[right.status];
     if (statusDelta !== 0) return statusDelta;
@@ -756,6 +864,14 @@ function truncate(value: string, maxLength: number): string {
   }
 
   return `${value.slice(0, maxLength - 15).trimEnd()}\n[truncated]`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kilobytes = bytes / 1024;
+  if (kilobytes < 1024) return `${kilobytes.toFixed(kilobytes >= 100 ? 0 : 1)} KB`;
+  const megabytes = kilobytes / 1024;
+  return `${megabytes.toFixed(megabytes >= 100 ? 0 : 1)} MB`;
 }
 
 function indentMultiline(value: string, prefix: string): string {

@@ -2,7 +2,8 @@ import type { ConfirmationRequest, ToolName } from "./tool-definitions.js";
 
 const CONFIRMATION_REQUIRED_TOOLS = new Set<ToolName>([
   "archiveInitiative",
-  "deleteTask"
+  "deleteTask",
+  "deleteMediaAttachment"
 ]);
 
 type ConfirmationInput = {

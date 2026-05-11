@@ -32,6 +32,10 @@
             "d-max__updateInitiative",
             "d-max__archiveInitiative",
             "d-max__updateInitiativeMarkdown",
+            "d-max__listInitiativeRelations",
+            "d-max__createInitiativeRelation",
+            "d-max__deleteInitiativeRelation",
+            "d-max__getInitiativeGraph",
             "d-max__listTasks",
             "d-max__createTask",
             "d-max__updateTask",
@@ -41,7 +45,12 @@
             "d-max__createTaskChecklistItem",
             "d-max__updateTaskChecklistItem",
             "d-max__deleteTaskChecklistItem",
-            "d-max__reorderTaskChecklistItems"
+            "d-max__reorderTaskChecklistItems",
+            "d-max__listMediaAttachments",
+            "d-max__attachMediaToEntity",
+            "d-max__updateMediaAttachment",
+            "d-max__deleteMediaAttachment",
+            "d-max__reorderMediaAttachments"
           ]
         },
         "subagents": {
@@ -59,6 +68,8 @@
             "d-max__listCategories",
             "d-max__listInitiatives",
             "d-max__getInitiative",
+            "d-max__listInitiativeRelations",
+            "d-max__getInitiativeGraph",
             "d-max__listTasks"
           ],
           "deny": [

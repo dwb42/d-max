@@ -5,6 +5,7 @@ import { InitiativeRepository } from "../repositories/initiatives.js";
 
 const initiativeStatusSchema = z.enum(["active", "paused", "completed", "archived"]);
 const initiativeTypeSchema = z.enum(["idea", "project", "habit"]);
+const projectPhaseSchema = z.enum(["planning", "doing"]);
 const initiativeDateSchema = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).nullable();
 const listInitiativesInput = z
   .object({
@@ -22,6 +23,7 @@ const createInitiativeInput = z.object({
   type: initiativeTypeSchema
     .optional()
     .describe("Initiative type. Use idea for loose thoughts, project for goal-oriented work, habit for ongoing practices. Defaults to project."),
+  projectPhase: projectPhaseSchema.optional().describe("Optional phase for type=project initiatives: planning or doing. Defaults to doing."),
   name: z.string().trim().min(1).describe("Name exactly as Dietrich says it when possible."),
   summary: z.string().trim().min(1).nullable().optional().describe("Short optional summary."),
   markdown: z.string().optional().describe("Durable initiative memory markdown. Use adaptive sections, not a hard template."),
@@ -34,6 +36,7 @@ const updateInitiativeInput = z.object({
   categoryId: z.number().int().positive().optional().describe("New category id."),
   parentId: z.number().int().positive().nullable().optional().describe("New parent initiative id, or null to remove the parent."),
   type: initiativeTypeSchema.optional().describe("New initiative type. Changing an existing type is a lifecycle decision and requires confirmation."),
+  projectPhase: projectPhaseSchema.optional().describe("New phase for type=project initiatives: planning or doing."),
   name: z.string().trim().min(1).optional().describe("New initiative name."),
   status: initiativeStatusSchema.optional().describe("New initiative status."),
   summary: z.string().trim().min(1).nullable().optional().describe("New optional summary."),
@@ -54,7 +57,7 @@ export const initiativeTools: ToolDefinition<any>[] = [
   defineTool({
     name: "listInitiatives",
     description:
-      "List d-max initiatives. Optional filters include categoryId, status, and type (idea, project, habit). Returned type=project initiatives may include startDate and endDate.",
+      "List d-max initiatives. Optional filters include categoryId, status, and type (idea, project, habit). Returned type=project initiatives may include projectPhase, startDate, and endDate.",
     inputSchema: listInitiativesInput,
     run: (input, context) => {
       if (!context.db) {
@@ -69,7 +72,7 @@ export const initiativeTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "getInitiative",
-    description: "Get one d-max initiative, including its type and optional startDate/endDate for type=project initiatives.",
+    description: "Get one d-max initiative, including its type, projectPhase, and optional startDate/endDate for type=project initiatives.",
     inputSchema: getInitiativeInput,
     run: (input, context) => {
       if (!context.db) {
@@ -99,7 +102,7 @@ export const initiativeTools: ToolDefinition<any>[] = [
   defineTool({
     name: "updateInitiative",
     description:
-      "Update a d-max initiative. For type=project initiatives, maintain startDate/endDate when Dietrich gives a project time span. Ideas are loose thoughts and habits are ongoing practices. Changing type is a lifecycle decision such as idea -> project or idea -> habit and requires Dietrich's confirmation.",
+      "Update a d-max initiative. For type=project initiatives, maintain projectPhase and startDate/endDate when Dietrich gives project phase or time-span changes. Ideas are loose thoughts and habits are ongoing practices. Changing type is a lifecycle decision such as idea -> project or idea -> habit and requires Dietrich's confirmation.",
     inputSchema: updateInitiativeInput,
     run: (input, context) => {
       if (!context.db) {

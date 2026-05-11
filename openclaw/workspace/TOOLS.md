@@ -42,6 +42,23 @@ Changing an existing initiative's `type` is a lifecycle decision and requires
 confirmation. A repeated request is not confirmation. If a tool returns
 `requiresConfirmation`, the change was not applied.
 
+## Initiative Hierarchy
+
+Use `updateInitiative` with `parentId` to set or clear a structural parent for
+an initiative. Parent/child hierarchy is separate from predecessor/successor
+execution order. An initiative can have one parent and many children. Avoid
+creating parent loops; there is no dedicated hierarchy cycle guard yet.
+
+## Initiative Relations
+
+Initiatives can be connected by directed `precedes` relations across ideas,
+projects, and habits. Use `createInitiativeRelation` for "B follows A" by
+setting A as `predecessorInitiativeId` and B as `successorInitiativeId`.
+Use `listInitiativeRelations` or `getInitiativeGraph` for questions like "what
+comes before this?", "what depends on this?", and "what comes next?". Cycles and
+self-relations are rejected. Deleting one relation does not require
+confirmation.
+
 ## Confirmation
 
 Require confirmation for:
@@ -55,6 +72,8 @@ concise summary before confirmation.
 ## Task Capture
 
 - Create clear commitments automatically.
+- Tasks only have `open` and `done` status; reopen a completed task with
+  `updateTask status=open`.
 - Use Inbox for concrete tasks without initiative context.
 - Ask before creating vague/speculative tasks.
 - Treat "make tasks from this" as candidate proposal, not automatic batch
@@ -63,6 +82,14 @@ concise summary before confirmation.
 - Use task checklist tools for simple subtasks inside an existing task. Items
   have only `name` and `status` (`todo` or `done`); checklist completion does
   not automatically complete the parent task.
+
+## Media Attachments
+
+Media attachments link uploaded assets to categories, initiatives, or tasks.
+Use `listMediaAttachments` to inspect metadata and derived text. Use
+`attachMediaToEntity` only for assets that already exist. Use
+`updateMediaAttachment` for captions/roles. `deleteMediaAttachment` removes a
+link and requires confirmation. Do not expose or invent filesystem paths.
 
 ## Silent Replies
 

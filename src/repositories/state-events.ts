@@ -2,7 +2,17 @@ import type Database from "better-sqlite3";
 import { nowIso } from "../db/time.js";
 
 export type StateEventSource = "api" | "tool";
-export type StateEventEntityType = "overview" | "category" | "initiative" | "task" | "calendar_entry" | "calendar_source";
+export type StateEventEntityType =
+  | "overview"
+  | "category"
+  | "initiative"
+  | "initiative_relation"
+  | "planning_canvas_node"
+  | "task"
+  | "calendar_entry"
+  | "calendar_source"
+  | "media_asset"
+  | "media_link";
 
 export type StateEvent = {
   id: number;

@@ -1,4 +1,5 @@
 import http from "node:http";
+import { createReadStream, readFileSync, statSync } from "node:fs";
 import { URL } from "node:url";
 import { z } from "zod";
 import { env } from "../config/env.js";
@@ -10,8 +11,16 @@ import { GoogleCalendarAuth } from "../calendar/google-calendar-auth.js";
 import { GoogleCalendarProvider } from "../calendar/google-calendar-provider.js";
 import { CalendarEntryRepository } from "../repositories/calendar-entries.js";
 import { CalendarSourceRepository } from "../repositories/calendar-sources.js";
+import { InitiativeRelationRepository } from "../repositories/initiative-relations.js";
 import { InitiativeRepository } from "../repositories/initiatives.js";
-import type { InitiativeType } from "../repositories/initiatives.js";
+import type { InitiativeStatus, InitiativeType } from "../repositories/initiatives.js";
+import { PlanningCanvasRepository } from "../repositories/planning-canvas.js";
+import { MediaAssetRepository } from "../repositories/media-assets.js";
+import type { MediaAsset } from "../repositories/media-assets.js";
+import { MediaLinkRepository } from "../repositories/media-links.js";
+import type { MediaAttachment, MediaEntityType, MediaLink } from "../repositories/media-links.js";
+import { analyzeMedia } from "../media/media-analysis.js";
+import { MediaStorage } from "../media/media-storage.js";
 import type { TaskStatus } from "../repositories/tasks.js";
 import { TaskRepository } from "../repositories/tasks.js";
 import { TaskChecklistItemRepository } from "../repositories/task-checklist-items.js";
@@ -41,6 +50,11 @@ const calendarEntries = new CalendarEntryRepository(db);
 const calendarSources = new CalendarSourceRepository(db);
 const googleCalendarAuth = new GoogleCalendarAuth();
 const initiatives = new InitiativeRepository(db);
+const initiativeRelations = new InitiativeRelationRepository(db);
+const planningCanvas = new PlanningCanvasRepository(db);
+const mediaAssets = new MediaAssetRepository(db);
+const mediaLinks = new MediaLinkRepository(db);
+const mediaStorage = new MediaStorage(env.dmaxMediaStorageDir);
 const tasks = new TaskRepository(db);
 const taskChecklistItems = new TaskChecklistItemRepository(db);
 const stateEvents = new StateEventRepository(db);
@@ -99,7 +113,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/api/app/overview") {
       const activeInitiatives = initiatives.list({ status: "active" });
-      const openTasks = tasks.list().filter((task) => task.status !== "done" && task.status !== "cancelled");
+      const openTasks = tasks.list().filter((task) => task.status !== "done");
 
       sendJson(res, 200, {
         categories: categories.list(),
@@ -304,6 +318,112 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/initiative-relations") {
+      sendJson(res, 200, {
+        relations: initiativeRelations.list({
+          initiativeId: parseOptionalPositiveInt(url.searchParams.get("initiativeId")) ?? undefined,
+          predecessorInitiativeId: parseOptionalPositiveInt(url.searchParams.get("predecessorInitiativeId")) ?? undefined,
+          successorInitiativeId: parseOptionalPositiveInt(url.searchParams.get("successorInitiativeId")) ?? undefined,
+          relationType: parseOptionalInitiativeRelationType(url.searchParams.get("relationType"))
+        })
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/initiative-relations") {
+      const body = createInitiativeRelationBody.parse(await readJson(req));
+      const relation = initiativeRelations.create(body);
+      emitApiStateEvent({
+        operation: "createInitiativeRelation",
+        entityType: "initiative_relation",
+        entityId: relation.id,
+        initiativeId: relation.successorInitiativeId
+      });
+      sendJson(res, 200, { relation });
+      return;
+    }
+
+    const initiativeRelationMatch = url.pathname.match(/^\/api\/initiative-relations\/(\d+)$/);
+    if (req.method === "DELETE" && initiativeRelationMatch) {
+      const relation = initiativeRelations.delete(Number(initiativeRelationMatch[1]));
+      if (!relation) {
+        sendJson(res, 404, { error: "Initiative relation not found" });
+        return;
+      }
+
+      emitApiStateEvent({
+        operation: "deleteInitiativeRelation",
+        entityType: "initiative_relation",
+        entityId: relation.id,
+        initiativeId: relation.successorInitiativeId
+      });
+      sendJson(res, 200, { deleted: true, id: relation.id });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/initiative-graph") {
+      sendJson(res, 200, {
+        graph: initiativeRelations.getInitiativeGraph({
+          initiativeId: parseOptionalPositiveInt(url.searchParams.get("initiativeId")) ?? undefined,
+          maxDepth: parseOptionalGraphDepth(url.searchParams.get("maxDepth"))
+        })
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/planning-canvas") {
+      sendJson(res, 200, {
+        view: planningCanvas.getView({
+          canvasId: parseOptionalPositiveInt(url.searchParams.get("canvasId")) ?? undefined,
+          filters: parsePlanningCanvasFilters(url)
+        })
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/planning-canvas/nodes") {
+      const body = createPlanningCanvasNodeBody.parse(await readJson(req));
+      const node = planningCanvas.createNode(body);
+      emitApiStateEvent({
+        operation: "createPlanningCanvasNode",
+        entityType: "planning_canvas_node",
+        entityId: node.id,
+        initiativeId: node.initiativeId
+      });
+      sendJson(res, 200, { node });
+      return;
+    }
+
+    const planningCanvasNodeMatch = url.pathname.match(/^\/api\/planning-canvas\/nodes\/(\d+)$/);
+    if (req.method === "PATCH" && planningCanvasNodeMatch) {
+      const body = updatePlanningCanvasNodeBody.parse(await readJson(req));
+      const node = planningCanvas.updateNode({ id: Number(planningCanvasNodeMatch[1]), ...body });
+      emitApiStateEvent({
+        operation: "updatePlanningCanvasNode",
+        entityType: "planning_canvas_node",
+        entityId: node.id,
+        initiativeId: node.initiativeId
+      });
+      sendJson(res, 200, { node });
+      return;
+    }
+
+    if (req.method === "DELETE" && planningCanvasNodeMatch) {
+      const node = planningCanvas.deleteNode(Number(planningCanvasNodeMatch[1]));
+      if (!node) {
+        sendJson(res, 404, { error: "Planning canvas node not found" });
+        return;
+      }
+      emitApiStateEvent({
+        operation: "deletePlanningCanvasNode",
+        entityType: "planning_canvas_node",
+        entityId: node.id,
+        initiativeId: node.initiativeId
+      });
+      sendJson(res, 200, { deleted: true, id: node.id });
+      return;
+    }
+
     const initiativeMatch = url.pathname.match(/^\/api\/(?:initiatives|projects)\/(\d+)$/);
     if (req.method === "GET" && initiativeMatch) {
       const initiative = initiatives.findById(Number(initiativeMatch[1]));
@@ -314,7 +434,10 @@ const server = http.createServer(async (req, res) => {
 
       sendJson(res, 200, {
         initiative,
-        tasks: tasks.list({ initiativeId: initiative.id })
+        predecessors: initiativeRelations.getInitiativePredecessors(initiative.id),
+        successors: initiativeRelations.getInitiativeSuccessors(initiative.id),
+        tasks: tasks.list({ initiativeId: initiative.id }),
+        mediaAttachments: mediaLinks.listForEntity("initiative", initiative.id).map(mediaAttachmentForApi)
       });
       return;
     }
@@ -359,7 +482,13 @@ const server = http.createServer(async (req, res) => {
 
       const initiative = initiatives.findById(task.initiativeId);
       const category = initiative ? categories.findById(initiative.categoryId) : null;
-      sendJson(res, 200, { task, checklistItems: taskChecklistItems.listByTask(task.id), initiative, category });
+      sendJson(res, 200, {
+        task,
+        checklistItems: taskChecklistItems.listByTask(task.id),
+        initiative,
+        category,
+        mediaAttachments: mediaLinks.listForEntity("task", task.id).map(mediaAttachmentForApi)
+      });
       return;
     }
 
@@ -368,6 +497,18 @@ const server = http.createServer(async (req, res) => {
       const task = tasks.update({ id: Number(taskMatch[1]), ...body });
       emitApiStateEvent({ operation: "updateTask", entityType: "task", entityId: task.id, taskId: task.id, initiativeId: task.initiativeId });
       sendJson(res, 200, { task });
+      return;
+    }
+
+    if (req.method === "DELETE" && taskMatch) {
+      const existing = tasks.findById(Number(taskMatch[1]));
+      if (!existing) {
+        sendJson(res, 404, { error: "Task not found" });
+        return;
+      }
+      tasks.delete(existing.id);
+      emitApiStateEvent({ operation: "deleteTask", entityType: "task", entityId: existing.id, taskId: existing.id, initiativeId: existing.initiativeId });
+      sendJson(res, 200, { deleted: true, id: existing.id });
       return;
     }
 
@@ -442,6 +583,148 @@ const server = http.createServer(async (req, res) => {
       taskChecklistItems.delete(itemId);
       emitApiStateEvent({ operation: "deleteTaskChecklistItem", entityType: "task", entityId: task.id, taskId: task.id, initiativeId: task.initiativeId });
       sendJson(res, 200, { deleted: true, id: itemId });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/media/attachments") {
+      const target = parseMediaEntityTarget(url);
+      ensureMediaEntityExists(target.entityType, target.entityId);
+      const file = await readBuffer(req, env.dmaxMediaMaxUploadBytes);
+      const stored = mediaStorage.store({
+        buffer: file,
+        mimeType: req.headers["content-type"] ?? "application/octet-stream",
+        originalName: typeof req.headers["x-file-name"] === "string" ? decodeHeaderValue(req.headers["x-file-name"]) : null
+      });
+      const existingAsset = mediaAssets.findByHash(stored.sha256, stored.byteSize);
+      const analysis = existingAsset
+        ? null
+        : await analyzeMedia({
+            buffer: file,
+            kind: stored.kind,
+            mimeType: stored.mimeType,
+            originalName: stored.originalName
+          });
+      const asset = existingAsset ?? mediaAssets.create({ ...stored, ...analysis });
+      const attachment = mediaLinks.create({
+        assetId: asset.id,
+        entityType: target.entityType,
+        entityId: target.entityId,
+        caption: target.caption
+      });
+      emitApiStateEvent(stateEventForMediaLink("createMediaAttachment", attachment));
+      sendJson(res, 200, { attachment: mediaAttachmentForApi(attachment) });
+      return;
+    }
+
+    const mediaAssetFileMatch = url.pathname.match(/^\/api\/media\/assets\/(\d+)\/file$/);
+    if (req.method === "GET" && mediaAssetFileMatch) {
+      const asset = mediaAssets.findById(Number(mediaAssetFileMatch[1]));
+      if (!asset) {
+        sendJson(res, 404, { error: "Media asset not found" });
+        return;
+      }
+
+      sendMediaFile(res, asset.mimeType, mediaStorage.absolutePath(asset.storagePath));
+      return;
+    }
+
+    const mediaAssetAnalyzeMatch = url.pathname.match(/^\/api\/media\/assets\/(\d+)\/analyze$/);
+    if (req.method === "POST" && mediaAssetAnalyzeMatch) {
+      const asset = mediaAssets.findById(Number(mediaAssetAnalyzeMatch[1]));
+      if (!asset) {
+        sendJson(res, 404, { error: "Media asset not found" });
+        return;
+      }
+      const body = reanalyzeMediaAssetBody.parse(await readJson(req));
+      const file = readFileSync(mediaStorage.absolutePath(asset.storagePath));
+      const analysis = await analyzeMedia({
+        buffer: file,
+        kind: asset.kind,
+        mimeType: asset.mimeType,
+        originalName: asset.originalName,
+        prompt: body.prompt
+      });
+      const updatedAsset = mediaAssets.updateDerivedText({ id: asset.id, ...analysis });
+      emitApiStateEvent({ operation: "reanalyzeMediaAsset", entityType: "media_asset", entityId: updatedAsset.id });
+      sendJson(res, 200, { asset: mediaAssetForApi(updatedAsset) });
+      return;
+    }
+
+    const mediaAssetMatch = url.pathname.match(/^\/api\/media\/assets\/(\d+)$/);
+    if (req.method === "GET" && mediaAssetMatch) {
+      const asset = mediaAssets.findById(Number(mediaAssetMatch[1]));
+      if (!asset) {
+        sendJson(res, 404, { error: "Media asset not found" });
+        return;
+      }
+      sendJson(res, 200, { asset: mediaAssetForApi(asset) });
+      return;
+    }
+
+    if (req.method === "PATCH" && mediaAssetMatch) {
+      const asset = mediaAssets.findById(Number(mediaAssetMatch[1]));
+      if (!asset) {
+        sendJson(res, 404, { error: "Media asset not found" });
+        return;
+      }
+      const body = updateMediaAssetBody.parse(await readJson(req));
+      const updatedAsset = mediaAssets.updateDerivedText({ id: asset.id, ...body });
+      emitApiStateEvent({ operation: "updateMediaAssetAnalysis", entityType: "media_asset", entityId: updatedAsset.id });
+      sendJson(res, 200, { asset: mediaAssetForApi(updatedAsset) });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/media/links") {
+      const target = parseMediaEntityTarget(url);
+      ensureMediaEntityExists(target.entityType, target.entityId);
+      sendJson(res, 200, { attachments: mediaLinks.listForEntity(target.entityType, target.entityId).map(mediaAttachmentForApi) });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/media/links") {
+      const body = createMediaLinkBody.parse(await readJson(req));
+      ensureMediaEntityExists(body.entityType, body.entityId);
+      if (!mediaAssets.findById(body.assetId)) {
+        sendJson(res, 404, { error: "Media asset not found" });
+        return;
+      }
+      const attachment = mediaLinks.create(body);
+      emitApiStateEvent(stateEventForMediaLink("createMediaLink", attachment));
+      sendJson(res, 200, { attachment: mediaAttachmentForApi(attachment) });
+      return;
+    }
+
+    const mediaLinkMatch = url.pathname.match(/^\/api\/media\/links\/(\d+)$/);
+    if (req.method === "PATCH" && mediaLinkMatch) {
+      const body = updateMediaLinkBody.parse(await readJson(req));
+      const attachment = mediaLinks.update({ id: Number(mediaLinkMatch[1]), ...body });
+      emitApiStateEvent(stateEventForMediaLink("updateMediaLink", attachment));
+      sendJson(res, 200, { attachment: mediaAttachmentForApi(attachment) });
+      return;
+    }
+
+    if (req.method === "DELETE" && mediaLinkMatch) {
+      const existing = mediaLinks.findById(Number(mediaLinkMatch[1]));
+      if (!existing) {
+        sendJson(res, 404, { error: "Media link not found" });
+        return;
+      }
+      mediaLinks.delete(existing.id);
+      emitApiStateEvent(stateEventForMediaLink("deleteMediaLink", existing));
+      sendJson(res, 200, { deleted: true, id: existing.id });
+      return;
+    }
+
+    if (req.method === "PATCH" && url.pathname === "/api/media/links/order") {
+      const body = reorderMediaLinksBody.parse(await readJson(req));
+      ensureMediaEntityExists(body.entityType, body.entityId);
+      const attachments = mediaLinks.reorderWithinEntity(body.entityType, body.entityId, body.linkIds);
+      emitApiStateEvent({
+        operation: "reorderMediaLinks",
+        entityType: "media_link",
+        ...stateScopeForMediaEntity(body.entityType, body.entityId)
+      });
+      sendJson(res, 200, { attachments: attachments.map(mediaAttachmentForApi) });
       return;
     }
 
@@ -674,7 +957,7 @@ function shutdown(): void {
 
 const updateTaskBody = z.object({
   title: z.string().trim().min(1).optional(),
-  status: z.enum(["open", "in_progress", "blocked", "done", "cancelled"]).optional(),
+  status: z.enum(["open", "done"]).optional(),
   priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
   notes: z.string().trim().min(1).nullable().optional(),
   dueAt: z.string().trim().min(1).nullable().optional()
@@ -741,11 +1024,13 @@ const updateCategoryBody = z.object({
 });
 
 const initiativeDateBody = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable();
+const projectPhaseBody = z.enum(["planning", "doing"]);
 
 const createInitiativeBody = z.object({
   categoryId: z.number().int().positive(),
   parentId: z.number().int().positive().nullable().optional(),
   type: z.enum(["idea", "project", "habit"]).optional(),
+  projectPhase: projectPhaseBody.optional(),
   name: z.string().trim().min(1),
   summary: z.string().trim().min(1).nullable().optional(),
   markdown: z.string().optional(),
@@ -757,6 +1042,7 @@ const updateInitiativeBody = z.object({
   categoryId: z.number().int().positive().optional(),
   parentId: z.number().int().positive().nullable().optional(),
   type: z.enum(["idea", "project", "habit"]).optional(),
+  projectPhase: projectPhaseBody.optional(),
   name: z.string().trim().min(1).optional(),
   status: z.enum(["active", "paused", "completed", "archived"]).optional(),
   summary: z.string().trim().min(1).nullable().optional(),
@@ -781,6 +1067,32 @@ const reorderInitiativesBody = z.union([
     })
     .transform((body) => ({ categoryId: body.categoryId, initiativeIds: body.projectIds }))
 ]);
+
+const createInitiativeRelationBody = z.object({
+  predecessorInitiativeId: z.number().int().positive(),
+  successorInitiativeId: z.number().int().positive(),
+  relationType: z.literal("precedes").optional()
+});
+
+const planningCanvasCoordinate = z.number().finite().min(0).max(100000);
+
+const createPlanningCanvasNodeBody = z.object({
+  canvasId: z.number().int().positive().optional(),
+  initiativeId: z.number().int().positive(),
+  x: planningCanvasCoordinate,
+  y: planningCanvasCoordinate,
+  width: planningCanvasCoordinate.nullable().optional(),
+  height: planningCanvasCoordinate.nullable().optional(),
+  collapsed: z.boolean().optional()
+});
+
+const updatePlanningCanvasNodeBody = z.object({
+  x: planningCanvasCoordinate.optional(),
+  y: planningCanvasCoordinate.optional(),
+  width: planningCanvasCoordinate.nullable().optional(),
+  height: planningCanvasCoordinate.nullable().optional(),
+  collapsed: z.boolean().optional()
+});
 
 const reorderTasksBody = z.union([
   z.object({
@@ -814,6 +1126,37 @@ const updateTaskChecklistItemBody = z.object({
 
 const reorderTaskChecklistItemsBody = z.object({
   itemIds: z.array(z.number().int().positive()).min(1)
+});
+
+const mediaEntityTypeBody = z.enum(["category", "initiative", "task", "calendar_entry", "app_chat_message"]);
+
+const createMediaLinkBody = z.object({
+  assetId: z.number().int().positive(),
+  entityType: mediaEntityTypeBody,
+  entityId: z.number().int().positive(),
+  caption: z.string().nullable().optional(),
+  role: z.string().trim().min(1).nullable().optional()
+});
+
+const updateMediaLinkBody = z.object({
+  caption: z.string().nullable().optional(),
+  role: z.string().trim().min(1).nullable().optional()
+});
+
+const updateMediaAssetBody = z.object({
+  summary: z.string().nullable().optional(),
+  textExcerpt: z.string().nullable().optional(),
+  transcript: z.string().nullable().optional()
+});
+
+const reanalyzeMediaAssetBody = z.object({
+  prompt: z.string().nullable().optional()
+});
+
+const reorderMediaLinksBody = z.object({
+  entityType: mediaEntityTypeBody,
+  entityId: z.number().int().positive(),
+  linkIds: z.array(z.number().int().positive()).min(1)
 });
 
 const voiceSessionBody = z.object({
@@ -892,7 +1235,7 @@ function parseConversationContextQuery(url: URL) {
   return { type: "task" as const, taskId: entityId };
 }
 
-function parseOptionalStatus(status: string | null) {
+function parseOptionalStatus(status: string | null): InitiativeStatus | undefined {
   if (status === "active" || status === "paused" || status === "completed" || status === "archived") {
     return status;
   }
@@ -906,6 +1249,25 @@ function parseOptionalInitiativeType(type: string | null): InitiativeType | unde
   }
 
   return undefined;
+}
+
+function parseOptionalInitiativeRelationType(type: string | null): "precedes" | undefined {
+  return type === "precedes" ? "precedes" : undefined;
+}
+
+function parsePlanningCanvasFilters(url: URL) {
+  return {
+    search: url.searchParams.get("search")?.trim() || undefined,
+    categoryId: parseOptionalPositiveInt(url.searchParams.get("categoryId")) ?? undefined,
+    type: parseOptionalInitiativeType(url.searchParams.get("type")),
+    status: parseOptionalStatus(url.searchParams.get("status")),
+    includeArchived: url.searchParams.get("includeArchived") === "true"
+  };
+}
+
+function parseOptionalGraphDepth(value: string | null): number | undefined {
+  const parsed = parseOptionalNonNegativeInt(value);
+  return parsed === null ? undefined : Math.min(parsed, 20);
 }
 
 function latestPromptLogCreatedAt(conversationId: number): string | null {
@@ -935,6 +1297,83 @@ function parseOptionalNonNegativeInt(value: string | null): number | null {
 
 function emitApiStateEvent(input: Omit<CreateStateEventInput, "source">): StateEvent {
   return stateEvents.create({ source: "api", ...input });
+}
+
+function parseMediaEntityTarget(url: URL): { entityType: MediaEntityType; entityId: number; caption?: string | null } {
+  const entityType = mediaEntityTypeBody.parse(url.searchParams.get("entityType"));
+  const entityId = parseOptionalPositiveInt(url.searchParams.get("entityId"));
+  if (!entityId) {
+    throw new Error("entityId is required for media attachments");
+  }
+  return {
+    entityType,
+    entityId,
+    caption: url.searchParams.get("caption")
+  };
+}
+
+function ensureMediaEntityExists(entityType: MediaEntityType, entityId: number): void {
+  if (entityType === "category") {
+    if (!categories.findById(entityId)) throw new Error(`Category not found: ${entityId}`);
+    return;
+  }
+  if (entityType === "initiative") {
+    if (!initiatives.findById(entityId)) throw new Error(`Initiative not found: ${entityId}`);
+    return;
+  }
+  if (entityType === "task") {
+    if (!tasks.findById(entityId)) throw new Error(`Task not found: ${entityId}`);
+    return;
+  }
+
+  throw new Error(`Media attachments for ${entityType} are not supported yet`);
+}
+
+function mediaAssetForApi(asset: MediaAsset): Omit<MediaAsset, "storagePath"> & { fileUrl: string } {
+  const { storagePath: _storagePath, ...safeAsset } = asset;
+  return {
+    ...safeAsset,
+    fileUrl: `/api/media/assets/${asset.id}/file`
+  };
+}
+
+function mediaAttachmentForApi(attachment: MediaAttachment): Omit<MediaAttachment, "asset"> & { asset: ReturnType<typeof mediaAssetForApi> } {
+  return {
+    ...attachment,
+    asset: mediaAssetForApi(attachment.asset)
+  };
+}
+
+function stateEventForMediaLink(operation: string, link: MediaLink | MediaAttachment): Omit<CreateStateEventInput, "source"> {
+  return {
+    operation,
+    entityType: "media_link",
+    entityId: link.id,
+    ...stateScopeForMediaEntity(link.entityType, link.entityId)
+  };
+}
+
+function stateScopeForMediaEntity(entityType: MediaEntityType, entityId: number): Pick<CreateStateEventInput, "categoryId" | "initiativeId" | "taskId"> {
+  if (entityType === "category") {
+    return { categoryId: entityId };
+  }
+  if (entityType === "initiative") {
+    const initiative = initiatives.findById(entityId);
+    return { initiativeId: entityId, categoryId: initiative?.categoryId ?? null };
+  }
+  if (entityType === "task") {
+    const task = tasks.findById(entityId);
+    return { taskId: entityId, initiativeId: task?.initiativeId ?? null };
+  }
+  return {};
+}
+
+function decodeHeaderValue(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function sendHtmlRedirect(res: http.ServerResponse, path: string): void {
@@ -1102,9 +1541,20 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "http://localhost:5173",
-    "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
-    "access-control-allow-headers": "content-type,x-dmax-trace-id",
+    "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
+    "access-control-allow-headers": "content-type,x-dmax-trace-id,x-file-name",
     "access-control-expose-headers": "x-dmax-trace-id"
   });
   res.end(JSON.stringify(body));
+}
+
+function sendMediaFile(res: http.ServerResponse, mimeType: string, filePath: string): void {
+  const stat = statSync(filePath);
+  res.writeHead(200, {
+    "content-type": mimeType,
+    "content-length": stat.size,
+    "cache-control": "private, max-age=3600",
+    "access-control-allow-origin": "http://localhost:5173"
+  });
+  createReadStream(filePath).pipe(res);
 }

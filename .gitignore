@@ -12,6 +12,7 @@ data/*.db-shm
 data/*.db-wal
 data/backups/
 data/diagnostics/
+data/media/
 data/google-calendar-oauth*.json
 data/openclaw-web-state/
 dist/
