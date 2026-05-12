@@ -42,6 +42,7 @@ describe("GoogleCalendarProvider", () => {
           id: "event-2",
           summary: "Recurring class",
           recurringEventId: "series-1",
+          originalStartTime: { dateTime: "2026-06-02T14:00:00+02:00" },
           start: { dateTime: "2026-06-02T14:00:00+02:00" },
           end: { dateTime: "2026-06-02T15:00:00+02:00" },
           organizer: { self: true }
@@ -76,8 +77,10 @@ describe("GoogleCalendarProvider", () => {
     expect(result.events[1]).toMatchObject({
       externalEventId: "event-2",
       recurring: true,
+      recurringEventId: "series-1",
       readOnlyReason: "recurring_not_supported"
     });
+    expect(result.events[1]?.originalStartAt).toBeTruthy();
   });
 
   it("reuses cached source event lists for repeated range requests", async () => {

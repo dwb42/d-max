@@ -11,6 +11,7 @@ import { assertCanLinkExistingProjectSpan } from "../calendar/calendar-linking-r
 import { GoogleCalendarAuth } from "../calendar/google-calendar-auth.js";
 import { GoogleCalendarProvider } from "../calendar/google-calendar-provider.js";
 import { CalendarEventBindingRepository } from "../repositories/calendar-event-bindings.js";
+import { CalendarEventVisibilityRepository } from "../repositories/calendar-event-visibility.js";
 import { CalendarEntryRepository } from "../repositories/calendar-entries.js";
 import { CalendarSourceRepository } from "../repositories/calendar-sources.js";
 import { InitiativeRelationRepository } from "../repositories/initiative-relations.js";
@@ -50,6 +51,7 @@ const db = openDatabase();
 const categories = new CategoryRepository(db);
 const calendarEntries = new CalendarEntryRepository(db);
 const calendarBindings = new CalendarEventBindingRepository(db);
+const calendarEventVisibility = new CalendarEventVisibilityRepository(db);
 const calendarSources = new CalendarSourceRepository(db);
 const googleCalendarAuth = new GoogleCalendarAuth();
 const initiatives = new InitiativeRepository(db);
@@ -129,11 +131,18 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/calendar") {
       const startDate = calendarDateQuery.parse(url.searchParams.get("start"));
       const endDate = calendarDateQuery.parse(url.searchParams.get("end"));
+      const hiddenSurface = calendarHiddenSurfaceQuery.parse(url.searchParams.get("surface") ?? undefined);
       if (startDate > endDate) {
         sendJson(res, 400, { error: "Calendar start cannot be after end" });
         return;
       }
-      sendJson(res, 200, await new CalendarService(db).getView({ startDate, endDate }));
+      sendJson(res, 200, await new CalendarService(db).getView({ startDate, endDate }, { hiddenSurface }));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/calendar/hidden-events") {
+      const surface = calendarEventVisibilitySurface.parse(url.searchParams.get("surface"));
+      sendJson(res, 200, { hiddenEvents: calendarEventVisibility.list({ surfaces: [surface, "global"] }) });
       return;
     }
 
@@ -215,6 +224,39 @@ const server = http.createServer(async (req, res) => {
         taskId: result.entry?.taskId ?? null
       });
       sendJson(res, 200, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/calendar/google-only-events") {
+      const body = createGoogleOnlyEventBody.parse(await readJson(req));
+      const source = requireWritableCalendarSource(body.calendarSourceId);
+      const event = await new GoogleCalendarProvider().createEvent(source, {
+        title: body.title,
+        startAt: body.startAt,
+        endAt: body.endAt,
+        allDay: body.allDay
+      });
+      sendJson(res, 200, { event });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/calendar/hidden-events") {
+      const body = createCalendarEventVisibilityBody.parse(await readJson(req));
+      const hiddenEvent = calendarEventVisibility.create(body);
+      emitApiStateEvent({ operation: "hideCalendarEvent", entityType: "calendar_event_visibility", entityId: hiddenEvent.id });
+      sendJson(res, 200, { hiddenEvent });
+      return;
+    }
+
+    const calendarEventVisibilityMatch = url.pathname.match(/^\/api\/calendar\/hidden-events\/(\d+)$/);
+    if (req.method === "DELETE" && calendarEventVisibilityMatch) {
+      const hiddenEvent = calendarEventVisibility.delete(Number(calendarEventVisibilityMatch[1]));
+      if (!hiddenEvent) {
+        sendJson(res, 404, { error: "Hidden calendar event not found" });
+        return;
+      }
+      emitApiStateEvent({ operation: "unhideCalendarEvent", entityType: "calendar_event_visibility", entityId: hiddenEvent.id });
+      sendJson(res, 200, { deleted: true, id: hiddenEvent.id });
       return;
     }
 
@@ -1054,6 +1096,9 @@ const updateTaskBody = z.object({
 const calendarDateQuery = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
 const calendarDateTime = z.string().trim().min(1);
 const calendarEntryType = z.enum(["initiative_focus", "task_work", "standalone"]);
+const calendarEventVisibilitySurface = z.enum(["planning_canvas", "calendar", "global"]);
+const calendarHiddenSurfaceQuery = calendarEventVisibilitySurface.nullish().transform((value) => value ?? null);
+const calendarEventVisibilityHiddenScope = z.enum(["event", "recurring_instance", "recurring_series"]);
 
 const createCalendarEntryBody = z.object({
   type: calendarEntryType,
@@ -1091,6 +1136,29 @@ const updateGoogleOnlyEventBody = z.object({
   startAt: z.string().trim().min(1),
   endAt: z.string().trim().min(1),
   allDay: z.boolean()
+});
+
+const createGoogleOnlyEventBody = z.object({
+  calendarSourceId: z.number().int().positive(),
+  title: z.string().trim().min(1),
+  startAt: z.string().trim().min(1),
+  endAt: z.string().trim().min(1),
+  allDay: z.boolean()
+});
+
+const createCalendarEventVisibilityBody = z.object({
+  provider: z.literal("google").optional(),
+  surface: calendarEventVisibilitySurface,
+  hiddenScope: calendarEventVisibilityHiddenScope,
+  calendarSourceId: z.number().int().positive().nullable().optional(),
+  externalCalendarId: z.string().trim().min(1),
+  externalEventId: z.string().trim().min(1).nullable().optional(),
+  recurringEventId: z.string().trim().min(1).nullable().optional(),
+  originalStartAt: z.string().trim().min(1).nullable().optional(),
+  iCalUID: z.string().trim().min(1).nullable().optional(),
+  titleSnapshot: z.string().trim().min(1),
+  startAtSnapshot: z.string().trim().min(1).nullable().optional(),
+  endAtSnapshot: z.string().trim().min(1).nullable().optional()
 });
 
 const linkGoogleEventBody = z.object({

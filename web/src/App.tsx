@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   DragEvent,
@@ -21,6 +21,8 @@ import {
   Clock,
   Copy,
   ExternalLink,
+  Eye,
+  EyeOff,
   FileText,
   GitPullRequestArrow,
   GripVertical,
@@ -51,8 +53,15 @@ import {
 import { Room, RoomEvent, Track } from "livekit-client";
 import type { RemoteTrack } from "livekit-client";
 import {
+  classifyPlanningCanvasSpecialGoogleEvent
+} from "./planning-canvas-special-google-events.js";
+import type {
+  PlanningCanvasSpecialGoogleEventMatch
+} from "./planning-canvas-special-google-events.js";
+import {
   createCategory,
   createGoogleEventFromDmax,
+  createGoogleOnlyEvent,
   createGoogleCalendarAuthUrl,
   createCalendarSource,
   createChatConversation,
@@ -67,6 +76,7 @@ import {
   deleteMediaAttachment,
   deleteTaskChecklistItem,
   disconnectGoogleCalendar,
+  fetchCalendarView,
   fetchChatActivity,
   fetchChatConversations,
   fetchChatMessages,
@@ -74,6 +84,7 @@ import {
   fetchGoogleCalendarAccounts,
   fetchGoogleCalendars,
   fetchGoogleCalendarAuthStatus,
+  fetchHiddenCalendarEvents,
   fetchInitiativeGraph,
   fetchOpenClawStatus,
   fetchOverview,
@@ -92,16 +103,19 @@ import {
   reorderTasks,
   subscribeStateEvents,
   streamChatMessage,
+  hideCalendarEvent,
   transcribeVoiceMessage,
   updateCalendarSource,
   updateCategory,
   updateInitiative,
+  updateGoogleOnlyEvent,
   updateMediaAssetAnalysis,
   updateMediaAttachment,
   updatePlanningCanvasNode,
   updateTask,
   updateTaskChecklistItem,
   updateTaskStatus,
+  unhideCalendarEvent,
   unlinkCalendarBinding,
   uploadMediaAttachment
 } from "./api.js";
@@ -109,6 +123,9 @@ import type {
   AppOverview,
   AppConversation,
   Category,
+  CalendarViewEvent,
+  CalendarEventVisibility,
+  CalendarEventVisibilityHiddenScope,
   CalendarSource,
   ConversationContext,
   GoogleCalendarAccountStatus,
@@ -224,6 +241,7 @@ type RelationshipCreateDraft = {
 };
 type PlanningCanvasRelatedProjectDirection = "predecessor" | "successor";
 type PlanningCanvasTimeDragMode = "move" | "resize-start" | "resize-end" | "move-start" | "move-end";
+type PlanningCanvasGoogleTimeDragMode = "move" | "resize-start" | "resize-end";
 type PlanningCanvasTimeDragState = {
   nodeId: number;
   initiativeId: number;
@@ -239,6 +257,39 @@ type PlanningCanvasTimeDragState = {
   draftStartDate: string | null;
   draftEndDate: string | null;
   moved: boolean;
+};
+type PlanningCanvasGoogleTimeDragState = {
+  eventId: string;
+  pointerId: number;
+  mode: PlanningCanvasGoogleTimeDragMode;
+  startClientX: number;
+  originStartDate: string;
+  originEndDate: string;
+  draftStartDate: string;
+  draftEndDate: string;
+  moved: boolean;
+};
+type PlanningCanvasGoogleTimeChangeDraft = {
+  event: Extract<CalendarViewEvent, { source: "google" }>;
+  originStartDate: string;
+  originEndDate: string;
+  nextStartDate: string;
+  nextEndDate: string;
+};
+type PlanningCanvasGoogleCreateDragState = {
+  pointerId: number;
+  row: number;
+  startClientX: number;
+  startDate: string;
+  draftEndDate: string;
+  moved: boolean;
+};
+type PlanningCanvasGoogleCreateDraft = {
+  row: number;
+  title: string;
+  calendarSourceId: number | null;
+  startDate: string;
+  endDate: string;
 };
 type PlanningCanvasGroupDragState = {
   pointerId: number;
@@ -3402,7 +3453,17 @@ function PlanningCanvasView(props: {
   const [canvasZoom, setCanvasZoom] = useState(1);
   const [timeDrag, setTimeDrag] = useState<PlanningCanvasTimeDragState | null>(null);
   const [groupDrag, setGroupDrag] = useState<PlanningCanvasGroupDragState | null>(null);
+  const [googleTimeDrag, setGoogleTimeDrag] = useState<PlanningCanvasGoogleTimeDragState | null>(null);
+  const [googleCreateDrag, setGoogleCreateDrag] = useState<PlanningCanvasGoogleCreateDragState | null>(null);
+  const [pendingGoogleTimeChange, setPendingGoogleTimeChange] = useState<PlanningCanvasGoogleTimeChangeDraft | null>(null);
+  const [pendingGoogleCreate, setPendingGoogleCreate] = useState<PlanningCanvasGoogleCreateDraft | null>(null);
+  const [googleMutationBusy, setGoogleMutationBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarViewEvent[]>([]);
+  const [calendarSources, setCalendarSources] = useState<CalendarSource[]>([]);
+  const [hiddenGoogleEvents, setHiddenGoogleEvents] = useState<CalendarEventVisibility[]>([]);
+  const [showHiddenGoogleEvents, setShowHiddenGoogleEvents] = useState(false);
+  const [recurringHideTarget, setRecurringHideTarget] = useState<Extract<CalendarViewEvent, { source: "google" }> | null>(null);
 
   const loadCanvas = async () => {
     try {
@@ -3428,20 +3489,98 @@ function PlanningCanvasView(props: {
   const weekLabels = useMemo(() => planningCanvasWeeks(canvasRange), [canvasRange]);
   const weekendSpans = useMemo(() => planningCanvasWeekends(canvasRange), [canvasRange]);
   const todayX = useMemo(() => planningCanvasDateX(dateOnlyLocal(new Date()), canvasRange), [canvasRange]);
-  const timeVisuals = useMemo(() => nodes.map((node) => planningCanvasTimeVisual(node, canvasRange)).filter(isPlanningCanvasTimeVisual), [nodes, canvasRange]);
+  const baseTimeVisuals = useMemo(() => nodes.map((node) => planningCanvasTimeVisual(node, canvasRange)).filter(isPlanningCanvasTimeVisual), [nodes, canvasRange]);
+  const googleTimeVisuals = useMemo(
+    () => layoutPlanningCanvasGoogleTimeVisuals(
+      calendarEvents.filter((event) => isPlanningCanvasGoogleTimeEvent(event, nodes)),
+      canvasRange
+    ),
+    [calendarEvents, canvasRange, nodes]
+  );
+  const childcareGapSpans = useMemo(() => planningCanvasChildcareGapSpans(googleTimeVisuals), [googleTimeVisuals]);
+  const childcareOverlapSpans = useMemo(() => planningCanvasChildcareOverlapSpans(googleTimeVisuals), [googleTimeVisuals]);
+  const googleLaneCount = Math.max(1, ...googleTimeVisuals.map((visual) => visual.row + 1));
+  const writableCalendarSources = useMemo(() => calendarSources.filter((source) => source.enabled && !source.readOnly), [calendarSources]);
+  const googleLaneRows = useMemo(() => Array.from({ length: googleLaneCount }, (_, row) => row), [googleLaneCount]);
+  const googleCreatePreview = googleCreateDrag
+    ? planningCanvasGoogleCreatePreview(googleCreateDrag, canvasRange)
+    : pendingGoogleCreate
+      ? planningCanvasGoogleCreateDraftPreview(pendingGoogleCreate, canvasRange)
+      : null;
+  const timeVisuals = useMemo(
+    () => baseTimeVisuals.map((visual) => ({ ...visual, top: visual.top + googleLaneCount * PLANNING_CANVAS_TIME_LANE_HEIGHT })),
+    [baseTimeVisuals, googleLaneCount]
+  );
   const timeVisualByInitiative = useMemo(() => new Map(timeVisuals.map((visual) => [visual.initiativeId, visual])), [timeVisuals]);
   const visibleUnmappedInitiatives = useMemo(
     () => (view?.unmappedInitiatives ?? []).filter(({ initiative }) => initiative.status !== "completed" && initiative.status !== "archived"),
     [view?.unmappedInitiatives]
   );
   const stageWidth = canvasRange.width * canvasZoom;
-  const stageHeight = Math.max(980, Math.max(0, ...nodes.map((node) => planningCanvasTimeLaneTop(node.y) + PLANNING_CANVAS_TIME_BAR_HEIGHT + 160)));
+  const stageHeight = Math.max(980, Math.max(0, ...timeVisuals.map((visual) => visual.top + PLANNING_CANVAS_TIME_BAR_HEIGHT + 160)));
   const edges = view?.relationEdges ?? [];
   const relationGroups = useMemo(() => buildPlanningCanvasRelationGroups(nodes, edges), [nodes, edges]);
 
   useEffect(() => {
     canvasZoomRef.current = canvasZoom;
   }, [canvasZoom]);
+
+  const loadPlanningCanvasCalendar = useCallback(async () => {
+    const start = dateOnlyFromUtc(canvasRange.start);
+    const end = dateOnlyFromUtc(canvasRange.end);
+    const [calendar, hiddenEvents, sources] = await Promise.all([
+      fetchCalendarView(start, end, { surface: "planning_canvas" }),
+      fetchHiddenCalendarEvents("planning_canvas"),
+      fetchCalendarSources()
+    ]);
+    setCalendarEvents(calendar.events);
+    setHiddenGoogleEvents(hiddenEvents);
+    setCalendarSources(sources);
+  }, [canvasRange]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadPlanningCanvasCalendar()
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Google Calendar konnte nicht geladen werden.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadPlanningCanvasCalendar]);
+
+  const hideGoogleEventFromCanvas = async (event: Extract<CalendarViewEvent, { source: "google" }>, hiddenScope: CalendarEventVisibilityHiddenScope) => {
+    try {
+      setError(null);
+      const hiddenEvent = await hideCalendarEvent({
+        surface: "planning_canvas",
+        hiddenScope,
+        calendarSourceId: event.sourceId,
+        externalCalendarId: event.externalCalendarId,
+        externalEventId: event.externalEventId,
+        recurringEventId: event.recurringEventId,
+        originalStartAt: hiddenScope === "recurring_instance" ? event.originalStartAt ?? event.startAt : event.originalStartAt,
+        iCalUID: event.iCalUID,
+        titleSnapshot: event.title,
+        startAtSnapshot: event.startAt,
+        endAtSnapshot: event.endAt
+      });
+      setRecurringHideTarget(null);
+      await loadPlanningCanvasCalendar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google Event konnte nicht ausgeblendet werden.");
+    }
+  };
+
+  const restoreHiddenGoogleEvent = async (hiddenEvent: CalendarEventVisibility) => {
+    try {
+      setError(null);
+      await unhideCalendarEvent(hiddenEvent.id);
+      await loadPlanningCanvasCalendar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google Event konnte nicht wieder eingeblendet werden.");
+    }
+  };
 
   const setZoomAroundPoint = (nextZoomInput: number, clientX?: number, clientY?: number) => {
     const wrap = stageRef.current;
@@ -3479,7 +3618,7 @@ function PlanningCanvasView(props: {
         canvasId: view.canvas.id,
         initiativeId,
         x: clampCanvasCoordinate(planningCanvasDateX(startDate, canvasRange) ?? x),
-        y: clampCanvasCoordinate(y),
+        y: clampCanvasCoordinate(planningCanvasStorageYFromCanvasY(y, googleLaneCount)),
         width: null,
         height: null
       });
@@ -3741,6 +3880,191 @@ function PlanningCanvasView(props: {
     void loadCanvas();
   };
 
+  const applyGoogleTimeDragPreview = (drag: PlanningCanvasGoogleTimeDragState, clientX: number): PlanningCanvasGoogleTimeDragState => {
+    const dayDelta = planningCanvasDayDeltaFromPointer(drag.startClientX, clientX, canvasZoom);
+    const nextDates = planningCanvasShiftGoogleDatesForDrag(drag, dayDelta);
+    const moved = drag.moved || Math.abs(clientX - drag.startClientX) > 3 || dayDelta !== 0;
+    setCalendarEvents((current) =>
+      current.map((event) =>
+        event.source === "google" && event.id === drag.eventId
+          ? { ...event, startAt: nextDates.startDate, endAt: nextDates.endDate }
+          : event
+      )
+    );
+    return { ...drag, draftStartDate: nextDates.startDate, draftEndDate: nextDates.endDate, moved };
+  };
+
+  const startGoogleTimeDrag = (event: ReactPointerEvent<HTMLElement>, visual: PlanningCanvasGoogleTimeVisual, mode: PlanningCanvasGoogleTimeDragMode) => {
+    if (!visual.event.editable || googleMutationBusy) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setGoogleTimeDrag({
+      eventId: visual.event.id,
+      pointerId: event.pointerId,
+      mode,
+      startClientX: event.clientX,
+      originStartDate: datePart(visual.event.startAt),
+      originEndDate: datePart(visual.event.endAt),
+      draftStartDate: datePart(visual.event.startAt),
+      draftEndDate: datePart(visual.event.endAt),
+      moved: false
+    });
+  };
+
+  const onGoogleTimePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
+    if (!googleTimeDrag || googleTimeDrag.pointerId !== event.pointerId) return;
+    setGoogleTimeDrag(applyGoogleTimeDragPreview(googleTimeDrag, event.clientX));
+  };
+
+  const finishGoogleTimeDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    if (!googleTimeDrag || googleTimeDrag.pointerId !== event.pointerId) return;
+    const finalDrag = applyGoogleTimeDragPreview(googleTimeDrag, event.clientX);
+    setGoogleTimeDrag(null);
+    const changed = finalDrag.draftStartDate !== finalDrag.originStartDate || finalDrag.draftEndDate !== finalDrag.originEndDate;
+    const target = calendarEvents.find((candidate): candidate is Extract<CalendarViewEvent, { source: "google" }> =>
+      candidate.source === "google" && candidate.id === finalDrag.eventId
+    );
+    if (!target) {
+      void loadPlanningCanvasCalendar();
+      return;
+    }
+    if (!changed) {
+      if (!finalDrag.moved && target.htmlLink) {
+        window.open(target.htmlLink, "_blank", "noopener,noreferrer");
+      }
+      return;
+    }
+    setPendingGoogleTimeChange({
+      event: {
+        ...target,
+        startAt: finalDrag.originStartDate,
+        endAt: finalDrag.originEndDate
+      },
+      originStartDate: finalDrag.originStartDate,
+      originEndDate: finalDrag.originEndDate,
+      nextStartDate: finalDrag.draftStartDate,
+      nextEndDate: finalDrag.draftEndDate
+    });
+  };
+
+  const cancelGoogleTimeChange = () => {
+    const draft = pendingGoogleTimeChange;
+    setPendingGoogleTimeChange(null);
+    if (!draft) {
+      void loadPlanningCanvasCalendar();
+      return;
+    }
+    setCalendarEvents((current) =>
+      current.map((event) =>
+        event.source === "google" && event.id === draft.event.id
+          ? { ...event, startAt: draft.originStartDate, endAt: draft.originEndDate }
+          : event
+      )
+    );
+  };
+
+  const confirmGoogleTimeChange = async () => {
+    if (!pendingGoogleTimeChange) return;
+    try {
+      setGoogleMutationBusy(true);
+      setError(null);
+      await updateGoogleOnlyEvent({
+        calendarSourceId: pendingGoogleTimeChange.event.sourceId,
+        externalEventId: pendingGoogleTimeChange.event.externalEventId,
+        title: pendingGoogleTimeChange.event.title,
+        startAt: pendingGoogleTimeChange.nextStartDate,
+        endAt: pendingGoogleTimeChange.nextEndDate,
+        allDay: true
+      });
+      setPendingGoogleTimeChange(null);
+      await loadPlanningCanvasCalendar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google Event konnte nicht gespeichert werden.");
+      cancelGoogleTimeChange();
+    } finally {
+      setGoogleMutationBusy(false);
+    }
+  };
+
+  const startGoogleCreateDrag = (event: ReactPointerEvent<HTMLDivElement>, row: number) => {
+    if (googleMutationBusy || pendingGoogleCreate || pendingGoogleTimeChange) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const rect = stage.getBoundingClientRect();
+    const canvasX = (event.clientX - rect.left + stage.scrollLeft) / canvasZoom;
+    const startDate = planningCanvasDateFromX(canvasX, canvasRange);
+    if (!startDate) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setGoogleCreateDrag({
+      pointerId: event.pointerId,
+      row,
+      startClientX: event.clientX,
+      startDate,
+      draftEndDate: startDate,
+      moved: false
+    });
+  };
+
+  const applyGoogleCreateDragPreview = (drag: PlanningCanvasGoogleCreateDragState, clientX: number): PlanningCanvasGoogleCreateDragState => {
+    const dayDelta = Math.max(0, planningCanvasDayDeltaFromPointer(drag.startClientX, clientX, canvasZoom));
+    return {
+      ...drag,
+      draftEndDate: shiftDate(drag.startDate, dayDelta),
+      moved: drag.moved || Math.abs(clientX - drag.startClientX) > 3 || dayDelta > 0
+    };
+  };
+
+  const onGoogleCreatePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!googleCreateDrag || googleCreateDrag.pointerId !== event.pointerId) return;
+    setGoogleCreateDrag(applyGoogleCreateDragPreview(googleCreateDrag, event.clientX));
+  };
+
+  const finishGoogleCreateDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!googleCreateDrag || googleCreateDrag.pointerId !== event.pointerId) return;
+    const finalDrag = applyGoogleCreateDragPreview(googleCreateDrag, event.clientX);
+    setGoogleCreateDrag(null);
+    if (finalDrag.draftEndDate <= finalDrag.startDate) return;
+    const rowSourceId = googleTimeVisuals.find((visual) => visual.row === finalDrag.row && visual.event.editable)?.event.sourceId ?? null;
+    const defaultSource = writableCalendarSources.find((source) => source.id === rowSourceId) ?? writableCalendarSources[0] ?? null;
+    setPendingGoogleCreate({
+      row: finalDrag.row,
+      title: "Neues Google Event",
+      calendarSourceId: defaultSource?.id ?? null,
+      startDate: finalDrag.startDate,
+      endDate: finalDrag.draftEndDate
+    });
+  };
+
+  const cancelGoogleCreate = () => {
+    setGoogleCreateDrag(null);
+    setPendingGoogleCreate(null);
+  };
+
+  const confirmGoogleCreate = async () => {
+    if (!pendingGoogleCreate?.calendarSourceId || !pendingGoogleCreate.title.trim()) return;
+    try {
+      setGoogleMutationBusy(true);
+      setError(null);
+      await createGoogleOnlyEvent({
+        calendarSourceId: pendingGoogleCreate.calendarSourceId,
+        title: pendingGoogleCreate.title.trim(),
+        startAt: pendingGoogleCreate.startDate,
+        endAt: pendingGoogleCreate.endDate,
+        allDay: true
+      });
+      setPendingGoogleCreate(null);
+      await loadPlanningCanvasCalendar();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google Event konnte nicht erstellt werden.");
+      setPendingGoogleCreate(null);
+    } finally {
+      setGoogleMutationBusy(false);
+    }
+  };
+
   return (
     <section className="planning-canvas-view">
       <aside className="planning-canvas-parking">
@@ -3812,6 +4136,44 @@ function PlanningCanvasView(props: {
           ))}
           {view && visibleUnmappedInitiatives.length === 0 ? <EmptyState title="No unplaced initiatives" /> : null}
         </div>
+        {hiddenGoogleEvents.length > 0 ? (
+          <div className="planning-canvas-parking-bottom">
+            <div className="planning-canvas-hidden-panel">
+              <button
+                type="button"
+                className="planning-canvas-hidden-toggle"
+                title="Ausgeblendete Google Events anzeigen"
+                aria-label="Ausgeblendete Google Events anzeigen"
+                onClick={() => setShowHiddenGoogleEvents((current) => !current)}
+              >
+                <Eye size={13} />
+                <span>{hiddenGoogleEvents.length} Google Termine ausgeblendet</span>
+              </button>
+              {showHiddenGoogleEvents ? (
+                <div className="planning-canvas-hidden-popover">
+                  <strong>Ausgeblendete Google Events</strong>
+                  {hiddenGoogleEvents.map((hiddenEvent) => (
+                    <div className="planning-canvas-hidden-row" key={hiddenEvent.id}>
+                      <span>
+                        {hiddenEvent.titleSnapshot}
+                        <small>{planningCanvasHiddenEventMeta(hiddenEvent)}</small>
+                      </span>
+                      <button
+                        type="button"
+                        className="icon-button compact"
+                        title="Wieder einblenden"
+                        aria-label={`${hiddenEvent.titleSnapshot} wieder einblenden`}
+                        onClick={() => void restoreHiddenGoogleEvent(hiddenEvent)}
+                      >
+                        <Eye size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </aside>
 
       <div
@@ -3878,6 +4240,134 @@ function PlanningCanvasView(props: {
               </div>
             ) : null}
             <div className="planning-canvas-time-layer">
+              {googleLaneRows.map((row) => (
+                <div
+                  key={`google-row-${row}`}
+                  className="planning-canvas-google-row-dropzone"
+                  style={{ top: PLANNING_CANVAS_TIME_HEADER_HEIGHT + row * PLANNING_CANVAS_TIME_LANE_HEIGHT }}
+                  onPointerDown={(event) => startGoogleCreateDrag(event, row)}
+                  onPointerMove={onGoogleCreatePointerMove}
+                  onPointerUp={finishGoogleCreateDrag}
+                  onPointerCancel={cancelGoogleCreate}
+                >
+                </div>
+              ))}
+              {childcareGapSpans.map((span) => (
+                <div
+                  key={span.id}
+                  className="planning-canvas-childcare-lane-span gap"
+                  style={{ left: span.left * canvasZoom, top: PLANNING_CANVAS_TIME_HEADER_HEIGHT, width: span.width * canvasZoom }}
+                  title={span.title}
+                  aria-hidden="true"
+                />
+              ))}
+              {childcareOverlapSpans.map((span) => (
+                <div
+                  key={span.id}
+                  className="planning-canvas-childcare-lane-span overlap"
+                  style={{ left: span.left * canvasZoom, top: PLANNING_CANVAS_TIME_HEADER_HEIGHT, width: span.width * canvasZoom }}
+                  title={span.title}
+                  aria-hidden="true"
+                />
+              ))}
+              {googleLaneRows.map((row) => (
+                <span
+                  key={`google-row-icon-${row}`}
+                  className="planning-canvas-google-row-icon"
+                  style={{ top: PLANNING_CANVAS_TIME_HEADER_HEIGHT + row * PLANNING_CANVAS_TIME_LANE_HEIGHT + (PLANNING_CANVAS_TIME_LANE_HEIGHT - 18) / 2 }}
+                  aria-hidden="true"
+                >
+                  <GoogleCalendarGlyph />
+                </span>
+              ))}
+              {googleTimeVisuals.map((visual) => (
+                <div
+                  key={visual.id}
+                  className={`planning-canvas-google-time-bar ${visual.event.editable ? "editable" : "readonly"} ${visual.special ? `special ${visual.special.className}` : ""} ${visual.hasChildcareConflict ? "childcare-conflict" : ""}`}
+                  style={{ left: visual.left * canvasZoom, top: visual.top, width: visual.width * canvasZoom, backgroundColor: visual.color, color: visual.special?.textColor }}
+                  title={visual.title}
+                  aria-label={visual.title}
+                  role={visual.htmlLink ? "link" : "group"}
+                  tabIndex={visual.htmlLink ? 0 : undefined}
+                  onPointerDown={(event) => startGoogleTimeDrag(event, visual, "move")}
+                  onPointerMove={onGoogleTimePointerMove}
+                  onPointerUp={finishGoogleTimeDrag}
+                  onPointerCancel={() => {
+                    setGoogleTimeDrag(null);
+                    void loadPlanningCanvasCalendar();
+                  }}
+                  onClick={(event) => {
+                    if (visual.event.editable || (event.target as HTMLElement).closest("button")) return;
+                    if (visual.htmlLink) window.open(visual.htmlLink, "_blank", "noopener,noreferrer");
+                  }}
+                  onKeyDown={(event) => {
+                    if ((event.key === "Enter" || event.key === " ") && visual.htmlLink) {
+                      event.preventDefault();
+                      window.open(visual.htmlLink, "_blank", "noopener,noreferrer");
+                    }
+                  }}
+                >
+                  <span className="planning-canvas-time-bar-label">{visual.name}</span>
+                  {visual.event.editable ? (
+                    <>
+                      <button
+                        type="button"
+                        className="planning-canvas-google-time-handle start"
+                        aria-label={`Startdatum fuer ${visual.name} aendern`}
+                        title="Startdatum ändern"
+                        onPointerDown={(event) => startGoogleTimeDrag(event, visual, "resize-start")}
+                        onPointerMove={onGoogleTimePointerMove}
+                        onPointerUp={finishGoogleTimeDrag}
+                        onPointerCancel={() => {
+                          setGoogleTimeDrag(null);
+                          void loadPlanningCanvasCalendar();
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                      />
+                      <button
+                        type="button"
+                        className="planning-canvas-google-time-handle end"
+                        aria-label={`Enddatum fuer ${visual.name} aendern`}
+                        title="Enddatum ändern"
+                        onPointerDown={(event) => startGoogleTimeDrag(event, visual, "resize-end")}
+                        onPointerMove={onGoogleTimePointerMove}
+                        onPointerUp={finishGoogleTimeDrag}
+                        onPointerCancel={() => {
+                          setGoogleTimeDrag(null);
+                          void loadPlanningCanvasCalendar();
+                        }}
+                        onClick={(event) => event.stopPropagation()}
+                      />
+                    </>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="planning-canvas-google-hide-button"
+                    title="Dieses Event ausblenden"
+                    aria-label={`${visual.name} ausblenden`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (visual.event.recurring) {
+                        setRecurringHideTarget(visual.event);
+                      } else {
+                        void hideGoogleEventFromCanvas(visual.event, "event");
+                      }
+                    }}
+                  >
+                    <EyeOff size={13} />
+                  </button>
+                </div>
+              ))}
+              {googleCreatePreview ? (
+                <div
+                  className="planning-canvas-google-create-preview"
+                  style={{ left: googleCreatePreview.left * canvasZoom, top: googleCreatePreview.top, width: googleCreatePreview.width * canvasZoom }}
+                  aria-hidden="true"
+                >
+                  <span>{pendingGoogleCreate ? pendingGoogleCreate.title : "Neues Google Event"}</span>
+                </div>
+              ) : null}
               {timeVisuals.map((visual) =>
                 visual.kind === "bar" ? (
                   <div
@@ -3894,6 +4384,7 @@ function PlanningCanvasView(props: {
                     onPointerCancel={cancelTimeDrag}
                   >
                     {visual.isLocked ? <span className="planning-canvas-time-lock-badge" aria-hidden="true"><Lock size={10} /></span> : null}
+                    {visual.hasGoogleCalendarBinding ? <GoogleCalendarTimebarBadge /> : null}
                     <span className="planning-canvas-time-bar-label">
                       {visual.name}
                     </span>
@@ -4038,6 +4529,49 @@ function PlanningCanvasView(props: {
           </div>
         </div>
       </div>
+
+      {recurringHideTarget ? (
+        <section className="compact-modal planning-canvas-hide-modal" role="dialog" aria-modal="true" aria-label="Recurring Google Event ausblenden">
+          <header>
+            <div>
+              <span>Google Serie</span>
+              <h2>{recurringHideTarget.title}</h2>
+            </div>
+            <button type="button" className="icon-button" aria-label="Schliessen" onClick={() => setRecurringHideTarget(null)}>
+              <X size={18} />
+            </button>
+          </header>
+          <p>Dieses Event gehoert zu einer wiederkehrenden Serie.</p>
+          <div className="planning-canvas-hide-options">
+            <button type="button" className="secondary-action compact" onClick={() => void hideGoogleEventFromCanvas(recurringHideTarget, "recurring_instance")}>
+              Nur dieses Vorkommen ausblenden
+            </button>
+            <button type="button" className="primary-action compact" onClick={() => void hideGoogleEventFromCanvas(recurringHideTarget, "recurring_series")}>
+              Ganze Serie ausblenden
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {pendingGoogleTimeChange ? (
+        <PlanningCanvasGoogleEventChangeModal
+          draft={pendingGoogleTimeChange}
+          busy={googleMutationBusy}
+          onCancel={cancelGoogleTimeChange}
+          onConfirm={() => void confirmGoogleTimeChange()}
+        />
+      ) : null}
+
+      {pendingGoogleCreate ? (
+        <PlanningCanvasGoogleEventCreateModal
+          draft={pendingGoogleCreate}
+          sources={writableCalendarSources}
+          busy={googleMutationBusy}
+          onChange={setPendingGoogleCreate}
+          onCancel={cancelGoogleCreate}
+          onConfirm={() => void confirmGoogleCreate()}
+        />
+      ) : null}
 
       {editingNode ? (
         <PlanningCanvasProjectModal
@@ -4251,6 +4785,117 @@ function PlanningCanvasProjectModal(props: {
         </footer>
       </section>
     </div>
+  );
+}
+
+function PlanningCanvasGoogleEventChangeModal(props: {
+  draft: PlanningCanvasGoogleTimeChangeDraft;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const currentRange = `${formatDateOnly(props.draft.originStartDate)} - ${formatDateOnly(props.draft.originEndDate)}`;
+  const nextRange = `${formatDateOnly(props.draft.nextStartDate)} - ${formatDateOnly(props.draft.nextEndDate)}`;
+  return (
+    <div className="planning-canvas-modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
+      <section className="planning-canvas-modal planning-canvas-google-event-modal" role="dialog" aria-modal="true" aria-label="Google Event verschieben" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="planning-canvas-modal-header">
+          <div>
+            <span>Google Event</span>
+            <h2>Änderung bestätigen</h2>
+          </div>
+          <button type="button" className="icon-button" aria-label="Schliessen" disabled={props.busy} onClick={props.onCancel}>
+            <X size={18} />
+          </button>
+        </header>
+        <div className="planning-canvas-modal-form">
+          <p>
+            Möchtest du das Event <strong>{props.draft.event.title}</strong> wirklich von <strong>{currentRange}</strong> auf <strong>{nextRange}</strong> verschieben?
+          </p>
+        </div>
+        <footer className="planning-canvas-modal-actions">
+          <button type="button" className="secondary-action compact" disabled={props.busy} onClick={props.onCancel}>Abbrechen</button>
+          <button type="button" className="primary-action compact" disabled={props.busy} onClick={props.onConfirm}>Änderung speichern</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function PlanningCanvasGoogleEventCreateModal(props: {
+  draft: PlanningCanvasGoogleCreateDraft;
+  sources: CalendarSource[];
+  busy: boolean;
+  onChange: (draft: PlanningCanvasGoogleCreateDraft) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dateRange = `${formatDateOnly(props.draft.startDate)} - ${formatDateOnly(props.draft.endDate)}`;
+  const canSave = Boolean(props.draft.title.trim() && props.draft.calendarSourceId && props.sources.length > 0);
+  return (
+    <div className="planning-canvas-modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
+      <section className="planning-canvas-modal planning-canvas-google-event-modal" role="dialog" aria-modal="true" aria-label="Google Event erstellen" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="planning-canvas-modal-header">
+          <div>
+            <span>Google Event</span>
+            <h2>Neues Event erstellen</h2>
+            <p>{dateRange}</p>
+          </div>
+          <button type="button" className="icon-button" aria-label="Schliessen" disabled={props.busy} onClick={props.onCancel}>
+            <X size={18} />
+          </button>
+        </header>
+        <div className="planning-canvas-modal-form">
+          <label>
+            Titel
+            <input
+              value={props.draft.title}
+              disabled={props.busy}
+              onChange={(event) => props.onChange({ ...props.draft, title: event.target.value })}
+            />
+          </label>
+          <label>
+            Google Kalender
+            <select
+              value={props.draft.calendarSourceId ?? ""}
+              disabled={props.busy || props.sources.length === 0}
+              onChange={(event) => props.onChange({ ...props.draft, calendarSourceId: Number(event.target.value) || null })}
+            >
+              {props.sources.length === 0 ? <option value="">Keine schreibbare Quelle</option> : null}
+              {props.sources.map((source) => (
+                <option key={source.id} value={source.id}>
+                  {source.displayName} · {source.accountLabel}
+                </option>
+              ))}
+            </select>
+          </label>
+          {props.sources.length === 0 ? <div className="config-hint">Keine schreibbare Google-Kalenderquelle konfiguriert.</div> : null}
+        </div>
+        <footer className="planning-canvas-modal-actions">
+          <button type="button" className="secondary-action compact" disabled={props.busy} onClick={props.onCancel}>Abbrechen</button>
+          <button type="button" className="primary-action compact" disabled={props.busy || !canSave} onClick={props.onConfirm}>Google Event erstellen</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function GoogleCalendarGlyph() {
+  return (
+    <svg viewBox="0 0 48 48" focusable="false">
+      <path fill="#ffc107" d="M43.61 20.08H42V20H24v8h11.3c-1.65 4.66-6.08 8-11.3 8-6.63 0-12-5.37-12-12s5.37-12 12-12c3.06 0 5.84 1.15 7.96 3.04l5.66-5.66C34.05 6.05 29.27 4 24 4 12.95 4 4 12.95 4 24s8.95 20 20 20 20-8.95 20-20c0-1.34-.14-2.65-.39-3.92z" />
+      <path fill="#ff3d00" d="M6.31 14.69l6.57 4.82C14.66 15.11 18.96 12 24 12c3.06 0 5.84 1.15 7.96 3.04l5.66-5.66C34.05 6.05 29.27 4 24 4 16.32 4 9.66 8.34 6.31 14.69z" />
+      <path fill="#4caf50" d="M24 44c5.17 0 9.86-1.98 13.41-5.19l-6.19-5.24C29.21 35.09 26.72 36 24 36c-5.2 0-9.62-3.31-11.29-7.95l-6.52 5.02C9.5 39.56 16.23 44 24 44z" />
+      <path fill="#1976d2" d="M43.61 20.08H42V20H24v8h11.3a12.04 12.04 0 0 1-4.09 5.57l.01-.01 6.19 5.24C36.97 39.2 44 34 44 24c0-1.34-.14-2.65-.39-3.92z" />
+    </svg>
+  );
+}
+
+function GoogleCalendarTimebarBadge() {
+  return (
+    <span className="planning-canvas-time-google-badge" title="Linked to Google Calendar" aria-hidden="true">
+      <GoogleCalendarGlyph />
+    </span>
   );
 }
 
@@ -7445,11 +8090,33 @@ type PlanningCanvasTimeVisual = {
   status: Initiative["status"];
   projectPhase: ProjectPhase;
   isLocked: boolean;
+  hasGoogleCalendarBinding: boolean;
   left: number;
   width: number;
   top: number;
   color: string;
   textColor: string;
+  title: string;
+};
+
+type PlanningCanvasGoogleTimeVisual = {
+  id: string;
+  name: string;
+  event: Extract<CalendarViewEvent, { source: "google" }>;
+  left: number;
+  width: number;
+  top: number;
+  row: number;
+  color: string;
+  title: string;
+  htmlLink: string | null;
+  special: PlanningCanvasSpecialGoogleEventMatch | null;
+  hasChildcareConflict: boolean;
+};
+type PlanningCanvasChildcareLaneSpan = {
+  id: string;
+  left: number;
+  width: number;
   title: string;
 };
 type PlanningCanvasRelationGroup = {
@@ -7647,6 +8314,7 @@ function planningCanvasTimeVisual(node: PlanningCanvasInitiativeNode, range: Pla
     status: node.initiative.status,
     projectPhase: node.initiative.projectPhase,
     isLocked: node.initiative.isLocked,
+    hasGoogleCalendarBinding: node.hasGoogleCalendarBinding,
     top,
     color,
     textColor: node.initiative.projectPhase === "planning" ? "#17211c" : "#ffffff"
@@ -7683,6 +8351,197 @@ function planningCanvasTimeVisual(node: PlanningCanvasInitiativeNode, range: Pla
 
 function isPlanningCanvasTimeVisual(value: PlanningCanvasTimeVisual | null): value is PlanningCanvasTimeVisual {
   return value !== null;
+}
+
+function layoutPlanningCanvasGoogleTimeVisuals(events: Array<Extract<CalendarViewEvent, { source: "google" }>>, range: PlanningCanvasRange): PlanningCanvasGoogleTimeVisual[] {
+  const rowRightEdges: number[] = [];
+  const baseVisuals = events
+    .map((event) => planningCanvasGoogleTimeVisual(event, range))
+    .filter(isPlanningCanvasGoogleTimeVisual)
+    .sort((left, right) => left.left - right.left || right.width - left.width || left.name.localeCompare(right.name));
+  const specialVisuals = baseVisuals
+    .filter((visual) => visual.special)
+    .sort((left, right) =>
+      left.left - right.left
+      || right.width - left.width
+      || (left.special?.priority ?? 0) - (right.special?.priority ?? 0)
+      || left.name.localeCompare(right.name)
+    );
+  const normalRowOffset = specialVisuals.length > 0 ? 1 : 0;
+  const childcareVisuals = specialVisuals.map((visual) => ({
+    ...visual,
+    row: 0,
+    top: planningCanvasGoogleLaneTop(0),
+    hasChildcareConflict: specialVisuals.some((candidate) =>
+      candidate.id !== visual.id
+      && candidate.special?.kind !== visual.special?.kind
+      && planningCanvasIntervalsOverlap(visual, candidate)
+    )
+  }));
+  const regularVisuals = baseVisuals
+    .filter((visual) => !visual.special)
+    .map((visual) => {
+      const availableRow = rowRightEdges.findIndex((right) => right <= visual.left);
+      const nextRow = availableRow === -1 ? rowRightEdges.length : availableRow;
+      rowRightEdges[nextRow] = visual.left + visual.width;
+      return {
+        ...visual,
+        row: nextRow + normalRowOffset,
+        top: planningCanvasGoogleLaneTop(nextRow + normalRowOffset)
+      };
+    });
+  return [...childcareVisuals, ...regularVisuals];
+}
+
+function planningCanvasGoogleTimeVisual(event: Extract<CalendarViewEvent, { source: "google" }>, range: PlanningCanvasRange): PlanningCanvasGoogleTimeVisual | null {
+  const start = parseDateOnlyUtc(datePart(event.startAt));
+  const end = parseDateOnlyUtc(datePart(event.endAt));
+  if (!start || !end || end < range.start || start > range.end) return null;
+  const clippedStart = start < range.start ? range.start : start;
+  const clippedEnd = end > range.end ? range.end : end;
+  const left = planningCanvasDateX(dateOnlyFromUtc(clippedStart), range);
+  const endExclusive = new Date(Date.UTC(clippedEnd.getUTCFullYear(), clippedEnd.getUTCMonth(), clippedEnd.getUTCDate() + 1));
+  const right = planningCanvasDateX(dateOnlyFromUtc(endExclusive), range) ?? range.width;
+  if (left === null) return null;
+  const special = classifyPlanningCanvasSpecialGoogleEvent(event);
+  return {
+    id: event.id,
+    name: event.title,
+    event,
+    left,
+    width: Math.max(1, right - left),
+    top: planningCanvasGoogleLaneTop(0),
+    row: 0,
+    color: special?.color ?? event.color ?? "#5167b8",
+    title: `${event.title}: ${formatDateOnly(datePart(event.startAt))} - ${formatDateOnly(datePart(event.endAt))} · ${event.sourceDisplayName}`,
+    htmlLink: event.htmlLink,
+    special,
+    hasChildcareConflict: false
+  };
+}
+
+function isPlanningCanvasGoogleTimeVisual(value: PlanningCanvasGoogleTimeVisual | null): value is PlanningCanvasGoogleTimeVisual {
+  return value !== null;
+}
+
+function planningCanvasChildcareGapSpans(visuals: PlanningCanvasGoogleTimeVisual[]): PlanningCanvasChildcareLaneSpan[] {
+  const intervals = visuals
+    .filter((visual) => visual.special)
+    .sort((left, right) => left.left - right.left || left.width - right.width);
+  if (intervals.length <= 1) return [];
+
+  const merged: Array<{ left: number; right: number }> = [];
+  for (const visual of intervals) {
+    const right = visual.left + visual.width;
+    const last = merged.at(-1);
+    if (!last || visual.left > last.right) {
+      merged.push({ left: visual.left, right });
+    } else {
+      last.right = Math.max(last.right, right);
+    }
+  }
+
+  const gaps: PlanningCanvasChildcareLaneSpan[] = [];
+  for (let index = 1; index < merged.length; index += 1) {
+    const previous = merged[index - 1]!;
+    const current = merged[index]!;
+    const width = current.left - previous.right;
+    if (width <= 0) continue;
+    gaps.push({
+      id: `childcare-gap-${index}-${previous.right}-${current.left}`,
+      left: previous.right,
+      width,
+      title: "Betreuungsluecke: kein Kinder-Betreuungs-Event"
+    });
+  }
+  return gaps;
+}
+
+function planningCanvasChildcareOverlapSpans(visuals: PlanningCanvasGoogleTimeVisual[]): PlanningCanvasChildcareLaneSpan[] {
+  const specialVisuals = visuals.filter((visual) => visual.special);
+  const overlaps: Array<{ left: number; right: number }> = [];
+  for (let leftIndex = 0; leftIndex < specialVisuals.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < specialVisuals.length; rightIndex += 1) {
+      const left = specialVisuals[leftIndex]!;
+      const right = specialVisuals[rightIndex]!;
+      if (left.special?.kind === right.special?.kind || !planningCanvasIntervalsOverlap(left, right)) continue;
+      overlaps.push({
+        left: Math.max(left.left, right.left),
+        right: Math.min(left.left + left.width, right.left + right.width)
+      });
+    }
+  }
+  return mergePlanningCanvasSpans(overlaps).map((span, index) => ({
+    id: `childcare-overlap-${index}-${span.left}-${span.right}`,
+    left: span.left,
+    width: span.right - span.left,
+    title: "Ueberschneidung: Bianka und Dietrich haben Kinder"
+  }));
+}
+
+function mergePlanningCanvasSpans(spans: Array<{ left: number; right: number }>): Array<{ left: number; right: number }> {
+  const sorted = spans
+    .filter((span) => span.right > span.left)
+    .sort((left, right) => left.left - right.left || left.right - right.right);
+  const merged: Array<{ left: number; right: number }> = [];
+  for (const span of sorted) {
+    const last = merged.at(-1);
+    if (!last || span.left > last.right) {
+      merged.push({ ...span });
+    } else {
+      last.right = Math.max(last.right, span.right);
+    }
+  }
+  return merged;
+}
+
+function planningCanvasIntervalsOverlap(
+  left: Pick<PlanningCanvasGoogleTimeVisual, "left" | "width">,
+  right: Pick<PlanningCanvasGoogleTimeVisual, "left" | "width">
+): boolean {
+  return left.left < right.left + right.width && right.left < left.left + left.width;
+}
+
+function isPlanningCanvasGoogleTimeEvent(event: CalendarViewEvent, nodes: PlanningCanvasInitiativeNode[]): event is Extract<CalendarViewEvent, { source: "google" }> {
+  if (event.source !== "google" || (!event.allDay && datePart(event.startAt) === datePart(event.endAt))) {
+    return false;
+  }
+  if (isExcludedPlanningCanvasGoogleEvent(event)) {
+    return false;
+  }
+  const placedInitiativeIds = new Set(nodes.map((node) => node.initiativeId));
+  return event.binding?.localEntityType !== "initiative_project_span" || !placedInitiativeIds.has(event.binding.localEntityId);
+}
+
+function isExcludedPlanningCanvasGoogleEvent(event: Extract<CalendarViewEvent, { source: "google" }>): boolean {
+  const sourceName = event.sourceDisplayName.toLocaleLowerCase("de-DE");
+  const calendarId = event.externalCalendarId.toLocaleLowerCase("de-DE");
+  const title = event.title.toLocaleLowerCase("de-DE");
+  return calendarId.includes("#holiday@group.v.calendar.google.com")
+    || sourceName.includes("feiertage in deutschland")
+    || sourceName.includes("german holidays")
+    || calendarId.includes("birthday")
+    || sourceName.includes("geburtstag")
+    || sourceName.includes("birthdays")
+    || title.includes("geburtstag");
+}
+
+function planningCanvasHiddenEventMeta(hiddenEvent: CalendarEventVisibility): string {
+  const scope = hiddenEvent.hiddenScope === "recurring_series"
+    ? "Serie"
+    : hiddenEvent.hiddenScope === "recurring_instance"
+      ? "Vorkommen"
+      : "Event";
+  const date = hiddenEvent.startAtSnapshot ? formatDateOnly(datePart(hiddenEvent.startAtSnapshot)) : "ohne Datum";
+  return `${scope} · ${date}`;
+}
+
+function planningCanvasGoogleLaneTop(row: number): number {
+  return PLANNING_CANVAS_TIME_HEADER_HEIGHT + row * PLANNING_CANVAS_TIME_LANE_HEIGHT + PLANNING_CANVAS_TIME_BAR_TOP_OFFSET;
+}
+
+function planningCanvasStorageYFromCanvasY(y: number, googleLaneCount: number): number {
+  return Math.max(PLANNING_CANVAS_TIME_HEADER_HEIGHT, y - googleLaneCount * PLANNING_CANVAS_TIME_LANE_HEIGHT);
 }
 
 function planningCanvasTimeLaneTop(y: number): number {
@@ -7744,6 +8603,64 @@ function planningCanvasShiftDatesForDrag(
   const shiftedEnd = drag.originEndDate ? shiftDate(drag.originEndDate, dayDelta) : null;
   const endDate = shiftedEnd && drag.originStartDate && shiftedEnd < drag.originStartDate ? drag.originStartDate : shiftedEnd;
   return { startDate: drag.originStartDate, endDate };
+}
+
+function planningCanvasShiftGoogleDatesForDrag(
+  drag: Pick<PlanningCanvasGoogleTimeDragState, "mode" | "originStartDate" | "originEndDate">,
+  dayDelta: number
+): { startDate: string; endDate: string } {
+  if (dayDelta === 0) {
+    return { startDate: drag.originStartDate, endDate: drag.originEndDate };
+  }
+
+  if (drag.mode === "move") {
+    return {
+      startDate: shiftDate(drag.originStartDate, dayDelta),
+      endDate: shiftDate(drag.originEndDate, dayDelta)
+    };
+  }
+
+  if (drag.mode === "resize-start") {
+    const shiftedStart = shiftDate(drag.originStartDate, dayDelta);
+    return { startDate: shiftedStart > drag.originEndDate ? drag.originEndDate : shiftedStart, endDate: drag.originEndDate };
+  }
+
+  const shiftedEnd = shiftDate(drag.originEndDate, dayDelta);
+  return { startDate: drag.originStartDate, endDate: shiftedEnd < drag.originStartDate ? drag.originStartDate : shiftedEnd };
+}
+
+function planningCanvasGoogleCreatePreview(
+  drag: PlanningCanvasGoogleCreateDragState,
+  range: PlanningCanvasRange
+): { left: number; width: number; top: number } | null {
+  return planningCanvasGoogleCreatePreviewForDates(drag.row, drag.startDate, drag.draftEndDate, range);
+}
+
+function planningCanvasGoogleCreateDraftPreview(
+  draft: PlanningCanvasGoogleCreateDraft,
+  range: PlanningCanvasRange
+): { left: number; width: number; top: number } | null {
+  return planningCanvasGoogleCreatePreviewForDates(draft.row, draft.startDate, draft.endDate, range);
+}
+
+function planningCanvasGoogleCreatePreviewForDates(
+  row: number,
+  startDate: string,
+  endDate: string,
+  range: PlanningCanvasRange
+): { left: number; width: number; top: number } | null {
+  const start = parseDateOnlyUtc(startDate);
+  const end = parseDateOnlyUtc(endDate);
+  if (!start || !end) return null;
+  const left = planningCanvasDateX(dateOnlyFromUtc(start), range);
+  const endExclusive = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate() + 1));
+  const right = planningCanvasDateX(dateOnlyFromUtc(endExclusive), range) ?? range.width;
+  if (left === null || right <= left) return null;
+  return {
+    left,
+    width: right - left,
+    top: planningCanvasGoogleLaneTop(row)
+  };
 }
 
 function defaultRelatedProjectDates(

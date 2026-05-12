@@ -136,6 +136,30 @@ create table if not exists calendar_event_bindings (
   updated_at text not null
 );
 
+create table if not exists calendar_event_visibility (
+  id integer primary key,
+  provider text not null check (provider in ('google')),
+  surface text not null check (surface in ('planning_canvas', 'calendar', 'global')),
+  hidden_scope text not null check (hidden_scope in ('event', 'recurring_instance', 'recurring_series')),
+  calendar_source_id integer references calendar_sources(id),
+  external_calendar_id text not null,
+  external_event_id text,
+  recurring_event_id text,
+  original_start_at text,
+  ical_uid text,
+  title_snapshot text not null,
+  start_at_snapshot text,
+  end_at_snapshot text,
+  hidden_at text not null,
+  created_at text not null,
+  updated_at text not null,
+  check (
+    (hidden_scope = 'event' and external_event_id is not null)
+    or (hidden_scope = 'recurring_instance' and recurring_event_id is not null and original_start_at is not null)
+    or (hidden_scope = 'recurring_series' and recurring_event_id is not null)
+  )
+);
+
 create table if not exists media_assets (
   id integer primary key,
   kind text not null check (kind in ('image', 'audio', 'video', 'document', 'other')),
@@ -214,7 +238,7 @@ create table if not exists app_state_events (
   id integer primary key,
   source text not null check (source in ('api', 'tool')),
   operation text not null,
-  entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'calendar_entry', 'calendar_source', 'media_asset', 'media_link')),
+  entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link')),
   entity_id integer,
   category_id integer,
   initiative_id integer,
@@ -255,6 +279,17 @@ create unique index if not exists idx_calendar_event_bindings_active_external
   where unlinked_at is null;
 create index if not exists idx_calendar_event_bindings_source on calendar_event_bindings(calendar_source_id);
 create index if not exists idx_calendar_event_bindings_status on calendar_event_bindings(sync_status, id);
+create unique index if not exists idx_calendar_event_visibility_event_identity
+  on calendar_event_visibility(provider, surface, external_calendar_id, external_event_id)
+  where hidden_scope = 'event';
+create unique index if not exists idx_calendar_event_visibility_instance_identity
+  on calendar_event_visibility(provider, surface, external_calendar_id, recurring_event_id, original_start_at)
+  where hidden_scope = 'recurring_instance';
+create unique index if not exists idx_calendar_event_visibility_series_identity
+  on calendar_event_visibility(provider, surface, external_calendar_id, recurring_event_id)
+  where hidden_scope = 'recurring_series';
+create index if not exists idx_calendar_event_visibility_surface on calendar_event_visibility(surface, provider, hidden_scope);
+create index if not exists idx_calendar_event_visibility_source on calendar_event_visibility(calendar_source_id);
 create index if not exists idx_media_assets_kind on media_assets(kind);
 create index if not exists idx_media_assets_sha256 on media_assets(sha256);
 create index if not exists idx_media_links_entity on media_links(entity_type, entity_id, sort_order, id);

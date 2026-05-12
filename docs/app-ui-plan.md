@@ -16,6 +16,10 @@ Active UI notes. Implemented state belongs in `docs/current-state.md`.
   parent-child and predecessor/successor relations from domain tables; it does
   not own a separate relationship model. Locked project spans keep horizontal
   date movement disabled while still allowing vertical row/prioritization moves.
+- The Planning Canvas also shows Google all-day/multi-day commitments in a
+  read-only top lane. Google events can be hidden from this surface; hidden
+  rules are restored through the lower-left sidebar button rather than through
+  controls floating over the canvas.
 - The Calendar day/week view separates fixed commitments from flexible project
   planning in its top lanes. Calendar URL parameters are the source of truth for
   the visible day/week and all-day expansion state.

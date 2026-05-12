@@ -4,6 +4,7 @@ import { CalendarService } from "../../src/calendar/calendar-service.js";
 import { GoogleCalendarProvider } from "../../src/calendar/google-calendar-provider.js";
 import type { ExternalCalendarEvent, GoogleCalendarEventCoreInput, GoogleCalendarEventsResult } from "../../src/calendar/google-calendar-provider.js";
 import { CalendarEventBindingRepository } from "../../src/repositories/calendar-event-bindings.js";
+import { CalendarEventVisibilityRepository } from "../../src/repositories/calendar-event-visibility.js";
 import { CalendarSourceRepository } from "../../src/repositories/calendar-sources.js";
 import { CategoryRepository } from "../../src/repositories/categories.js";
 import { InitiativeRepository } from "../../src/repositories/initiatives.js";
@@ -216,6 +217,49 @@ describe("CalendarService", () => {
       }
     });
     expect(warnings[0]?.message).toContain("timeframe is locked");
+  });
+
+  it("filters hidden Google events only for the requested surface", async () => {
+    const source = new CalendarSourceRepository(db).create({
+      accountLabel: "dw@example.com",
+      calendarId: "primary",
+      displayName: "Google"
+    });
+    new CalendarEventVisibilityRepository(db).create({
+      surface: "planning_canvas",
+      hiddenScope: "event",
+      calendarSourceId: source.id,
+      externalCalendarId: "primary",
+      externalEventId: "google-event-1",
+      titleSnapshot: "Hidden trip"
+    });
+    const service = new CalendarService(db, new FakeGoogleCalendarProvider({
+      id: "google-event-1",
+      externalCalendarId: "primary",
+      externalEventId: "google-event-1",
+      title: "Hidden trip",
+      startAt: "2026-06-08",
+      endAt: "2026-06-09",
+      allDay: true,
+      sourceId: source.id,
+      sourceDisplayName: source.displayName,
+      htmlLink: null,
+      etag: null,
+      updatedAt: null,
+      recurring: false,
+      organizerSelf: true,
+      sourceReadOnly: true,
+      editable: false,
+      readOnlyReason: "source_read_only",
+      color: null,
+      readOnly: true
+    }));
+
+    const planningCanvasView = await service.getView({ startDate: "2026-06-08", endDate: "2026-06-09" }, { hiddenSurface: "planning_canvas" });
+    const calendarView = await service.getView({ startDate: "2026-06-08", endDate: "2026-06-09" });
+
+    expect(planningCanvasView.events).toHaveLength(0);
+    expect(calendarView.events).toHaveLength(1);
   });
 });
 

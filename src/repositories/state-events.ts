@@ -10,6 +10,7 @@ export type StateEventEntityType =
   | "planning_canvas_node"
   | "task"
   | "calendar_entry"
+  | "calendar_event_visibility"
   | "calendar_source"
   | "media_asset"
   | "media_link";

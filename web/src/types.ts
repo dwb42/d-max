@@ -83,6 +83,7 @@ export type PlanningCanvasInitiativeNode = PlanningCanvasNode & {
   taskCount: number;
   openTaskCount: number;
   doneTaskCount: number;
+  hasGoogleCalendarBinding: boolean;
 };
 
 export type PlanningCanvasRelationEdge = {
@@ -193,6 +194,28 @@ export type CalendarSource = {
   updatedAt: string;
 };
 
+export type CalendarEventVisibilitySurface = "planning_canvas" | "calendar" | "global";
+export type CalendarEventVisibilityHiddenScope = "event" | "recurring_instance" | "recurring_series";
+
+export type CalendarEventVisibility = {
+  id: number;
+  provider: "google";
+  surface: CalendarEventVisibilitySurface;
+  hiddenScope: CalendarEventVisibilityHiddenScope;
+  calendarSourceId: number | null;
+  externalCalendarId: string;
+  externalEventId: string | null;
+  recurringEventId: string | null;
+  originalStartAt: string | null;
+  iCalUID: string | null;
+  titleSnapshot: string;
+  startAtSnapshot: string | null;
+  endAtSnapshot: string | null;
+  hiddenAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type GoogleCalendarAuthStatus = {
   configured: boolean;
   connected: boolean;
@@ -273,6 +296,9 @@ export type CalendarViewEvent =
       etag: string | null;
       updatedAt: string | null;
       recurring: boolean;
+      recurringEventId: string | null;
+      originalStartAt: string | null;
+      iCalUID: string | null;
       organizerSelf: boolean;
       organizer: {
         email: string | null;
@@ -457,6 +483,7 @@ export type StateEvent = {
     | "planning_canvas_node"
     | "task"
     | "calendar_entry"
+    | "calendar_event_visibility"
     | "calendar_source"
     | "media_asset"
     | "media_link";

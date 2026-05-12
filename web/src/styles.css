@@ -5068,6 +5068,8 @@ button.task-notes-panel:hover {
 }
 
 .planning-canvas-parking {
+  display: flex;
+  flex-direction: column;
   border: 1px solid #dfe7dc;
   border-radius: 8px;
   background: #ffffff;
@@ -5119,6 +5121,13 @@ button.task-notes-panel:hover {
 .planning-canvas-parking-list {
   display: grid;
   gap: 8px;
+}
+
+.planning-canvas-parking-bottom {
+  display: grid;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
 }
 
 .planning-canvas-parking-item {
@@ -5321,6 +5330,64 @@ button.task-notes-panel:hover {
   pointer-events: none;
 }
 
+.planning-canvas-hidden-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.planning-canvas-hidden-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid rgba(81, 103, 184, 0.22);
+  border-radius: 8px;
+  padding: 0 9px;
+  background: rgba(81, 103, 184, 0.08);
+  color: #273461;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.planning-canvas-hidden-popover {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid rgba(16, 23, 20, 0.14);
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+  color: #101714;
+  box-shadow: 0 6px 18px rgba(16, 23, 20, 0.08);
+}
+
+.planning-canvas-hidden-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid rgba(16, 23, 20, 0.08);
+  padding-top: 8px;
+}
+
+.planning-canvas-hidden-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planning-canvas-hidden-row small {
+  display: block;
+  margin-top: 2px;
+  color: #5f6b63;
+  font-size: 11px;
+}
+
 .planning-canvas-time-bar {
   position: absolute;
   display: flex;
@@ -5337,6 +5404,251 @@ button.task-notes-panel:hover {
   overflow: visible;
   pointer-events: auto;
   touch-action: none;
+}
+
+.planning-canvas-google-time-bar {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  z-index: 2;
+  min-width: 42px;
+  height: 32px;
+  border-radius: 7px;
+  padding: 3px 6px;
+  box-shadow: inset 0 0 0 1px rgba(16, 23, 20, 0.12), 0 3px 8px rgba(16, 23, 20, 0.07);
+  color: #ffffff;
+  opacity: 0.88;
+  overflow: hidden;
+  pointer-events: auto;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.planning-canvas-google-time-bar.readonly {
+  cursor: pointer;
+}
+
+.planning-canvas-google-time-bar.editable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.planning-canvas-google-time-bar.editable:active {
+  cursor: grabbing;
+}
+
+.planning-canvas-google-row-dropzone {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 0;
+  height: var(--planning-canvas-time-lane-height);
+  cursor: crosshair;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.planning-canvas-google-row-icon {
+  position: absolute;
+  left: 8px;
+  z-index: 6;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(16, 23, 20, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 5px rgba(16, 23, 20, 0.08);
+  pointer-events: none;
+}
+
+.planning-canvas-google-row-icon svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+}
+
+.planning-canvas-childcare-lane-span {
+  position: absolute;
+  height: var(--planning-canvas-time-lane-height);
+  border-radius: 7px;
+  pointer-events: none;
+}
+
+.planning-canvas-childcare-lane-span.gap {
+  z-index: 0;
+  border-left: 1px solid rgba(168, 96, 39, 0.34);
+  border-right: 1px solid rgba(168, 96, 39, 0.34);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(214, 132, 72, 0.18) 0,
+      rgba(214, 132, 72, 0.18) 6px,
+      rgba(255, 255, 255, 0) 6px,
+      rgba(255, 255, 255, 0) 13px
+    ),
+    rgba(248, 203, 145, 0.18);
+}
+
+.planning-canvas-childcare-lane-span.overlap {
+  z-index: 1;
+  border-left: 1px solid rgba(119, 63, 119, 0.42);
+  border-right: 1px solid rgba(119, 63, 119, 0.42);
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(119, 63, 119, 0.2) 0,
+      rgba(119, 63, 119, 0.2) 5px,
+      rgba(255, 255, 255, 0) 5px,
+      rgba(255, 255, 255, 0) 11px
+    ),
+    rgba(119, 63, 119, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(119, 63, 119, 0.2);
+}
+
+.planning-canvas-google-time-bar.special {
+  z-index: 4;
+  height: 29px;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  opacity: 0.76;
+  background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.18), rgba(16, 23, 20, 0.08));
+  box-shadow: inset 0 0 0 1px rgba(16, 23, 20, 0.16), 0 4px 10px rgba(16, 23, 20, 0.09);
+}
+
+.planning-canvas-google-time-bar.special.childcare-bianka {
+  margin-top: 1px;
+}
+
+.planning-canvas-google-time-bar.special.childcare-dietrich {
+  z-index: 5;
+  margin-top: 8px;
+}
+
+.planning-canvas-google-time-bar.special.childcare-conflict {
+  opacity: 0.82;
+  background-image:
+    repeating-linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.28) 0,
+      rgba(255, 255, 255, 0.28) 4px,
+      rgba(16, 23, 20, 0.08) 4px,
+      rgba(16, 23, 20, 0.08) 8px
+    ),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.16), rgba(16, 23, 20, 0.1));
+}
+
+.planning-canvas-google-time-bar:hover,
+.planning-canvas-google-time-bar:focus-visible {
+  opacity: 1;
+  outline: 2px solid rgba(81, 103, 184, 0.35);
+  outline-offset: 2px;
+}
+
+.planning-canvas-google-hide-button {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #101714;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease;
+  cursor: pointer;
+}
+
+.planning-canvas-google-time-bar:hover .planning-canvas-google-hide-button,
+.planning-canvas-google-time-bar:focus-within .planning-canvas-google-hide-button {
+  opacity: 1;
+}
+
+.planning-canvas-google-time-handle {
+  position: absolute;
+  top: 50%;
+  z-index: 5;
+  width: 16px;
+  height: 24px;
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  border-radius: 999px;
+  padding: 0;
+  background: rgba(16, 23, 20, 0.58);
+  box-shadow: 0 2px 8px rgba(16, 23, 20, 0.16);
+  cursor: ew-resize;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease;
+  touch-action: none;
+}
+
+.planning-canvas-google-time-handle.start {
+  left: -8px;
+}
+
+.planning-canvas-google-time-handle.end {
+  right: -8px;
+}
+
+.planning-canvas-google-time-bar:hover .planning-canvas-google-time-handle,
+.planning-canvas-google-time-bar:focus-within .planning-canvas-google-time-handle,
+.planning-canvas-google-time-handle:focus-visible {
+  opacity: 1;
+}
+
+.planning-canvas-google-create-preview {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  min-width: 42px;
+  height: 32px;
+  border: 1px dashed rgba(39, 128, 111, 0.72);
+  border-radius: 7px;
+  padding: 3px 6px;
+  background: rgba(39, 128, 111, 0.14);
+  color: #1f5d53;
+  pointer-events: none;
+}
+
+.planning-canvas-google-create-preview span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.planning-canvas-hide-modal {
+  width: min(440px, calc(100vw - 28px));
+}
+
+.planning-canvas-google-event-modal {
+  width: min(520px, calc(100vw - 28px));
+}
+
+.planning-canvas-google-event-modal p {
+  margin: 0;
+  color: #4f5d55;
+  line-height: 1.45;
+}
+
+.planning-canvas-hide-modal p {
+  margin: 0 0 14px;
+  color: #5f6b63;
+}
+
+.planning-canvas-hide-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .planning-canvas-time-bar::before,
@@ -5496,6 +5808,28 @@ button.task-notes-panel:hover {
   color: #26342d;
   box-shadow: 0 2px 5px rgba(16, 23, 20, 0.12);
   pointer-events: none;
+}
+
+.planning-canvas-time-google-badge {
+  position: absolute;
+  right: -7px;
+  bottom: -7px;
+  display: inline-grid;
+  place-items: center;
+  z-index: 6;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(16, 23, 20, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 2px 5px rgba(16, 23, 20, 0.12);
+  pointer-events: none;
+}
+
+.planning-canvas-time-google-badge svg {
+  width: 13px;
+  height: 13px;
+  display: block;
 }
 
 .planning-canvas-time-bar-label {

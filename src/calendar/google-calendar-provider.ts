@@ -16,6 +16,9 @@ export type ExternalCalendarEvent = {
   etag: string | null;
   updatedAt: string | null;
   recurring: boolean;
+  recurringEventId?: string | null;
+  originalStartAt?: string | null;
+  iCalUID?: string | null;
   organizerSelf: boolean;
   organizer?: GoogleCalendarPerson | null;
   attendees?: GoogleCalendarAttendee[];
@@ -69,7 +72,7 @@ const googleCalendarEventListCacheTtlMs = 60_000;
 const googleCalendarFetchTimeoutMs = 8_000;
 const googleCalendarEventListFields = [
   "nextPageToken",
-  "items(id,iCalUID,status,summary,htmlLink,etag,updated,start,end,recurringEventId,recurrence,organizer(email,displayName,self),attendees(email,displayName,self,responseStatus,optional),colorId)"
+  "items(id,iCalUID,status,summary,htmlLink,etag,updated,start,end,recurringEventId,originalStartTime,recurrence,organizer(email,displayName,self),attendees(email,displayName,self,responseStatus,optional),colorId)"
 ].join(",");
 const eventListCache = new Map<string, { expiresAt: number; events: ExternalCalendarEvent[] }>();
 const eventListInFlight = new Map<string, Promise<ExternalCalendarEvent[]>>();
@@ -377,6 +380,7 @@ export class GoogleCalendarProvider {
     const eventId = event.id ?? event.iCalUID ?? randomUUID();
     const allDay = Boolean(start.date && end.date);
     const recurring = Boolean(event.recurringEventId || event.recurrence?.length);
+    const originalStartAt = event.originalStartTime ? normalizeGoogleEventTime(event.originalStartTime) : null;
     const organizerSelf = event.organizer?.self === true;
     const organizer = normalizeGooglePerson(event.organizer ?? null);
     const readOnlyReason = googleReadOnlyReason({ source, recurring, organizerSelf, oauthCanWrite });
@@ -394,6 +398,9 @@ export class GoogleCalendarProvider {
       etag: event.etag ?? null,
       updatedAt: event.updated ?? null,
       recurring,
+      recurringEventId: event.recurringEventId ?? null,
+      originalStartAt,
+      iCalUID: event.iCalUID ?? null,
       organizerSelf,
       organizer,
       attendees: (event.attendees ?? []).map(normalizeGoogleAttendee),
@@ -450,6 +457,7 @@ type GoogleEvent = {
   updated?: string;
   status?: string;
   recurringEventId?: string;
+  originalStartTime?: { date?: string; dateTime?: string; timeZone?: string };
   recurrence?: string[];
   organizer?: { email?: string; displayName?: string; self?: boolean };
   attendees?: Array<{ email?: string; displayName?: string; self?: boolean; responseStatus?: string; optional?: boolean }>;
@@ -476,6 +484,16 @@ function normalizeGoogleAttendee(attendee: { email?: string; displayName?: strin
     responseStatus: attendee.responseStatus ?? null,
     optional: attendee.optional === true
   };
+}
+
+function normalizeGoogleEventTime(value: { date?: string; dateTime?: string }): string | null {
+  if (value.date) {
+    return value.date;
+  }
+  if (value.dateTime) {
+    return toLocalDateTime(value.dateTime);
+  }
+  return null;
 }
 
 async function googleCalendarFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {

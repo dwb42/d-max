@@ -36,6 +36,7 @@ export type PlanningCanvasInitiativeNode = PlanningCanvasNode & {
   taskCount: number;
   openTaskCount: number;
   doneTaskCount: number;
+  hasGoogleCalendarBinding: boolean;
 };
 
 export type PlanningCanvasRelationEdge = {
@@ -110,6 +111,7 @@ type InitiativeCanvasRow = PlanningCanvasNodeRow & {
   task_count: number;
   open_task_count: number;
   done_task_count: number;
+  has_google_calendar_binding: number;
 };
 
 type UnmappedInitiativeRow = {
@@ -331,11 +333,16 @@ export class PlanningCanvasRepository {
           c.color as category_color,
           count(t.id) as task_count,
           sum(case when t.status = 'open' then 1 else 0 end) as open_task_count,
-          sum(case when t.status = 'done' then 1 else 0 end) as done_task_count
+          sum(case when t.status = 'done' then 1 else 0 end) as done_task_count,
+          max(case when b.id is not null then 1 else 0 end) as has_google_calendar_binding
          from planning_canvas_nodes n
          join initiatives i on i.id = n.initiative_id
          left join categories c on c.id = i.category_id
          left join tasks t on t.initiative_id = i.id
+         left join calendar_event_bindings b
+           on b.local_entity_type = 'initiative_project_span'
+          and b.local_entity_id = i.id
+          and b.unlinked_at is null
          where n.canvas_id = ?${where ? ` and ${where}` : ""}
          group by n.id
          order by n.y asc, n.x asc, lower(i.name) asc, n.id asc`
@@ -512,7 +519,8 @@ function toPlanningCanvasInitiativeNode(row: InitiativeCanvasRow): Omit<Planning
           },
     taskCount: row.task_count,
     openTaskCount: row.open_task_count ?? 0,
-    doneTaskCount: row.done_task_count ?? 0
+    doneTaskCount: row.done_task_count ?? 0,
+    hasGoogleCalendarBinding: row.has_google_calendar_binding === 1
   };
 }
 

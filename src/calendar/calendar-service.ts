@@ -1,6 +1,8 @@
 import type Database from "better-sqlite3";
 import { CalendarEventBindingRepository } from "../repositories/calendar-event-bindings.js";
 import type { CalendarBindingLocalEntityType, CalendarEventBinding } from "../repositories/calendar-event-bindings.js";
+import { CalendarEventVisibilityRepository, visibilityMatchesEvent } from "../repositories/calendar-event-visibility.js";
+import type { CalendarEventVisibilitySurface } from "../repositories/calendar-event-visibility.js";
 import { CalendarEntryRepository } from "../repositories/calendar-entries.js";
 import type { CalendarEntry, CalendarEntryType } from "../repositories/calendar-entries.js";
 import { CalendarSourceRepository } from "../repositories/calendar-sources.js";
@@ -51,6 +53,9 @@ export type CalendarViewEvent =
       etag: string | null;
       updatedAt: string | null;
       recurring: boolean;
+      recurringEventId: string | null;
+      originalStartAt: string | null;
+      iCalUID: string | null;
       organizerSelf: boolean;
       organizer: {
         email: string | null;
@@ -105,6 +110,7 @@ export type CalendarView = {
 export class CalendarService {
   private readonly entries: CalendarEntryRepository;
   private readonly bindings: CalendarEventBindingRepository;
+  private readonly eventVisibility: CalendarEventVisibilityRepository;
   private readonly sources: CalendarSourceRepository;
   private readonly categories: CategoryRepository;
   private readonly initiatives: InitiativeRepository;
@@ -116,13 +122,14 @@ export class CalendarService {
   ) {
     this.entries = new CalendarEntryRepository(db);
     this.bindings = new CalendarEventBindingRepository(db);
+    this.eventVisibility = new CalendarEventVisibilityRepository(db);
     this.sources = new CalendarSourceRepository(db);
     this.categories = new CategoryRepository(db);
     this.initiatives = new InitiativeRepository(db);
     this.tasks = new TaskRepository(db);
   }
 
-  async getView(range: { startDate: string; endDate: string }): Promise<CalendarView> {
+  async getView(range: { startDate: string; endDate: string }, options: { hiddenSurface?: CalendarEventVisibilitySurface | null } = {}): Promise<CalendarView> {
     const startedAt = Date.now();
     const timings: Record<string, number> = {};
     const startAt = `${range.startDate}T00:00:00.000`;
@@ -191,8 +198,12 @@ export class CalendarService {
       [...initiativeSpanEvents, ...dmaxEvents]
         .flatMap((event) => event.binding ? [externalBindingKey(event.binding.externalCalendarId, event.binding.externalEventId)] : [])
     );
+    const hiddenRules = options.hiddenSurface
+      ? this.eventVisibility.list({ surfaces: [options.hiddenSurface, "global"] })
+      : [];
     const unlinkedGoogleEvents = googleResult.events
       .filter((event) => !localRenderedExternalBindingKeys.has(externalBindingKey(event.externalCalendarId, event.externalEventId)))
+      .filter((event) => !hiddenRules.some((rule) => visibilityMatchesEvent(event, rule)))
       .map((event) => toGoogleViewEvent(event, bindingByExternalEvent.get(externalBindingKey(event.externalCalendarId, event.externalEventId)) ?? null));
     timings.localRenderMs = Date.now() - localStartedAt;
 
@@ -211,6 +222,7 @@ export class CalendarService {
       sources: sourceList.length,
       bindings: bindingListBeforeSync.length,
       googleEvents: googleResult.events.length,
+      hiddenGoogleEvents: hiddenRules.length,
       dmaxEvents: dmaxEvents.length,
       initiativeSpanEvents: initiativeSpanEvents.length,
       returnedEvents: view.events.length,
@@ -459,6 +471,9 @@ function toGoogleViewEvent(event: ExternalCalendarEvent, binding: CalendarEventB
     etag: event.etag,
     updatedAt: event.updatedAt,
     recurring: event.recurring,
+    recurringEventId: event.recurringEventId ?? null,
+    originalStartAt: event.originalStartAt ?? null,
+    iCalUID: event.iCalUID ?? null,
     organizerSelf: event.organizerSelf,
     organizer: event.organizer ?? null,
     attendees: event.attendees ?? [],

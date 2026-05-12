@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { CalendarEntryRepository } from "../../src/repositories/calendar-entries.js";
 import { CalendarEventBindingRepository } from "../../src/repositories/calendar-event-bindings.js";
+import { CalendarEventVisibilityRepository } from "../../src/repositories/calendar-event-visibility.js";
 import { CalendarSourceRepository } from "../../src/repositories/calendar-sources.js";
 import { CategoryRepository } from "../../src/repositories/categories.js";
 import { InitiativeRelationRepository } from "../../src/repositories/initiative-relations.js";
@@ -118,9 +119,22 @@ describe("repositories", () => {
     const relations = new InitiativeRelationRepository(db);
     const tasks = new TaskRepository(db);
     const canvas = new PlanningCanvasRepository(db);
-    const parent = initiatives.create({ categoryId: category.id, name: "Parent", type: "project" });
+    const parent = initiatives.create({ categoryId: category.id, name: "Parent", type: "project", startDate: "2026-05-01", endDate: "2026-05-03" });
     const child = initiatives.create({ categoryId: category.id, parentId: parent.id, name: "Child", type: "project" });
     const successor = initiatives.create({ categoryId: category.id, name: "Successor", type: "project" });
+    const source = new CalendarSourceRepository(db).create({
+      accountLabel: "dw@example.com",
+      calendarId: "primary",
+      displayName: "Google",
+      readOnly: false
+    });
+    new CalendarEventBindingRepository(db).create({
+      localEntityType: "initiative_project_span",
+      localEntityId: parent.id,
+      calendarSourceId: source.id,
+      externalCalendarId: source.calendarId,
+      externalEventId: "google-event-1"
+    });
     tasks.create({ initiativeId: parent.id, title: "Parent task" });
     relations.create({ predecessorInitiativeId: child.id, successorInitiativeId: successor.id });
 
@@ -134,6 +148,8 @@ describe("repositories", () => {
     expect(view.canvas.name).toBe("Default");
     expect(view.nodes.map((node) => node.initiative.name)).toEqual(["Parent", "Child", "Successor"]);
     expect(view.nodes.find((node) => node.initiativeId === parent.id)?.openTaskCount).toBe(1);
+    expect(view.nodes.find((node) => node.initiativeId === parent.id)?.hasGoogleCalendarBinding).toBe(true);
+    expect(view.nodes.find((node) => node.initiativeId === child.id)?.hasGoogleCalendarBinding).toBe(false);
     expect(view.relationEdges).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: "parent_child", fromInitiativeId: parent.id, toInitiativeId: child.id }),
@@ -359,5 +375,71 @@ describe("repositories", () => {
         externalEventId: "google-event-2"
       })
     ).not.toThrow();
+  });
+
+  it("stores hidden Google event visibility rules for canvas and recurring series", () => {
+    const source = new CalendarSourceRepository(db).create({
+      accountLabel: "dw@b42.io",
+      calendarId: "primary",
+      displayName: "Business"
+    });
+    const visibility = new CalendarEventVisibilityRepository(db);
+
+    const instance = visibility.create({
+      surface: "planning_canvas",
+      hiddenScope: "recurring_instance",
+      calendarSourceId: source.id,
+      externalCalendarId: "primary",
+      externalEventId: "instance-1",
+      recurringEventId: "series-1",
+      originalStartAt: "2026-06-02",
+      titleSnapshot: "Recurring class",
+      startAtSnapshot: "2026-06-02",
+      endAtSnapshot: "2026-06-02"
+    });
+    const updated = visibility.create({
+      surface: "planning_canvas",
+      hiddenScope: "recurring_instance",
+      calendarSourceId: source.id,
+      externalCalendarId: "primary",
+      externalEventId: "instance-1-renamed",
+      recurringEventId: "series-1",
+      originalStartAt: "2026-06-02",
+      titleSnapshot: "Recurring class renamed"
+    });
+    const series = visibility.create({
+      surface: "planning_canvas",
+      hiddenScope: "recurring_series",
+      calendarSourceId: source.id,
+      externalCalendarId: "primary",
+      recurringEventId: "series-1",
+      titleSnapshot: "Recurring class"
+    });
+
+    expect(updated.id).toBe(instance.id);
+    expect(visibility.list({ surfaces: ["planning_canvas"] })).toHaveLength(2);
+    expect(visibility.matchesEvent({
+      id: "instance-2",
+      externalCalendarId: "primary",
+      externalEventId: "instance-2",
+      title: "Recurring class",
+      startAt: "2026-06-09",
+      endAt: "2026-06-09",
+      allDay: true,
+      sourceId: source.id,
+      sourceDisplayName: source.displayName,
+      htmlLink: null,
+      etag: null,
+      updatedAt: null,
+      recurring: true,
+      recurringEventId: "series-1",
+      originalStartAt: "2026-06-09",
+      organizerSelf: true,
+      sourceReadOnly: true,
+      editable: false,
+      readOnlyReason: "recurring_not_supported",
+      color: null,
+      readOnly: true
+    }, series)).toBe(true);
   });
 });

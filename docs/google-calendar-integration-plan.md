@@ -10,8 +10,9 @@ Implementation status:
 - Phase 4: implemented for lazy title/time/all-day sync, last-edit-wins, and
   sync status/warnings.
 - Phase 5: partially implemented for pragmatic multi-account OAuth/token
-  handling, account-card config UI, richer read-only metadata display, and
-  calendar-load performance hardening. Background sync/webhooks, recurrence,
+  handling, account-card config UI, richer read-only metadata display,
+  calendar-load performance hardening, and Planning Canvas Google-event
+  visibility rules. Background sync/webhooks, recurrence editing/linking,
   default calendars, and durable sync history remain future work.
 
 This plan captures the agreed future direction for DMAX and Google Calendar.
@@ -71,7 +72,9 @@ DMAX must support these states:
 
 Google-only events are not cached durably in DMAX for the first core. They are
 loaded live from Google, with a short in-memory event-list cache for UI
-performance only.
+performance only. DMAX may persist local visibility rules for Google-only
+events, for example hiding a specific Google event or recurring series from a
+surface without importing or mutating the Google event itself.
 
 ### Time Object Mapping
 
@@ -152,7 +155,9 @@ Editable Google-only events:
 - The calendar edit modal shows organizer and attendees when Google provides
   them.
 - Recurring Google events are visible but not editable, promotable, or linkable
-  in the first core.
+  in the first core. Planning Canvas visibility controls can hide either one
+  recurring instance or the whole recurring series, but this does not create
+  recurrence editing/linking support.
 
 ### Deletion And Unlinking
 
@@ -256,10 +261,12 @@ Current core objects:
 - `calendar_sources`: configured Google calendars.
 - Google events: loaded live through the provider.
 
-New conceptual object:
+Implemented identity/visibility objects:
 
 - `calendar_event_bindings`: optional connection between a DMAX time object and
   a Google event.
+- `calendar_event_visibility`: optional DMAX-side visibility rule for a Google
+  event on a DMAX surface.
 
 Provider-specific code should be isolated in `src/calendar/google-calendar-*`.
 The rest of DMAX should reason about normalized calendar events and bindings.
@@ -318,6 +325,61 @@ Potential later extensions:
   banners need durability.
 - Additional sync field snapshots when expanding beyond title/time.
 - Recurrence model for habit tasks/routines.
+
+## Implemented Visibility Model
+
+`calendar_event_visibility` stores local hide rules for Google events. It does
+not import Google events and does not mutate Google Calendar. The model is
+surface-aware so a rule can apply only to the Planning Canvas, only to the
+calendar, or globally across DMAX surfaces.
+
+Current table shape:
+
+```sql
+create table calendar_event_visibility (
+  id integer primary key,
+  provider text not null check (provider in ('google')),
+  surface text not null check (surface in ('planning_canvas', 'calendar', 'global')),
+  hidden_scope text not null check (
+    hidden_scope in ('event', 'recurring_instance', 'recurring_series')
+  ),
+  calendar_source_id integer references calendar_sources(id),
+  external_calendar_id text not null,
+  external_event_id text,
+  recurring_event_id text,
+  original_start_at text,
+  ical_uid text,
+  title_snapshot text not null,
+  start_at_snapshot text,
+  end_at_snapshot text,
+  hidden_at text not null,
+  created_at text not null,
+  updated_at text not null
+);
+```
+
+Identity rules:
+
+- Single Google event: `external_calendar_id + external_event_id`.
+- One recurring instance: `external_calendar_id + recurring_event_id +
+  original_start_at`.
+- Whole recurring series: `external_calendar_id + recurring_event_id`.
+
+The Google provider normalizes `recurringEventId`, `originalStartTime`, and
+`iCalUID` in addition to the existing event ID, ETag, updated timestamp,
+organizer, attendees, ownership, and editability metadata.
+
+Current UI use:
+
+- Planning Canvas reads `/api/calendar?surface=planning_canvas` so hidden rules
+  filter only that surface plus global rules.
+- Hovering a Planning Canvas Google event reveals an eye-off action.
+- Recurring Google events ask whether to hide only this instance or the whole
+  series.
+- A lower-left Planning Canvas sidebar button, e.g. `2 Google Termine
+  ausgeblendet`, opens the restore list.
+
+The `/calendar` surface is model-ready but does not yet expose hide/restore UI.
 
 ## Sync Strategy
 

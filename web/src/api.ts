@@ -4,6 +4,9 @@ import type {
   AppOverview,
   AppPromptLog,
   CalendarEntry,
+  CalendarEventVisibility,
+  CalendarEventVisibilityHiddenScope,
+  CalendarEventVisibilitySurface,
   CalendarEntryType,
   CalendarSource,
   CalendarViewData,
@@ -43,8 +46,42 @@ export async function fetchOpenClawStatus(): Promise<OpenClawStatus> {
   return response.openClaw;
 }
 
-export async function fetchCalendarView(start: string, end: string): Promise<CalendarViewData> {
-  return request<CalendarViewData>(`/api/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+export async function fetchCalendarView(start: string, end: string, input: { surface?: CalendarEventVisibilitySurface } = {}): Promise<CalendarViewData> {
+  const params = new URLSearchParams({ start, end });
+  if (input.surface) {
+    params.set("surface", input.surface);
+  }
+  return request<CalendarViewData>(`/api/calendar?${params.toString()}`);
+}
+
+export async function fetchHiddenCalendarEvents(surface: CalendarEventVisibilitySurface): Promise<CalendarEventVisibility[]> {
+  const response = await request<{ hiddenEvents: CalendarEventVisibility[] }>(`/api/calendar/hidden-events?surface=${encodeURIComponent(surface)}`);
+  return response.hiddenEvents;
+}
+
+export async function hideCalendarEvent(input: {
+  surface: CalendarEventVisibilitySurface;
+  hiddenScope: CalendarEventVisibilityHiddenScope;
+  calendarSourceId?: number | null;
+  externalCalendarId: string;
+  externalEventId?: string | null;
+  recurringEventId?: string | null;
+  originalStartAt?: string | null;
+  iCalUID?: string | null;
+  titleSnapshot: string;
+  startAtSnapshot?: string | null;
+  endAtSnapshot?: string | null;
+}): Promise<CalendarEventVisibility> {
+  const response = await request<{ hiddenEvent: CalendarEventVisibility }>("/api/calendar/hidden-events", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.hiddenEvent;
+}
+
+export async function unhideCalendarEvent(id: number): Promise<void> {
+  await request(`/api/calendar/hidden-events/${id}`, { method: "DELETE" });
 }
 
 export async function createCalendarEntry(input: {
@@ -116,6 +153,20 @@ export async function updateGoogleOnlyEvent(input: {
 }): Promise<void> {
   await request("/api/calendar/google-events", {
     method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+}
+
+export async function createGoogleOnlyEvent(input: {
+  calendarSourceId: number;
+  title: string;
+  startAt: string;
+  endAt: string;
+  allDay: boolean;
+}): Promise<void> {
+  await request("/api/calendar/google-only-events", {
+    method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input)
   });

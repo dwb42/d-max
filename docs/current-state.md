@@ -31,7 +31,7 @@ categories, initiatives, initiative_relations,
 planning_canvases, planning_canvas_nodes,
 tasks,
 task_checklist_items,
-calendar_entries, calendar_sources, calendar_event_bindings,
+calendar_entries, calendar_sources, calendar_event_bindings, calendar_event_visibility,
 media_assets, media_links,
 app_chat_messages, app_conversations, app_prompt_logs, app_state_events
 ```
@@ -70,7 +70,27 @@ auto-clear those fields for ideas/habits, so callers should not set them on
 non-project initiatives.
 `planning_canvases` and `planning_canvas_nodes` store a browser-first Planning
 Canvas MVP. The repository ensures one `Default` canvas. The current canvas UI
-is project-only: it renders and parks only initiatives with `type = project`.
+renders and parks only initiatives with `type = project`, and also shows Google
+Calendar all-day or multi-day events from enabled sources as time bars in a
+dedicated top lane, stacking only events that would otherwise overlap.
+As temporary title-based special logic, Google events whose title contains
+`Bianka` and `Kinder` or `Dietrich` and `Kinder` are treated as childcare coverage: they use the
+uppermost Google lane, all other all-day Google events render below them,
+Bianka/Dietrich overlaps are allowed and highlighted, and gaps between
+childcare coverage blocks are marked.
+The Planning Canvas Google lane
+filters out German holidays, birthdays, and Google events already linked to a
+placed project span. Pure Google event lanes are marked with a small Google
+icon at the lane start and do not show a text status/Google lane pill. Editable
+all-day or multi-day Google events can be moved horizontally or resized from
+their left/right edges on the Planning Canvas; every date change opens a
+confirmation modal before the Google event is updated. Dragging right across a
+pure Google lane creates a new all-day Google event after title/calendar
+confirmation. Hovering a Google event reveals an eye-off control that hides the
+event on the Planning Canvas. Recurring Google events ask whether to hide only
+the visible instance or the whole series. Hidden Google event rules are
+restorable from the lower area of the left Planning Canvas sidebar and affect
+only the selected surface.
 Nodes persist manual layout state (`x`, `y`, optional `width`/`height`,
 `collapsed`) for an initiative on that canvas; the rendered horizontal timeline
 bar position is derived from the project's `start_date`/`end_date`, while the
@@ -103,6 +123,8 @@ still move the project vertically between visual rows, but horizontal date
 movement is ignored. Start/end markers and resize handles cannot change locked
 dates, resize handles are hidden, and the Planning Canvas edit modal leaves
 date inputs disabled so timeframe changes go through the project detail modal.
+Project timeline bars with an active Google Calendar project-span binding render
+a Google icon badge in the lower-right corner.
 Parent-child and predecessor/successor relation lines connect timeline
 bars/markers directly; predecessor/successor lines do not use arrowheads. A
 parent-only group can be moved up/down in rows by dragging the parent timeline
@@ -147,6 +169,13 @@ uses last-edit-wins for shared fields unless the project span is locked, marks
 external deletion/read-only/error states on the binding, and surfaces sync
 warnings in the calendar UI. Locked project spans remain DMAX-authoritative for
 the linked Google event so Google-side date moves do not shift the project.
+`calendar_event_visibility` stores DMAX-side Google event hide rules by surface
+(`planning_canvas`, `calendar`, or `global`) without mutating Google Calendar.
+It supports single external events, one recurring instance keyed by
+`recurring_event_id` plus `original_start_at`, and complete recurring series
+keyed by `recurring_event_id`. The current browser UI uses this for Planning
+Canvas Google event hiding; `/calendar` is prepared as a future surface but does
+not yet expose hide controls.
 `media_assets` stores metadata for uploaded media files and `media_links`
 connects those assets to d-max entities. Binary media files are stored outside
 SQLite under `DMAX_MEDIA_STORAGE_DIR` (`data/media` by default, gitignored).
@@ -173,7 +202,8 @@ Configured and authorized Google calendar sources are fetched live in
 fetch returns partial calendar results when individual Google sources or auth
 refresh fail, includes warning metadata, and normalizes richer Google event
 metadata such as provider IDs, links, ETag/update data, recurring status,
-organizer, attendees, ownership, editability, and read-only reason. Events from
+`recurringEventId`, `originalStartTime`, `iCalUID`, organizer, attendees,
+ownership, editability, and read-only reason. Events from
 external organizers are included when their calendar source is active, but
 remain read-only in DMAX. Event-list reads use Google partial-response fields,
 a short in-memory per-source/range cache, in-flight request deduplication, and
@@ -294,7 +324,8 @@ Implemented behavior:
   timeline. Defaults to previous month through six months ahead, with controls
   for 3/6/12/18 months ahead. Bars are clipped to the visible range and open the
   initiative detail when clicked.
-- `/planning-canvas`: project-only manual planning canvas. It has a left
+- `/planning-canvas`: manual project planning canvas with a top lane for Google
+  Calendar all-day and multi-day events. It has a left
   parking lot of unplaced projects with search and category filters, a
   scrollable/pannable weekly-grid canvas, a red vertical today line, and
   editable project timeline bars. Unplaced project rows show project name,
@@ -320,7 +351,10 @@ Implemented behavior:
   are plain lines without arrowheads and there are no relation visibility
   toggles. Dragging from the parking lot creates a
   `planning_canvas_nodes` row and assigns a dropped start date plus one-week
-  default duration when the project has no dates. Zoom changes the time-axis
+  default duration when the project has no dates. Hovering a Google top-lane
+  event reveals an eye-off hide action; recurring Google events offer
+  instance-vs-series hiding. A lower-left sidebar button such as `2 Google
+  Termine ausgeblendet` opens the restore list. Zoom changes the time-axis
   scale and horizontal spacing only.
 - `/calendar`: day/week planning view with Google-Calendar-style day columns and
   a 10-minute time grid. Local d-max entries can be created by dragging active
@@ -401,9 +435,13 @@ Implemented in `src/api/server.ts`.
 GET  /health
 GET  /api/app/overview
 GET  /api/calendar
+GET  /api/calendar/hidden-events
+POST /api/calendar/hidden-events
+DELETE /api/calendar/hidden-events/:id
 POST /api/calendar/entries
 PATCH /api/calendar/entries/:id
 POST /api/calendar/entries/:id/complete
+POST /api/calendar/google-only-events
 DELETE /api/calendar/entries/:id
 POST /api/calendar/google-events
 PATCH /api/calendar/google-events
