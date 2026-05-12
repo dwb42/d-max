@@ -97,6 +97,8 @@ Rules:
 - `initiative.startDate` and `initiative.endDate` are inclusive DMAX dates.
 - Google all-day events use Google's exclusive end date internally; provider
   code hides that conversion.
+- Timed Google events that span multiple dates are project-span-compatible and
+  normalize to date-only DMAX project spans.
 - `calendar_entries` represent concrete sessions, appointments, or work blocks.
 - Tasks do not own date spans directly. A task can have multiple
   `calendar_entries`.
@@ -185,8 +187,8 @@ DMAX remains locally editable when Google is unavailable or a write fails.
 - Save DMAX change locally.
 - Mark binding as `pending_sync` or `sync_error`.
 - Retry on the next calendar refresh.
-- If the source is now read-only, local edits are allowed but sync is marked
-  blocked.
+- If the source or linked Google event is read-only, local edits are allowed but
+  sync is marked blocked/error with the concrete read-only reason where known.
 
 ### Sync Trigger
 

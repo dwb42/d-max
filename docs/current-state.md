@@ -164,11 +164,15 @@ initiative's date span) to one Google calendar event, with at most one active
 binding per local time object and per external provider event. Linked
 `calendar_entry` rows sync title/start/end with linked timed Google events.
 Linked project spans sync `initiative.name`, `start_date`, and `end_date` with
-linked Google all-day events. Sync runs lazily when `/api/calendar` is loaded,
+linked Google all-day events and timed Google events that span multiple dates;
+timed multi-day events are normalized to date-only project spans in DMAX. Sync
+runs lazily when `/api/calendar` is loaded,
 uses last-edit-wins for shared fields unless the project span is locked, marks
 external deletion/read-only/error states on the binding, and surfaces sync
-warnings in the calendar UI. Locked project spans remain DMAX-authoritative for
-the linked Google event so Google-side date moves do not shift the project.
+warnings in the calendar UI. Read-only sync warnings preserve the concrete
+Google reason where known, for example events owned by an external organizer.
+Locked project spans remain DMAX-authoritative for the linked Google event so
+Google-side date moves do not shift the project.
 `calendar_event_visibility` stores DMAX-side Google event hide rules by surface
 (`planning_canvas`, `calendar`, or `global`) without mutating Google Calendar.
 It supports single external events, one recurring instance keyed by
