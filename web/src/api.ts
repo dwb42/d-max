@@ -165,11 +165,19 @@ export async function createGoogleOnlyEvent(input: {
   endAt: string;
   allDay: boolean;
 }): Promise<void> {
-  await request("/api/calendar/google-only-events", {
+  const init = {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input)
-  });
+  };
+  try {
+    await request("/api/calendar/google-only-events", init);
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== "Not found") {
+      throw error;
+    }
+    await request("/api/calendar/google-events", init);
+  }
 }
 
 export async function linkGoogleEventFromGoogle(input: {

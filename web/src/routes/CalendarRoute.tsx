@@ -808,10 +808,11 @@ function GoogleEventDialog(props: {
   onClose: () => void;
 }) {
   const event = props.event;
+  const projectSpanCandidate = isGoogleProjectSpanCandidate(event);
   const projectInitiatives = props.initiatives.filter((initiative) => initiative.type === "project");
   const [title, setTitle] = useState(event.title);
-  const [startAt, setStartAt] = useState(event.allDay ? event.startAt : event.startAt.slice(0, 16));
-  const [endAt, setEndAt] = useState(event.allDay ? event.endAt : event.endAt.slice(0, 16));
+  const [startAt, setStartAt] = useState(projectSpanCandidate ? datePart(event.startAt) : event.startAt.slice(0, 16));
+  const [endAt, setEndAt] = useState(projectSpanCandidate ? datePart(event.endAt) : event.endAt.slice(0, 16));
   const [projectId, setProjectId] = useState<number | null>(projectInitiatives[0]?.id ?? null);
   const [taskId, setTaskId] = useState<number | null>(props.tasks[0]?.id ?? null);
   const [categoryId, setCategoryId] = useState<number | null>(props.categories[0]?.id ?? null);
@@ -843,12 +844,14 @@ function GoogleEventDialog(props: {
     externalEtag: event.etag,
     externalUpdatedAt: event.updatedAt,
     title: title.trim() || event.title,
-    startAt: event.allDay ? startAt : `${startAt}:00.000`,
-    endAt: event.allDay ? endAt : `${endAt}:00.000`,
-    allDay: event.allDay
+    startAt: projectSpanCandidate ? startAt : `${startAt}:00.000`,
+    endAt: projectSpanCandidate ? endAt : `${endAt}:00.000`,
+    allDay: projectSpanCandidate
   };
 
-  const googleEventChanged = title.trim() !== event.title || googlePayload.startAt !== event.startAt || googlePayload.endAt !== event.endAt;
+  const originalComparableStartAt = projectSpanCandidate ? datePart(event.startAt) : event.startAt;
+  const originalComparableEndAt = projectSpanCandidate ? datePart(event.endAt) : event.endAt;
+  const googleEventChanged = title.trim() !== event.title || googlePayload.startAt !== originalComparableStartAt || googlePayload.endAt !== originalComparableEndAt;
 
   function validateSave(): string | null {
     if (event.editable && !title.trim()) return "Titel darf nicht leer sein.";
@@ -874,7 +877,7 @@ function GoogleEventDialog(props: {
           title: googlePayload.title,
           startAt: googlePayload.startAt,
           endAt: googlePayload.endAt,
-          allDay: event.allDay
+          allDay: googlePayload.allDay
         });
       }
       if (!event.recurring && !event.binding && linkMode !== "none") {
@@ -912,7 +915,7 @@ function GoogleEventDialog(props: {
           </div>
           <div>
             <dt>Zeit</dt>
-            <dd>{event.allDay ? `${formatDateOnly(event.startAt)}-${formatDateOnly(event.endAt)}` : formatTimeRange(event.startAt, event.endAt)}</dd>
+            <dd>{projectSpanCandidate ? `${formatDateOnly(datePart(event.startAt))}-${formatDateOnly(datePart(event.endAt))}` : formatTimeRange(event.startAt, event.endAt)}</dd>
           </div>
           <div>
             <dt>Status</dt>
@@ -965,18 +968,18 @@ function GoogleEventDialog(props: {
             <div className="google-event-date-grid">
               <label className="google-event-field">
                 <span>Start</span>
-                <input type={event.allDay ? "date" : "datetime-local"} value={startAt} disabled={busy} onChange={(inputEvent) => setStartAt(inputEvent.target.value)} />
+                <input type={projectSpanCandidate ? "date" : "datetime-local"} value={startAt} disabled={busy} onChange={(inputEvent) => setStartAt(inputEvent.target.value)} />
               </label>
               <label className="google-event-field">
                 <span>Ende</span>
-                <input type={event.allDay ? "date" : "datetime-local"} value={endAt} disabled={busy} onChange={(inputEvent) => setEndAt(inputEvent.target.value)} />
+                <input type={projectSpanCandidate ? "date" : "datetime-local"} value={endAt} disabled={busy} onChange={(inputEvent) => setEndAt(inputEvent.target.value)} />
               </label>
             </div>
           </form>
         ) : null}
         {!event.recurring && !event.binding ? (
           <div className="google-event-link-actions">
-            {event.allDay ? (
+            {projectSpanCandidate ? (
               <>
                 <div className="segmented-control google-event-link-mode-control">
                   <button type="button" className={linkMode === "existing_project" ? "active" : ""} onClick={() => setLinkMode(linkMode === "existing_project" ? "none" : "existing_project")}>
@@ -990,7 +993,7 @@ function GoogleEventDialog(props: {
                   <section className="google-event-link-section">
                     <div className="google-event-section-title">
                       <strong>Mit bestehendem Projekt verknüpfen</strong>
-                      <span>Dieses Google-Ganztags-Event wird mit der Projekt-Zeitspanne verbunden.</span>
+                      <span>Dieses Google-Ganztags- oder Mehrtags-Event wird mit der Projekt-Zeitspanne verbunden.</span>
                     </div>
                     <label className="google-event-field">
                       <span>Projekt</span>
@@ -1028,7 +1031,7 @@ function GoogleEventDialog(props: {
                   <section className="google-event-link-section">
                     <div className="google-event-section-title">
                       <strong>Neues Projekt aus Google erstellen</strong>
-                      <span>DMAX übernimmt Titel und Zeitraum dieses Google-Events als neues Projekt.</span>
+                      <span>DMAX übernimmt Titel und Datumszeitraum dieses Google-Events als neues Projekt.</span>
                     </div>
                     <label className="google-event-field">
                       <span>Kategorie</span>
@@ -1385,6 +1388,10 @@ function layoutAllDayEvents(events: CalendarViewEvent[], days: string[]): Calend
 }
 
 function isCalendarAllDayLaneEvent(event: CalendarViewEvent): boolean {
+  return event.allDay || datePart(event.startAt) !== datePart(event.endAt);
+}
+
+function isGoogleProjectSpanCandidate(event: Extract<CalendarViewEvent, { source: "google" }>): boolean {
   return event.allDay || datePart(event.startAt) !== datePart(event.endAt);
 }
 

@@ -147,6 +147,73 @@ describe("CalendarService", () => {
     });
   });
 
+  it("explains why local changes were not synced when the linked Google event is not editable", async () => {
+    const category = new CategoryRepository(db).create({ name: "Events" });
+    const initiatives = new InitiativeRepository(db);
+    const project = initiatives.create({
+      categoryId: category.id,
+      type: "project",
+      name: "Hoffest Astraea",
+      startDate: "2026-06-19",
+      endDate: "2026-06-21"
+    }, "2026-06-01T07:00:00.000Z");
+    const source = new CalendarSourceRepository(db).create({
+      accountLabel: "dw@example.com",
+      calendarId: "primary",
+      displayName: "Google",
+      readOnly: false
+    });
+    const bindings = new CalendarEventBindingRepository(db);
+    const binding = bindings.create({
+      localEntityType: "initiative_project_span",
+      localEntityId: project.id,
+      calendarSourceId: source.id,
+      externalCalendarId: "primary",
+      externalEventId: "google-event-1",
+      externalEtag: "etag-1",
+      externalUpdatedAt: "2026-06-01T08:00:00.000Z",
+      lastSyncedAt: "2026-06-01T08:00:00.000Z"
+    });
+    initiatives.update({ id: project.id, name: "Hoffest Astraea" }, "2026-06-02T08:00:00.000Z");
+    const provider = new FakeGoogleCalendarProvider({
+      id: "google-event-1",
+      externalCalendarId: "primary",
+      externalEventId: "google-event-1",
+      title: "Hoffest Astraea",
+      startAt: "2026-06-19",
+      endAt: "2026-06-21",
+      allDay: true,
+      sourceId: source.id,
+      sourceDisplayName: source.displayName,
+      htmlLink: "https://calendar.google.com/event?eid=google-event-1",
+      etag: "etag-1",
+      updatedAt: "2026-06-01T08:00:00.000Z",
+      recurring: false,
+      organizerSelf: false,
+      sourceReadOnly: false,
+      editable: false,
+      readOnlyReason: "external_organizer",
+      color: source.color,
+      readOnly: true
+    });
+
+    const warnings = await new CalendarService(db, provider).syncLinkedLocalEntity({
+      localEntityType: "initiative_project_span",
+      localEntityId: project.id
+    });
+
+    expect(provider.lastUpdate).toBeNull();
+    expect(warnings).toEqual([{
+      scope: "sync",
+      sourceId: source.id,
+      message: "Hoffest Astraea: Google event is not editable because you are not the organizer. Local changes were not synced."
+    }]);
+    expect(bindings.findById(binding.id)).toMatchObject({
+      syncStatus: "sync_error",
+      syncMessage: "Google event is not editable because you are not the organizer."
+    });
+  });
+
   it("keeps a locked project span authoritative when Google changed later", async () => {
     const category = new CategoryRepository(db).create({ name: "Travel" });
     const initiatives = new InitiativeRepository(db);
@@ -217,6 +284,67 @@ describe("CalendarService", () => {
       }
     });
     expect(warnings[0]?.message).toContain("timeframe is locked");
+  });
+
+  it("treats timed multi-day Google events as project-span compatible", async () => {
+    const category = new CategoryRepository(db).create({ name: "Retreats" });
+    const initiatives = new InitiativeRepository(db);
+    const project = initiatives.create({
+      categoryId: category.id,
+      type: "project",
+      name: "Old Retreat",
+      startDate: "2026-05-10",
+      endDate: "2026-05-11"
+    }, "2026-05-01T07:00:00.000Z");
+    const source = new CalendarSourceRepository(db).create({
+      accountLabel: "dw@example.com",
+      calendarId: "primary",
+      displayName: "Google",
+      readOnly: false
+    });
+    new CalendarEventBindingRepository(db).create({
+      localEntityType: "initiative_project_span",
+      localEntityId: project.id,
+      calendarSourceId: source.id,
+      externalCalendarId: "primary",
+      externalEventId: "google-event-1",
+      externalEtag: "etag-1",
+      externalUpdatedAt: "2026-05-01T08:00:00.000Z",
+      lastSyncedAt: "2026-05-01T08:00:00.000Z"
+    });
+    const provider = new FakeGoogleCalendarProvider({
+      id: "google-event-1",
+      externalCalendarId: "primary",
+      externalEventId: "google-event-1",
+      title: "Timed Multi-day Retreat",
+      startAt: "2026-05-17T15:00:00.000",
+      endAt: "2026-05-19T19:00:00.000",
+      allDay: false,
+      sourceId: source.id,
+      sourceDisplayName: source.displayName,
+      htmlLink: "https://calendar.google.com/event?eid=google-event-1",
+      etag: "etag-2",
+      updatedAt: "2026-05-02T08:00:00.000Z",
+      recurring: false,
+      organizerSelf: true,
+      sourceReadOnly: false,
+      editable: true,
+      readOnlyReason: null,
+      color: source.color,
+      readOnly: true
+    });
+
+    const warnings = await new CalendarService(db, provider).syncLinkedLocalEntity({
+      localEntityType: "initiative_project_span",
+      localEntityId: project.id
+    });
+
+    expect(warnings).toEqual([]);
+    expect(initiatives.findById(project.id)).toMatchObject({
+      name: "Timed Multi-day Retreat",
+      startDate: "2026-05-17",
+      endDate: "2026-05-19"
+    });
   });
 
   it("filters hidden Google events only for the requested surface", async () => {

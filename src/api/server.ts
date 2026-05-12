@@ -214,16 +214,28 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/calendar/google-events") {
-      const body = createGoogleEventFromDmaxBody.parse(await readJson(req));
-      const result = await createGoogleEventFromDmax(body);
-      emitApiStateEvent({
-        operation: "createGoogleCalendarEvent",
-        entityType: result.binding.localEntityType === "calendar_entry" ? "calendar_entry" : "initiative",
-        entityId: result.binding.localEntityId,
-        initiativeId: result.binding.localEntityType === "initiative_project_span" ? result.binding.localEntityId : result.entry?.initiativeId ?? null,
-        taskId: result.entry?.taskId ?? null
+      const body = createGoogleEventBody.parse(await readJson(req));
+      if ("localEntityType" in body) {
+        const result = await createGoogleEventFromDmax(body);
+        emitApiStateEvent({
+          operation: "createGoogleCalendarEvent",
+          entityType: result.binding.localEntityType === "calendar_entry" ? "calendar_entry" : "initiative",
+          entityId: result.binding.localEntityId,
+          initiativeId: result.binding.localEntityType === "initiative_project_span" ? result.binding.localEntityId : result.entry?.initiativeId ?? null,
+          taskId: result.entry?.taskId ?? null
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      const source = requireWritableCalendarSource(body.calendarSourceId);
+      const event = await new GoogleCalendarProvider().createEvent(source, {
+        title: body.title,
+        startAt: body.startAt,
+        endAt: body.endAt,
+        allDay: body.allDay
       });
-      sendJson(res, 200, result);
+      sendJson(res, 200, { event });
       return;
     }
 
@@ -1129,6 +1141,17 @@ const createGoogleEventFromDmaxBody = z.object({
   calendarSourceId: z.number().int().positive()
 });
 
+const createGoogleEventBody = z.union([
+  createGoogleEventFromDmaxBody,
+  z.object({
+    calendarSourceId: z.number().int().positive(),
+    title: z.string().trim().min(1),
+    startAt: z.string().trim().min(1),
+    endAt: z.string().trim().min(1),
+    allDay: z.boolean()
+  })
+]);
+
 const updateGoogleOnlyEventBody = z.object({
   calendarSourceId: z.number().int().positive(),
   externalEventId: z.string().trim().min(1),
@@ -1559,9 +1582,11 @@ async function linkGoogleEventToDmax(input: z.infer<typeof linkGoogleEventBody>)
   }
 
   if (input.target.type === "existing_project_span" || input.target.type === "new_project") {
-    if (!input.allDay) {
-      throw new Error("Only all-day Google events can be linked to project spans.");
+    if (!isProjectSpanCompatibleGoogleEvent(input)) {
+      throw new Error("Only all-day or multi-day Google events can be linked to project spans.");
     }
+    const projectStartDate = datePart(input.startAt);
+    const projectEndDate = datePart(input.endAt);
     const initialDirection = input.initialDirection ?? "google_to_dmax";
     const provider = new GoogleCalendarProvider();
     let initiative;
@@ -1570,8 +1595,8 @@ async function linkGoogleEventToDmax(input: z.infer<typeof linkGoogleEventBody>)
         categoryId: input.target.categoryId,
         type: "project",
         name: input.target.name ?? input.title,
-        startDate: input.startAt,
-        endDate: input.endAt
+        startDate: projectStartDate,
+        endDate: projectEndDate
       });
     } else {
       const existing = initiatives.findById(input.target.initiativeId);
@@ -1582,7 +1607,7 @@ async function linkGoogleEventToDmax(input: z.infer<typeof linkGoogleEventBody>)
         initialDirection
       });
       initiative = initialDirection === "google_to_dmax"
-        ? initiatives.update({ id: project.id, name: input.title, startDate: input.startAt, endDate: input.endAt })
+        ? initiatives.update({ id: project.id, name: input.title, startDate: projectStartDate, endDate: projectEndDate })
         : project;
     }
 
@@ -1669,6 +1694,14 @@ function requireWritableCalendarSource(id: number): NonNullable<ReturnType<Calen
     throw new Error("Calendar source is read-only.");
   }
   return source;
+}
+
+function isProjectSpanCompatibleGoogleEvent(input: { allDay: boolean; startAt: string; endAt: string }): boolean {
+  return input.allDay || datePart(input.startAt) !== datePart(input.endAt);
+}
+
+function datePart(value: string): string {
+  return value.slice(0, 10);
 }
 
 function googleMarkerDescription(localEntityType: "calendar_entry" | "initiative_project_span", localEntityId: number): string {

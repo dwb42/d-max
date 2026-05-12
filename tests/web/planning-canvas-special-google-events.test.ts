@@ -12,7 +12,15 @@ describe("planning canvas special Google event rules", () => {
       kind: "childcare_bianka",
       personLabel: "Bianka"
     });
+    expect(classifyPlanningCanvasSpecialGoogleEvent(googleEvent("Bianka mit Kindern Im Urlaub"))).toMatchObject({
+      kind: "childcare_bianka",
+      personLabel: "Bianka"
+    });
     expect(classifyPlanningCanvasSpecialGoogleEvent(googleEvent("Dietrich uebernimmt die Kinder"))).toMatchObject({
+      kind: "childcare_dietrich",
+      personLabel: "Dietrich"
+    });
+    expect(classifyPlanningCanvasSpecialGoogleEvent(googleEvent("Kindern Urlaub Dietrich"))).toMatchObject({
       kind: "childcare_dietrich",
       personLabel: "Dietrich"
     });

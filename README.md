@@ -24,8 +24,9 @@ npm run dev
 ```
 
 `npm run dev` is the default local entrypoint. It warms the local OpenClaw
-gateway first and then starts the API and Vite web app. If LiveKit is configured,
-it also starts the Drive voice agent in watch mode.
+gateway first and then starts the API in watch mode and the Vite web app. API
+changes under `src/` restart the local API automatically. If LiveKit is
+configured, it also starts the Drive voice agent in watch mode.
 
 Open `http://localhost:5173`.
 

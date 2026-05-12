@@ -241,7 +241,7 @@ type RelationshipCreateDraft = {
 };
 type PlanningCanvasRelatedProjectDirection = "predecessor" | "successor";
 type PlanningCanvasTimeDragMode = "move" | "resize-start" | "resize-end" | "move-start" | "move-end";
-type PlanningCanvasGoogleTimeDragMode = "move" | "resize-start" | "resize-end";
+type PlanningCanvasGoogleTimeDragMode = "resize-start" | "resize-end";
 type PlanningCanvasTimeDragState = {
   nodeId: number;
   initiativeId: number;
@@ -3457,6 +3457,7 @@ function PlanningCanvasView(props: {
   const [googleCreateDrag, setGoogleCreateDrag] = useState<PlanningCanvasGoogleCreateDragState | null>(null);
   const [pendingGoogleTimeChange, setPendingGoogleTimeChange] = useState<PlanningCanvasGoogleTimeChangeDraft | null>(null);
   const [pendingGoogleCreate, setPendingGoogleCreate] = useState<PlanningCanvasGoogleCreateDraft | null>(null);
+  const [editingGoogleEvent, setEditingGoogleEvent] = useState<Extract<CalendarViewEvent, { source: "google" }> | null>(null);
   const [googleMutationBusy, setGoogleMutationBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [calendarEvents, setCalendarEvents] = useState<CalendarViewEvent[]>([]);
@@ -3929,12 +3930,7 @@ function PlanningCanvasView(props: {
       void loadPlanningCanvasCalendar();
       return;
     }
-    if (!changed) {
-      if (!finalDrag.moved && target.htmlLink) {
-        window.open(target.htmlLink, "_blank", "noopener,noreferrer");
-      }
-      return;
-    }
+    if (!changed) return;
     setPendingGoogleTimeChange({
       event: {
         ...target,
@@ -3988,7 +3984,7 @@ function PlanningCanvasView(props: {
   };
 
   const startGoogleCreateDrag = (event: ReactPointerEvent<HTMLDivElement>, row: number) => {
-    if (googleMutationBusy || pendingGoogleCreate || pendingGoogleTimeChange) return;
+    if (googleMutationBusy || pendingGoogleCreate || pendingGoogleTimeChange || editingGoogleEvent) return;
     const stage = stageRef.current;
     if (!stage) return;
     const rect = stage.getBoundingClientRect();
@@ -4063,6 +4059,20 @@ function PlanningCanvasView(props: {
     } finally {
       setGoogleMutationBusy(false);
     }
+  };
+
+  const saveGoogleEventEdit = async (input: { title: string; startDate: string; endDate: string }) => {
+    if (!editingGoogleEvent || !editingGoogleEvent.editable) return;
+    await updateGoogleOnlyEvent({
+      calendarSourceId: editingGoogleEvent.sourceId,
+      externalEventId: editingGoogleEvent.externalEventId,
+      title: input.title.trim(),
+      startAt: input.startDate,
+      endAt: input.endDate,
+      allDay: true
+    });
+    setEditingGoogleEvent(null);
+    await loadPlanningCanvasCalendar();
   };
 
   return (
@@ -4287,23 +4297,16 @@ function PlanningCanvasView(props: {
                   style={{ left: visual.left * canvasZoom, top: visual.top, width: visual.width * canvasZoom, backgroundColor: visual.color, color: visual.special?.textColor }}
                   title={visual.title}
                   aria-label={visual.title}
-                  role={visual.htmlLink ? "link" : "group"}
-                  tabIndex={visual.htmlLink ? 0 : undefined}
-                  onPointerDown={(event) => startGoogleTimeDrag(event, visual, "move")}
-                  onPointerMove={onGoogleTimePointerMove}
-                  onPointerUp={finishGoogleTimeDrag}
-                  onPointerCancel={() => {
-                    setGoogleTimeDrag(null);
-                    void loadPlanningCanvasCalendar();
-                  }}
+                  role="button"
+                  tabIndex={0}
                   onClick={(event) => {
-                    if (visual.event.editable || (event.target as HTMLElement).closest("button")) return;
-                    if (visual.htmlLink) window.open(visual.htmlLink, "_blank", "noopener,noreferrer");
+                    if ((event.target as HTMLElement).closest("button")) return;
+                    setEditingGoogleEvent(visual.event);
                   }}
                   onKeyDown={(event) => {
-                    if ((event.key === "Enter" || event.key === " ") && visual.htmlLink) {
+                    if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      window.open(visual.htmlLink, "_blank", "noopener,noreferrer");
+                      setEditingGoogleEvent(visual.event);
                     }
                   }}
                 >
@@ -4345,6 +4348,15 @@ function PlanningCanvasView(props: {
                     className="planning-canvas-google-hide-button"
                     title="Dieses Event ausblenden"
                     aria-label={`${visual.name} ausblenden`}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onPointerMove={(event) => event.stopPropagation()}
+                    onPointerUp={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
@@ -4570,6 +4582,27 @@ function PlanningCanvasView(props: {
           onChange={setPendingGoogleCreate}
           onCancel={cancelGoogleCreate}
           onConfirm={() => void confirmGoogleCreate()}
+        />
+      ) : null}
+
+      {editingGoogleEvent ? (
+        <PlanningCanvasGoogleEventEditModal
+          event={editingGoogleEvent}
+          busy={googleMutationBusy}
+          onCancel={() => setEditingGoogleEvent(null)}
+          onSave={async (input) => {
+            try {
+              setGoogleMutationBusy(true);
+              setError(null);
+              await saveGoogleEventEdit(input);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Google Event konnte nicht gespeichert werden.");
+              await loadPlanningCanvasCalendar();
+              throw err;
+            } finally {
+              setGoogleMutationBusy(false);
+            }
+          }}
         />
       ) : null}
 
@@ -4874,6 +4907,84 @@ function PlanningCanvasGoogleEventCreateModal(props: {
         <footer className="planning-canvas-modal-actions">
           <button type="button" className="secondary-action compact" disabled={props.busy} onClick={props.onCancel}>Abbrechen</button>
           <button type="button" className="primary-action compact" disabled={props.busy || !canSave} onClick={props.onConfirm}>Google Event erstellen</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function PlanningCanvasGoogleEventEditModal(props: {
+  event: Extract<CalendarViewEvent, { source: "google" }>;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (input: { title: string; startDate: string; endDate: string }) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(props.event.title);
+  const [startDate, setStartDate] = useState(datePart(props.event.startAt));
+  const [endDate, setEndDate] = useState(datePart(props.event.endAt));
+  const [error, setError] = useState<string | null>(null);
+  const disabled = props.busy || !props.event.editable;
+  const dateRangeInvalid = Boolean(startDate && endDate && endDate < startDate);
+  const canSave = props.event.editable && title.trim().length > 0 && startDate.length > 0 && endDate.length > 0 && !dateRangeInvalid;
+
+  const save = async () => {
+    if (!canSave) return;
+    try {
+      setError(null);
+      await props.onSave({ title, startDate, endDate });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google Event konnte nicht gespeichert werden.");
+    }
+  };
+
+  return (
+    <div className="planning-canvas-modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
+      <section className="planning-canvas-modal planning-canvas-google-event-modal" role="dialog" aria-modal="true" aria-label="Google Event bearbeiten" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="planning-canvas-modal-header">
+          <div>
+            <span>Google Event</span>
+            <h2>Event bearbeiten</h2>
+            <p>{props.event.sourceDisplayName}</p>
+          </div>
+          <button type="button" className="icon-button" aria-label="Schliessen" disabled={props.busy} onClick={props.onCancel}>
+            <X size={18} />
+          </button>
+        </header>
+        <div className="planning-canvas-modal-form">
+          <label>
+            Titel
+            <input
+              value={title}
+              disabled={disabled}
+              onChange={(event) => setTitle(event.target.value)}
+            />
+          </label>
+          <label>
+            Startdatum
+            <input
+              type="date"
+              value={startDate}
+              disabled={disabled}
+              onChange={(event) => setStartDate(event.target.value)}
+            />
+          </label>
+          <label>
+            Enddatum
+            <input
+              type="date"
+              value={endDate}
+              min={startDate || undefined}
+              disabled={disabled}
+              onChange={(event) => setEndDate(event.target.value)}
+            />
+          </label>
+          {!props.event.editable ? <div className="config-hint">{props.event.readOnlyReason ?? "Dieses Google Event ist schreibgeschützt."}</div> : null}
+          {dateRangeInvalid ? <div className="form-error">Das Enddatum darf nicht vor dem Startdatum liegen.</div> : null}
+          {error ? <div className="form-error">{error}</div> : null}
+        </div>
+        <footer className="planning-canvas-modal-actions">
+          <button type="button" className="secondary-action compact" disabled={props.busy} onClick={props.onCancel}>Abbrechen</button>
+          <button type="button" className="primary-action compact" disabled={props.busy || !canSave} onClick={() => void save()}>Google Event speichern</button>
         </footer>
       </section>
     </div>
@@ -8611,13 +8722,6 @@ function planningCanvasShiftGoogleDatesForDrag(
 ): { startDate: string; endDate: string } {
   if (dayDelta === 0) {
     return { startDate: drag.originStartDate, endDate: drag.originEndDate };
-  }
-
-  if (drag.mode === "move") {
-    return {
-      startDate: shiftDate(drag.originStartDate, dayDelta),
-      endDate: shiftDate(drag.originEndDate, dayDelta)
-    };
   }
 
   if (drag.mode === "resize-start") {

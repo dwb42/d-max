@@ -82,11 +82,12 @@ The Planning Canvas Google lane
 filters out German holidays, birthdays, and Google events already linked to a
 placed project span. Pure Google event lanes are marked with a small Google
 icon at the lane start and do not show a text status/Google lane pill. Editable
-all-day or multi-day Google events can be moved horizontally or resized from
-their left/right edges on the Planning Canvas; every date change opens a
-confirmation modal before the Google event is updated. Dragging right across a
-pure Google lane creates a new all-day Google event after title/calendar
-confirmation. Hovering a Google event reveals an eye-off control that hides the
+all-day or multi-day Google events can be opened in an edit modal by clicking
+the event and resized from their left/right edges on the Planning Canvas; full
+event dragging is disabled, and every resize date change opens a confirmation
+modal before the Google event is updated. Dragging right across a pure Google
+lane creates a new all-day Google event after title/calendar confirmation.
+Hovering a Google event reveals an eye-off control that hides the
 event on the Planning Canvas. Recurring Google events ask whether to hide only
 the visible instance or the whole series. Hidden Google event rules are
 restorable from the lower area of the left Planning Canvas sidebar and affect
@@ -259,8 +260,9 @@ tables.
   watches the OpenClaw session file as a fallback when the gateway request does
   not return its final payload reliably.
 - Local development is started through `npm run dev`. That command warms the
-  local OpenClaw gateway first and only then starts API plus Vite web app; it
-  starts the Drive voice agent too when LiveKit env vars are configured.
+  local OpenClaw gateway first and only then starts the API in watch mode plus
+  the Vite web app; it starts the Drive voice agent too when LiveKit env vars
+  are configured. API changes under `src/` restart the local API automatically.
 - The web-chat OpenClaw config is intentionally narrow. It keeps the browser
   chat path on OpenClaw/Codex while disabling OpenClaw memory-core for this
   runtime; d-max initiative memory remains the SQLite/markdown source of truth.
@@ -279,9 +281,9 @@ Run:
 npm run dev
 ```
 
-This is the standard local start command. It warms OpenClaw first, starts API
-and Vite, and conditionally starts `voice:agent -- --watch` when LiveKit is
-configured.
+This is the standard local start command. It warms OpenClaw first, starts the
+API in watch mode and Vite, and conditionally starts `voice:agent -- --watch`
+when LiveKit is configured.
 
 Implemented behavior:
 

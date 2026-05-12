@@ -303,9 +303,9 @@ export class CalendarService {
         warnings.push({ scope: "sync", sourceId: source.id, message: `${local.title}: Google event became all-day and was not synced.` });
         continue;
       }
-      if (binding.localEntityType === "initiative_project_span" && !external.allDay) {
-        this.bindings.update({ id: binding.id, syncStatus: "sync_error", syncMessage: "Linked project span Google event became timed." });
-        warnings.push({ scope: "sync", sourceId: source.id, message: `${local.title}: project span Google event became timed and was not synced.` });
+      if (binding.localEntityType === "initiative_project_span" && !isProjectSpanCompatibleExternalEvent(external)) {
+        this.bindings.update({ id: binding.id, syncStatus: "sync_error", syncMessage: "Linked project span Google event became single-day timed." });
+        warnings.push({ scope: "sync", sourceId: source.id, message: `${local.title}: project span Google event became single-day timed and was not synced.` });
         continue;
       }
 
@@ -335,12 +335,13 @@ export class CalendarService {
           }
         } else {
           if (!external.editable) {
+            const readOnlyMessage = formatGoogleEventReadOnlyMessage(external.readOnlyReason);
             this.bindings.update({
               id: binding.id,
               syncStatus: source.readOnly ? "sync_blocked_readonly" : "sync_error",
-              syncMessage: external.readOnlyReason ? `Google event is not editable: ${external.readOnlyReason}` : "Google event is not editable."
+              syncMessage: readOnlyMessage
             });
-            warnings.push({ scope: "sync", sourceId: source.id, message: `${local.title}: local changes are not synced because Google is read-only.` });
+            warnings.push({ scope: "sync", sourceId: source.id, message: `${local.title}: ${readOnlyMessage} Local changes were not synced.` });
             continue;
           }
           const updatedExternal = await this.googleProvider.updateEvent(source, binding.externalEventId, {
@@ -415,8 +416,8 @@ export class CalendarService {
     this.initiatives.update({
       id: binding.localEntityId,
       name: external.title,
-      startDate: external.startAt,
-      endDate: external.endAt
+      startDate: datePart(external.startAt),
+      endDate: datePart(external.endAt)
     });
   }
 
@@ -507,6 +508,29 @@ function localOverlapsDateRange(
   range: { startDate: string; endDate: string }
 ): boolean {
   return local.endAt.slice(0, 10) >= range.startDate && local.startAt.slice(0, 10) <= range.endDate;
+}
+
+function isProjectSpanCompatibleExternalEvent(event: ExternalCalendarEvent): boolean {
+  return event.allDay || datePart(event.startAt) !== datePart(event.endAt);
+}
+
+function formatGoogleEventReadOnlyMessage(reason: string | null): string {
+  switch (reason) {
+    case "external_organizer":
+      return "Google event is not editable because you are not the organizer.";
+    case "oauth_scope_missing":
+      return "Google Calendar write permission is missing. Disconnect and reconnect Google Calendar in /config.";
+    case "recurring_not_supported":
+      return "Recurring Google events are not editable from DMAX.";
+    case "source_read_only":
+      return "Google calendar is read-only.";
+    default:
+      return "Google event is not editable.";
+  }
+}
+
+function datePart(value: string): string {
+  return value.slice(0, 10);
 }
 
 function followingTwoCalendarRanges(range: { startDate: string; endDate: string }): Array<{ startDate: string; endDate: string }> {

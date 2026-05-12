@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   }
 
   console.log("[dev] OpenClaw is ready. Starting d-max app stack...");
-  startManagedProcess("api", ["run", "api"]);
+  startManagedProcess("api", ["run", "api:watch"]);
   startManagedProcess("web", ["run", "web"]);
 
   if (env.livekitUrl && env.livekitApiKey && env.livekitApiSecret) {

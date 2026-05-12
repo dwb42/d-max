@@ -7,8 +7,9 @@
   "scripts": {
     "dev": "tsx src/main.ts",
     "dev:app": "npm run dev",
-    "dev:raw": "concurrently \"npm run api\" \"npm run web\" \"npm run voice:agent -- --watch\"",
+    "dev:raw": "concurrently \"npm run api:watch\" \"npm run web\" \"npm run voice:agent -- --watch\"",
     "api": "tsx src/api/server.ts",
+    "api:watch": "tsx watch src/api/server.ts",
     "web": "vite --host 0.0.0.0",
     "web:build": "vite build",
     "mcp": "tsx src/mcp/server.ts",

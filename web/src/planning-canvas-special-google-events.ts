@@ -26,7 +26,7 @@ type PlanningCanvasSpecialGoogleEventRule = {
 const planningCanvasSpecialGoogleEventRules: PlanningCanvasSpecialGoogleEventRule[] = [
   {
     kind: "childcare_bianka",
-    titlePattern: /(?=.*\bbianka\b)(?=.*\bkinder\b)/iu,
+    titlePattern: /(?=.*bianka)(?=.*kinder)/iu,
     className: "childcare-bianka",
     color: "#c96f8f",
     textColor: "#ffffff",
@@ -35,7 +35,7 @@ const planningCanvasSpecialGoogleEventRules: PlanningCanvasSpecialGoogleEventRul
   },
   {
     kind: "childcare_dietrich",
-    titlePattern: /(?=.*\bdietrich\b)(?=.*\bkinder\b)/iu,
+    titlePattern: /(?=.*dietrich)(?=.*kinder)/iu,
     className: "childcare-dietrich",
     color: "#3f6f8f",
     textColor: "#ffffff",
