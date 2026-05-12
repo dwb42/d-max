@@ -14,10 +14,11 @@ const CONTEXT_RELEVANT_TABLES = [
   "media_assets",
   "media_links",
   "calendar_entries",
-  "calendar_sources"
+  "calendar_sources",
+  "calendar_event_bindings"
 ];
 
-const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "a969b1980dab84bb49de14088dd509c41c876ad32b75907b5fb1847f29d7b791";
+const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "1326476788adc55205a3528c9ff9b26e0fe05d64af59d9df503c1fa624864c16";
 
 describe("context resolver schema synchronization", () => {
   let db: Database.Database;

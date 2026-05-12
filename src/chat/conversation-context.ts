@@ -112,7 +112,7 @@ const promptTemplateSpecs: Array<{
       "  Markdown:",
       "  {{idea_markdown}}",
       "Projekte in diesem Lebensbereich ({{project_count}}):",
-      "- #{{project_id}} {{project_name}}; status: {{project_status}}; Zeitraum: {{project_date_range}}",
+      "- #{{project_id}} {{project_name}}; status: {{project_status}}; Zeitraum: {{project_date_range}}; locked: {{project_timeframe_locked}}",
       "  Markdown:",
       "  {{project_markdown}}",
       "Initiative-Reihenfolge in/mit diesem Lebensbereich ({{initiative_relation_count}}):",
@@ -169,7 +169,7 @@ const promptTemplateSpecs: Array<{
     meaning: "Focused on projects across life areas.",
     contextDataLines: [
       "Projects grouped by life area ({{project_count}}):",
-      "- #{{initiative_id}} {{initiative_name}}; status: {{initiative_status}}; time span: {{date_range}}: {{initiative_summary_or_memory}}",
+      "- #{{initiative_id}} {{initiative_name}}; status: {{initiative_status}}; time span: {{date_range}}; locked: {{timeframe_locked}}: {{initiative_summary_or_memory}}",
       "Project precedence relations ({{initiative_relation_count}}):",
       "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}} -> #{{successor_initiative_id}} {{successor_initiative_name}}",
       "Open tasks connected to projects ({{open_task_count}}, showing highest-signal first):",
@@ -183,7 +183,7 @@ const promptTemplateSpecs: Array<{
     type: "project",
     meaning: "Focused on one project. Use the initiative markdown as durable project memory.",
     contextDataLines: [
-      "Initiative: #{{initiative_id}} {{initiative_name}}; type: project (Project); status: {{initiative_status}}; time span: {{startDate}} to {{endDate}}; summary: {{initiative_summary}}",
+      "Initiative: #{{initiative_id}} {{initiative_name}}; type: project (Project); status: {{initiative_status}}; time span: {{startDate}} to {{endDate}}; locked: {{timeframe_locked}}; summary: {{initiative_summary}}",
       "Category: #{{category_id}} {{category_name}} ({{category_color}})",
       "Initiative memory markdown:",
       "{{initiative_markdown}}",
@@ -258,7 +258,7 @@ const promptTemplateSpecs: Array<{
       "Notes: {{task_notes}}",
       "Media attachments ({{media_attachment_count}}):",
       "- #{{media_asset_id}} [{{media_kind}}/{{media_mime_type}}, {{media_byte_size}}] {{media_original_name}}; caption: {{media_caption}}; summary/excerpt: {{media_summary_or_excerpt}}",
-      "Initiative: #{{initiative_id}} {{initiative_name}}; type: {{initiative_type}}; status: {{initiative_status}}; time span: {{initiative_time_span}}; summary: {{initiative_summary}}",
+      "Initiative: #{{initiative_id}} {{initiative_name}}; type: {{initiative_type}}; status: {{initiative_status}}; time span: {{initiative_time_span}}; locked: {{initiative_timeframe_locked}}; summary: {{initiative_summary}}",
       "Category: #{{category_id}} {{category_name}} ({{category_color}})",
       "Initiative memory excerpt:",
       "{{initiative_markdown_excerpt}}",
@@ -743,11 +743,11 @@ function instructionsForContextType(type: string): string[] {
 }
 
 function formatInitiativeHeader(initiative: Initiative): string {
-  return `Initiative: #${initiative.id} ${initiative.name}; type: ${initiative.type} (${formatInitiativeType(initiative.type)}); status: ${initiative.status}; project phase: ${initiative.type === "project" ? initiative.projectPhase : "n/a"}; time span: ${formatInitiativeDateRangeValue(initiative)}; summary: ${initiative.summary ?? "none"}`;
+  return `Initiative: #${initiative.id} ${initiative.name}; type: ${initiative.type} (${formatInitiativeType(initiative.type)}); status: ${initiative.status}; project phase: ${initiative.type === "project" ? initiative.projectPhase : "n/a"}; time span: ${formatInitiativeDateRangeValue(initiative)}; timeframe locked: ${formatInitiativeLockedValue(initiative)}; summary: ${initiative.summary ?? "none"}`;
 }
 
 function formatInitiativeProjectPhase(initiative: Initiative): string {
-  return initiative.type === "project" ? `; phase: ${initiative.projectPhase}` : "";
+  return initiative.type === "project" ? `; phase: ${initiative.projectPhase}; timeframe locked: ${formatInitiativeLockedValue(initiative)}` : "";
 }
 
 function formatInitiativeDateRange(initiative: Initiative): string {
@@ -766,6 +766,10 @@ function formatInitiativeDateRangeValue(initiative: Initiative): string {
     return `ends ${initiative.endDate}`;
   }
   return "none";
+}
+
+function formatInitiativeLockedValue(initiative: Initiative): string {
+  return initiative.type === "project" ? (initiative.isLocked ? "yes" : "no") : "n/a";
 }
 
 function formatInitiativeType(type: Initiative["type"]): string {

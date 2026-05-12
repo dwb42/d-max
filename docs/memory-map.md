@@ -1,6 +1,6 @@
 # d-max Memory Map
 
-Date: 2026-05-08
+Date: 2026-05-12
 
 This file defines where Markdown-based memory and configuration belongs.
 
@@ -14,6 +14,7 @@ This file defines where Markdown-based memory and configuration belongs.
 | `docs/app-ui-plan.md` | Active UI notes | Current UI direction and near-term UI work | Implemented-state duplication |
 | `docs/realtime-voice-plan.md` | Active voice hardening notes | Current voice path and remaining hardening | Product-wide memory or obsolete architecture |
 | `docs/media-attachments-plan.md` | Media attachment implementation notes and follow-up map | Attachment architecture decisions, current v1 capabilities, and remaining media follow-ups | Source-of-truth implemented state that belongs in `docs/current-state.md` |
+| `docs/google-calendar-integration-plan.md` | Google Calendar integration plan and follow-up map | Agreed Google Calendar semantics, sync roadmap, current limitations, and future account/sync work | Source-of-truth implemented state that belongs in `docs/current-state.md` |
 | `docs/archive/` | Historical docs archive | Superseded plans, dated handoffs, and old spec packs kept for background context | Active source-of-truth state, current implementation instructions, or runtime rules |
 
 ## OpenClaw Workspace Memory

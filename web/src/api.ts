@@ -10,6 +10,7 @@ import type {
   Category,
   ChatActivity,
   ConversationContext,
+  GoogleCalendarAccountStatus,
   GoogleCalendarAuthStatus,
   GoogleCalendarListItem,
   LiveKitVoiceSession,
@@ -93,14 +94,80 @@ export async function deleteCalendarEntry(id: number): Promise<void> {
   await request(`/api/calendar/entries/${id}`, { method: "DELETE" });
 }
 
+export async function createGoogleEventFromDmax(input: {
+  localEntityType: "calendar_entry" | "initiative_project_span";
+  localEntityId: number;
+  calendarSourceId: number;
+}): Promise<void> {
+  await request("/api/calendar/google-events", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateGoogleOnlyEvent(input: {
+  calendarSourceId: number;
+  externalEventId: string;
+  title: string;
+  startAt: string;
+  endAt: string;
+  allDay: boolean;
+}): Promise<void> {
+  await request("/api/calendar/google-events", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+}
+
+export async function linkGoogleEventFromGoogle(input: {
+  calendarSourceId: number;
+  externalCalendarId: string;
+  externalEventId: string;
+  externalEtag?: string | null;
+  externalUpdatedAt?: string | null;
+  title: string;
+  startAt: string;
+  endAt: string;
+  allDay: boolean;
+  initialDirection?: "google_to_dmax" | "dmax_to_google";
+  target:
+    | { type: "existing_project_span"; initiativeId: number }
+    | { type: "new_project"; categoryId: number; name?: string }
+    | { type: "existing_project_entry"; initiativeId: number }
+    | { type: "existing_task_entry"; taskId: number }
+    | { type: "new_task_entry"; initiativeId: number; title?: string };
+}): Promise<void> {
+  await request("/api/calendar/bindings/from-google", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+}
+
+export async function unlinkCalendarBinding(id: number, input: { deleteGoogleEvent?: boolean } = {}): Promise<void> {
+  await request(`/api/calendar/bindings/${id}`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+}
+
 export async function fetchCalendarSources(): Promise<CalendarSource[]> {
   const response = await request<{ sources: CalendarSource[] }>("/api/config/calendar-sources");
   return response.sources;
 }
 
-export async function fetchGoogleCalendarAuthStatus(): Promise<GoogleCalendarAuthStatus> {
-  const response = await request<{ googleCalendar: GoogleCalendarAuthStatus }>("/api/config/google-calendar/status");
+export async function fetchGoogleCalendarAuthStatus(accountLabel?: string | null): Promise<GoogleCalendarAuthStatus> {
+  const query = accountLabel?.trim() ? `?accountLabel=${encodeURIComponent(accountLabel.trim())}` : "";
+  const response = await request<{ googleCalendar: GoogleCalendarAuthStatus }>(`/api/config/google-calendar/status${query}`);
   return response.googleCalendar;
+}
+
+export async function fetchGoogleCalendarAccounts(): Promise<GoogleCalendarAccountStatus[]> {
+  const response = await request<{ accounts: GoogleCalendarAccountStatus[] }>("/api/config/google-calendar/accounts");
+  return response.accounts;
 }
 
 export async function createGoogleCalendarAuthUrl(input: { loginHint?: string | null } = {}): Promise<string> {
@@ -112,12 +179,17 @@ export async function createGoogleCalendarAuthUrl(input: { loginHint?: string | 
   return response.authUrl;
 }
 
-export async function disconnectGoogleCalendar(): Promise<void> {
-  await request("/api/config/google-calendar/disconnect", { method: "POST" });
+export async function disconnectGoogleCalendar(accountLabel?: string | null): Promise<void> {
+  await request("/api/config/google-calendar/disconnect", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ accountLabel: accountLabel?.trim() || null })
+  });
 }
 
-export async function fetchGoogleCalendars(): Promise<GoogleCalendarListItem[]> {
-  const response = await request<{ calendars: GoogleCalendarListItem[] }>("/api/config/google-calendar/calendars");
+export async function fetchGoogleCalendars(accountLabel?: string | null): Promise<GoogleCalendarListItem[]> {
+  const query = accountLabel?.trim() ? `?accountLabel=${encodeURIComponent(accountLabel.trim())}` : "";
+  const response = await request<{ calendars: GoogleCalendarListItem[] }>(`/api/config/google-calendar/calendars${query}`);
   return response.calendars;
 }
 
@@ -214,6 +286,7 @@ export async function createInitiative(input: {
   markdown?: string;
   startDate?: string | null;
   endDate?: string | null;
+  isLocked?: boolean;
 }): Promise<Initiative> {
   const response = await request<{ initiative: Initiative }>("/api/initiatives", {
     method: "POST",
@@ -236,6 +309,7 @@ export async function updateInitiative(
     markdown?: string;
     startDate?: string | null;
     endDate?: string | null;
+    isLocked?: boolean;
   }
 ): Promise<Initiative> {
   const response = await request<{ initiative: Initiative }>(`/api/initiatives/${initiativeId}`, {

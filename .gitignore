@@ -15,6 +15,7 @@ data/diagnostics/
 data/media/
 data/google-calendar-oauth*.json
 data/openclaw-web-state/
+data/google-calendar-oauth*.accounts/
 dist/
 dist-web/
 coverage/

@@ -44,6 +44,7 @@ type InitiativeRelationJoinRow = InitiativeRelationRow & {
   predecessor_markdown: string;
   predecessor_start_date: string | null;
   predecessor_end_date: string | null;
+  predecessor_is_locked: number;
   predecessor_sort_order: number;
   predecessor_is_system: number;
   predecessor_created_at: string;
@@ -59,6 +60,7 @@ type InitiativeRelationJoinRow = InitiativeRelationRow & {
   successor_markdown: string;
   successor_start_date: string | null;
   successor_end_date: string | null;
+  successor_is_locked: number;
   successor_sort_order: number;
   successor_is_system: number;
   successor_created_at: string;
@@ -102,6 +104,7 @@ function initiativeFromPrefixedRow(row: InitiativeRelationJoinRow, prefix: "pred
     markdown: row[`${prefix}_markdown`],
     startDate: row[`${prefix}_start_date`],
     endDate: row[`${prefix}_end_date`],
+    isLocked: row[`${prefix}_is_locked`] === 1,
     sortOrder: row[`${prefix}_sort_order`],
     isSystem: row[`${prefix}_is_system`] === 1,
     createdAt: row[`${prefix}_created_at`],
@@ -305,6 +308,7 @@ type InitiativeRow = {
   markdown: string;
   start_date: string | null;
   end_date: string | null;
+  is_locked: number;
   sort_order: number;
   is_system: number;
   created_at: string;
@@ -324,6 +328,7 @@ function initiativeFromRow(row: InitiativeRow): Initiative {
     markdown: row.markdown,
     startDate: row.start_date,
     endDate: row.end_date,
+    isLocked: row.is_locked === 1,
     sortOrder: row.sort_order,
     isSystem: row.is_system === 1,
     createdAt: row.created_at,
@@ -359,6 +364,7 @@ function relationJoinSql(): string {
       p.markdown as predecessor_markdown,
       p.start_date as predecessor_start_date,
       p.end_date as predecessor_end_date,
+      p.is_locked as predecessor_is_locked,
       p.sort_order as predecessor_sort_order,
       p.is_system as predecessor_is_system,
       p.created_at as predecessor_created_at,
@@ -374,6 +380,7 @@ function relationJoinSql(): string {
       s.markdown as successor_markdown,
       s.start_date as successor_start_date,
       s.end_date as successor_end_date,
+      s.is_locked as successor_is_locked,
       s.sort_order as successor_sort_order,
       s.is_system as successor_is_system,
       s.created_at as successor_created_at,

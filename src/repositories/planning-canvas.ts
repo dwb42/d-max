@@ -100,6 +100,7 @@ type InitiativeCanvasRow = PlanningCanvasNodeRow & {
   markdown: string;
   start_date: string | null;
   end_date: string | null;
+  is_locked: number;
   sort_order: number;
   is_system: number;
   initiative_created_at: string;
@@ -123,6 +124,7 @@ type UnmappedInitiativeRow = {
   markdown: string;
   start_date: string | null;
   end_date: string | null;
+  is_locked: number;
   sort_order: number;
   is_system: number;
   created_at: string;
@@ -320,6 +322,7 @@ export class PlanningCanvasRepository {
           i.markdown,
           i.start_date,
           i.end_date,
+          i.is_locked,
           i.sort_order,
           i.is_system,
           i.created_at as initiative_created_at,
@@ -493,6 +496,7 @@ function toPlanningCanvasInitiativeNode(row: InitiativeCanvasRow): Omit<Planning
       markdown: row.markdown,
       start_date: row.start_date,
       end_date: row.end_date,
+      is_locked: row.is_locked,
       sort_order: row.sort_order,
       is_system: row.is_system,
       created_at: row.initiative_created_at,
@@ -524,6 +528,7 @@ function initiativeFromRow(row: {
   markdown: string;
   start_date: string | null;
   end_date: string | null;
+  is_locked: number;
   sort_order: number;
   is_system: number;
   created_at: string;
@@ -541,6 +546,7 @@ function initiativeFromRow(row: {
     markdown: row.markdown,
     startDate: row.start_date,
     endDate: row.end_date,
+    isLocked: row.is_locked === 1,
     sortOrder: row.sort_order,
     isSystem: row.is_system === 1,
     createdAt: row.created_at,

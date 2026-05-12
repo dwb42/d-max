@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   DragEvent,
@@ -28,6 +28,8 @@ import {
   Lightbulb,
   ListTree,
   LayoutGrid,
+  Lock,
+  LockOpen,
   Mic,
   Mic2,
   Paperclip,
@@ -49,9 +51,8 @@ import {
 import { Room, RoomEvent, Track } from "livekit-client";
 import type { RemoteTrack } from "livekit-client";
 import {
-  completeCalendarEntry,
-  createCalendarEntry,
   createCategory,
+  createGoogleEventFromDmax,
   createGoogleCalendarAuthUrl,
   createCalendarSource,
   createChatConversation,
@@ -61,7 +62,6 @@ import {
   createTask,
   createTaskChecklistItem,
   createVoiceSession,
-  deleteCalendarEntry,
   deleteInitiativeRelation,
   deleteTask,
   deleteMediaAttachment,
@@ -71,7 +71,7 @@ import {
   fetchChatConversations,
   fetchChatMessages,
   fetchCalendarSources,
-  fetchCalendarView,
+  fetchGoogleCalendarAccounts,
   fetchGoogleCalendars,
   fetchGoogleCalendarAuthStatus,
   fetchInitiativeGraph,
@@ -93,7 +93,6 @@ import {
   subscribeStateEvents,
   streamChatMessage,
   transcribeVoiceMessage,
-  updateCalendarEntry,
   updateCalendarSource,
   updateCategory,
   updateInitiative,
@@ -103,6 +102,7 @@ import {
   updateTask,
   updateTaskChecklistItem,
   updateTaskStatus,
+  unlinkCalendarBinding,
   uploadMediaAttachment
 } from "./api.js";
 import type {
@@ -110,9 +110,8 @@ import type {
   AppConversation,
   Category,
   CalendarSource,
-  CalendarViewData,
-  CalendarViewEvent,
   ConversationContext,
+  GoogleCalendarAccountStatus,
   GoogleCalendarAuthStatus,
   GoogleCalendarListItem,
   ChatActivity,
@@ -137,6 +136,8 @@ import type {
   TaskDetail
 } from "./types.js";
 import "./styles.css";
+
+const CalendarRoute = lazy(() => import("./routes/CalendarRoute.js"));
 
 type CollectionView = "ideas" | "projects" | "habits";
 type View =
@@ -191,6 +192,7 @@ type CreateInitiativeInput = {
   markdown?: string;
   startDate?: string | null;
   endDate?: string | null;
+  isLocked?: boolean;
 };
 type UpdateInitiativeInput = {
   categoryId?: number;
@@ -203,6 +205,7 @@ type UpdateInitiativeInput = {
   markdown?: string;
   startDate?: string | null;
   endDate?: string | null;
+  isLocked?: boolean;
 };
 type UpdateTaskInput = {
   title?: string;
@@ -211,6 +214,8 @@ type UpdateTaskInput = {
   notes?: string | null;
   dueAt?: string | null;
 };
+const LOCKED_TIMEFRAME_TOOLTIP = "Zeitraum ist gesperrt und kann nicht verschoben werden";
+const LOCKED_CANVAS_TIMEFRAME_TOOLTIP = "Zeitraum ist gesperrt; Projekt kann nur vertikal verschoben werden";
 type RelationshipCreateSlot = "parent" | "child" | "predecessor" | "successor";
 type RelationshipCreateDraft = {
   name: string;
@@ -229,6 +234,7 @@ type PlanningCanvasTimeDragState = {
   originY: number;
   originStartDate: string | null;
   originEndDate: string | null;
+  locksTimeframe: boolean;
   draftY: number;
   draftStartDate: string | null;
   draftEndDate: string | null;
@@ -325,6 +331,44 @@ function pathForLifeArea(categoryName: string): string {
 
 function pathForCollectionCategory(view: CollectionView, categoryName: string): string {
   return `/${view}/${encodeURIComponent(categoryName)}`;
+}
+
+function defaultCalendarControls(): CalendarControlsState {
+  return {
+    mode: "week",
+    anchorDate: dateOnlyLocal(new Date()),
+    showAllDay: true
+  };
+}
+
+function calendarControlsFromPath(path: string): CalendarControlsState {
+  const defaults = defaultCalendarControls();
+  const [pathname, search = ""] = path.split("?");
+  if (pathname !== "/calendar") {
+    return defaults;
+  }
+
+  const params = new URLSearchParams(search);
+  const view = params.get("view") ?? params.get("mode");
+  const date = params.get("date");
+  const allDay = params.get("allDay");
+  return {
+    mode: view === "day" ? "day" : "week",
+    anchorDate: date && isDateOnlyString(date) ? date : defaults.anchorDate,
+    showAllDay: allDay === null ? defaults.showAllDay : allDay !== "0" && allDay.toLowerCase() !== "false"
+  };
+}
+
+function calendarPathForControls(controls: CalendarControlsState): string {
+  const params = new URLSearchParams();
+  params.set("view", controls.mode);
+  params.set("date", controls.anchorDate);
+  params.set("allDay", controls.showAllDay ? "1" : "0");
+  return `/calendar?${params.toString()}`;
+}
+
+function isDateOnlyString(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && Boolean(parseDateOnlyUtc(value));
 }
 
 function collectionViewForInitiativeType(type: InitiativeType): CollectionView {
@@ -464,11 +508,7 @@ export default function App() {
   const [lifeAreaInitiatives, setLifeAreaInitiatives] = useState<Initiative[] | null>(null);
   const [initiativeDetail, setInitiativeDetail] = useState<InitiativeDetail | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
-  const [calendarControls, setCalendarControls] = useState<CalendarControlsState>(() => ({
-    mode: "week",
-    anchorDate: dateOnlyLocal(new Date()),
-    showAllDay: true
-  }));
+  const [calendarControls, setCalendarControls] = useState<CalendarControlsState>(() => calendarControlsFromPath(`${window.location.pathname}${window.location.search}`));
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplateDefinition[]>([]);
   const [promptLogs, setPromptLogs] = useState<AppPromptLog[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState<number | null>(null);
@@ -586,8 +626,22 @@ export default function App() {
   ]);
 
   function navigate(path: string) {
-    window.history.pushState(null, "", path);
-    setRoute(routeFromPath(path));
+    const nextPath = path === "/calendar" ? calendarPathForControls(calendarControls) : path;
+    window.history.pushState(null, "", nextPath);
+    setRoute(routeFromPath(nextPath));
+    if (routeFromPath(nextPath).view === "calendar") {
+      setCalendarControls(calendarControlsFromPath(nextPath));
+    }
+  }
+
+  function updateCalendarControls(updater: CalendarControlsState | ((current: CalendarControlsState) => CalendarControlsState)) {
+    setCalendarControls((current) => {
+      const next = typeof updater === "function" ? updater(current) : updater;
+      const nextPath = calendarPathForControls(next);
+      window.history.pushState(null, "", nextPath);
+      setRoute(routeFromPath(nextPath));
+      return next;
+    });
   }
 
   function toggleSidebar() {
@@ -971,10 +1025,26 @@ export default function App() {
   }, [route]);
 
   useEffect(() => {
-    const onPopState = () => setRoute(routeFromPath(`${window.location.pathname}${window.location.search}`));
+    const onPopState = () => {
+      const path = `${window.location.pathname}${window.location.search}`;
+      const nextRoute = routeFromPath(path);
+      setRoute(nextRoute);
+      if (nextRoute.view === "calendar") {
+        setCalendarControls(calendarControlsFromPath(path));
+      }
+    };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+
+  useEffect(() => {
+    if (route.view !== "calendar") return;
+    const currentPath = `${window.location.pathname}${window.location.search}`;
+    const nextPath = calendarPathForControls(calendarControls);
+    if (currentPath !== nextPath) {
+      window.history.replaceState(null, "", nextPath);
+    }
+  }, [route.view, calendarControls]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1120,10 +1190,17 @@ export default function App() {
           </div>
           <InitiativeDetailHeader
             initiative={initiative}
+            projectCalendarBinding={initiativeDetail?.projectCalendarBinding ?? null}
             onUpdateInitiative={async (initiativeId, input) => {
               await updateInitiative(initiativeId, input);
               await refresh();
               setInitiativeDetail(await fetchInitiativeDetail(initiativeId));
+            }}
+            onCalendarBindingChange={async () => {
+              await refresh();
+              if (initiative) {
+                setInitiativeDetail(await fetchInitiativeDetail(initiative.id));
+              }
             }}
           />
         </div>
@@ -1176,9 +1253,9 @@ export default function App() {
             mode={calendarControls.mode}
             anchorDate={calendarControls.anchorDate}
             days={calendarHeaderDays}
-            onModeChange={(mode) => setCalendarControls((current) => ({ ...current, mode }))}
-            onToday={() => setCalendarControls((current) => ({ ...current, anchorDate: dateOnlyLocal(new Date()) }))}
-            onShift={(days) => setCalendarControls((current) => ({ ...current, anchorDate: shiftDate(current.anchorDate, days) }))}
+            onModeChange={(mode) => updateCalendarControls((current) => ({ ...current, mode }))}
+            onToday={() => updateCalendarControls((current) => ({ ...current, anchorDate: dateOnlyLocal(new Date()) }))}
+            onShift={(days) => updateCalendarControls((current) => ({ ...current, anchorDate: shiftDate(current.anchorDate, days) }))}
           />
         ) : null}
       </header>
@@ -1304,28 +1381,30 @@ export default function App() {
           />
           )}
           {view === "lifeAreas" && (
-          <LifeAreasView
-            categories={overview?.categories ?? []}
-            initiatives={lifeAreaInitiatives ?? overview?.initiatives ?? []}
-            onOpenLifeArea={(categoryName) => navigate(pathForLifeArea(categoryName))}
-            onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
-            onReorderInitiatives={async (categoryId, initiativeIds) => {
-              await reorderInitiatives(categoryId, initiativeIds);
-              await refresh();
-              setLifeAreaInitiatives(await fetchInitiatives());
-            }}
-            onCreateInitiative={async (input) => {
-              try {
-                setError(null);
-                await createInitiative(input);
+            overview ? (
+            <LifeAreasView
+              categories={overview.categories}
+              initiatives={lifeAreaInitiatives ?? overview.initiatives}
+              onOpenLifeArea={(categoryName) => navigate(pathForLifeArea(categoryName))}
+              onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+              onReorderInitiatives={async (categoryId, initiativeIds) => {
+                await reorderInitiatives(categoryId, initiativeIds);
                 await refresh();
                 setLifeAreaInitiatives(await fetchInitiatives());
-              } catch (err) {
-                setError(err instanceof Error ? err.message : "Eintrag konnte nicht angelegt werden.");
-                throw err;
-              }
-            }}
-          />
+              }}
+              onCreateInitiative={async (input) => {
+                try {
+                  setError(null);
+                  await createInitiative(input);
+                  await refresh();
+                  setLifeAreaInitiatives(await fetchInitiatives());
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Eintrag konnte nicht angelegt werden.");
+                  throw err;
+                }
+              }}
+            />
+            ) : <EmptyState title="Lebensbereiche werden geladen" />
           )}
           {view === "lifeArea" && (
           <LifeAreaDetailView
@@ -1365,16 +1444,18 @@ export default function App() {
           />
           )}
           {!isEmptyState && view === "calendar" && (
-          <CalendarPlannerView
-            categories={overview?.categories ?? []}
-            initiatives={overview?.initiatives ?? []}
-            tasks={overview?.tasks ?? []}
-            controls={calendarControls}
-            onShowAllDayChange={() => setCalendarControls((current) => ({ ...current, showAllDay: !current.showAllDay }))}
-            onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
-            onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
-            onAfterChange={refresh}
-          />
+          <Suspense fallback={<EmptyState title="Kalender wird geladen" />}>
+            <CalendarRoute
+              categories={overview?.categories ?? []}
+              initiatives={overview?.initiatives ?? []}
+              tasks={overview?.tasks ?? []}
+              controls={calendarControls}
+              onShowAllDayChange={() => updateCalendarControls((current) => ({ ...current, showAllDay: !current.showAllDay }))}
+              onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+              onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
+              onAfterChange={refresh}
+            />
+          </Suspense>
           )}
           {!isEmptyState && isCollectionView(view) && (
           <InitiativesView
@@ -2928,324 +3009,11 @@ function isInitiative(value: Initiative | undefined): value is Initiative {
 const timelineMonthOptions = [3, 6, 12, 18];
 
 type CalendarMode = "day" | "week";
-type CalendarDragPayload =
-  | { kind: "initiative"; initiativeId: number; title: string }
-  | { kind: "task"; taskId: number; title: string }
-  | { kind: "entry"; entryId: number; durationMinutes: number };
-
-type CalendarDropPreview = {
-  payload: CalendarDragPayload;
-  startMinutes: number;
-  endMinutes: number;
-};
-
-type CalendarDragState = {
-  payload: CalendarDragPayload;
-  offsetY: number;
-};
-
-type CalendarProjectHoverInfo = {
-  name: string;
-  categoryName: string;
-  statusLabel: string;
-  dateRange: string | null;
-  openTaskCount: number;
-  summary: string | null;
-};
-
-type CalendarProjectHoverOverlay = {
-  info: CalendarProjectHoverInfo;
-  top: number;
-  left: number;
-};
-
-const calendarStartHour = 6;
-const calendarDefaultEndHour = 23;
-const calendarSnapMinutes = 10;
-const calendarPixelsPerMinute = 1.035;
-const calendarDefaultDurationMinutes = 90;
-
 type CalendarControlsState = {
   mode: CalendarMode;
   anchorDate: string;
   showAllDay: boolean;
 };
-
-function CalendarPlannerView(props: {
-  categories: AppOverview["categories"];
-  initiatives: Initiative[];
-  tasks: Task[];
-  controls: CalendarControlsState;
-  onShowAllDayChange: () => void;
-  onOpenInitiative: (initiativeId: number) => void;
-  onOpenTask: (taskId: number) => void;
-  onAfterChange: () => Promise<void>;
-}) {
-  const [calendar, setCalendar] = useState<CalendarViewData | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [standaloneDraft, setStandaloneDraft] = useState<{ date: string; startMinutes: number } | null>(null);
-  const [activeCalendarDrag, setActiveCalendarDrag] = useState<CalendarDragState | null>(null);
-  const [sidebarProjectHover, setSidebarProjectHover] = useState<CalendarProjectHoverOverlay | null>(null);
-  const range = useMemo(() => calendarVisibleRange(props.controls.anchorDate, props.controls.mode), [props.controls.anchorDate, props.controls.mode]);
-  const days = useMemo(() => daysInRange(range.start, range.end), [range]);
-  const events = calendar?.events ?? [];
-  const timedEvents = events.filter((event) => !event.allDay);
-  const latestEndMinutes = timedEvents.reduce((max, event) => Math.max(max, minutesFromDateTime(event.endAt)), calendarDefaultEndHour * 60);
-  const endHour = Math.max(calendarDefaultEndHour, Math.ceil(latestEndMinutes / 60));
-  const gridHeight = (endHour * 60 - calendarStartHour * 60) * calendarPixelsPerMinute;
-  const activeProjects = props.initiatives.filter((initiative) => initiative.type === "project" && initiative.status === "active");
-  const tasksByInitiative = new Map<number, Task[]>();
-  for (const task of props.tasks.filter((task) => task.status === "open")) {
-    const current = tasksByInitiative.get(task.initiativeId) ?? [];
-    current.push(task);
-    tasksByInitiative.set(task.initiativeId, current);
-  }
-  const projectHoverInfoById = useMemo(() => {
-    const infoById = new Map<number, CalendarProjectHoverInfo>();
-    for (const initiative of props.initiatives.filter((candidate) => candidate.type === "project")) {
-      const category = props.categories.find((candidate) => candidate.id === initiative.categoryId);
-      const openTaskCount = props.tasks.filter((task) =>
-        task.initiativeId === initiative.id && task.status !== "done"
-      ).length;
-      const summary = initiative.summary?.trim() || firstMarkdownLine(initiative.markdown);
-      infoById.set(initiative.id, {
-        name: displayInitiativeName(initiative),
-        categoryName: category?.name ?? "Ohne Kategorie",
-        statusLabel: initiative.status === "active" ? "Aktiv" : initiative.status === "paused" ? "Pausiert" : initiative.status === "completed" ? "Abgeschlossen" : "Archiviert",
-        dateRange: formatInitiativeDateRangeForUi(initiative),
-        openTaskCount,
-        summary: summary || null
-      });
-    }
-    return infoById;
-  }, [props.categories, props.initiatives, props.tasks]);
-
-  const loadCalendar = async () => {
-    setBusy(true);
-    try {
-      setCalendar(await fetchCalendarView(range.start, range.end));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  useEffect(() => {
-    void loadCalendar();
-  }, [range.start, range.end]);
-
-  async function reloadAfterMutation() {
-    await Promise.all([loadCalendar(), props.onAfterChange()]);
-  }
-
-  async function createDroppedEntry(payload: CalendarDragPayload, date: string, startMinutes: number) {
-    setActiveCalendarDrag(null);
-    const startAt = dateTimeFromMinutes(date, startMinutes);
-    const endAt = dateTimeFromMinutes(date, boundedEndMinutes(date, startMinutes, events));
-    if (payload.kind === "initiative") {
-      await createCalendarEntry({
-        type: "initiative_focus",
-        title: `Projekt: ${payload.title}`,
-        startAt,
-        endAt,
-        initiativeId: payload.initiativeId
-      });
-    } else if (payload.kind === "task") {
-      await createCalendarEntry({
-        type: "task_work",
-        title: payload.title,
-        startAt,
-        endAt,
-        taskId: payload.taskId
-      });
-    } else {
-      await updateCalendarEntry(payload.entryId, {
-        startAt,
-        endAt: dateTimeFromMinutes(date, startMinutes + payload.durationMinutes)
-      });
-    }
-    await reloadAfterMutation();
-  }
-
-  function startCalendarDrag(event: DragEvent<HTMLElement>, payload: CalendarDragPayload) {
-    const offsetY = calendarDragOffsetY(event);
-    setCalendarDragData(event, payload, offsetY);
-    setActiveCalendarDrag({ payload, offsetY });
-  }
-
-  function showSidebarProjectHover(element: HTMLElement, info: CalendarProjectHoverInfo) {
-    const rect = element.getBoundingClientRect();
-    const width = 250;
-    setSidebarProjectHover({
-      info,
-      top: Math.max(12, Math.min(rect.top, window.innerHeight - 230)),
-      left: Math.min(rect.right + 10, window.innerWidth - width - 12)
-    });
-  }
-
-  async function createStandalone(title: string) {
-    if (!standaloneDraft || !title.trim()) return;
-    const startAt = dateTimeFromMinutes(standaloneDraft.date, standaloneDraft.startMinutes);
-    await createCalendarEntry({
-      type: "standalone",
-      title,
-      startAt,
-      endAt: dateTimeFromMinutes(standaloneDraft.date, standaloneDraft.startMinutes + calendarDefaultDurationMinutes)
-    });
-    setStandaloneDraft(null);
-    await reloadAfterMutation();
-  }
-
-  return (
-    <section className="calendar-planner">
-      <aside className="calendar-planner-sidebar">
-        <div className="calendar-sidebar-section">
-          <h2>Aktive Projekte</h2>
-          <div className="calendar-project-list">
-            {activeProjects.map((initiative) => {
-              const category = props.categories.find((candidate) => candidate.id === initiative.categoryId);
-              const projectTasks = tasksByInitiative.get(initiative.id) ?? [];
-              const hoverInfo = projectHoverInfoById.get(initiative.id) ?? null;
-              return (
-                <details key={initiative.id} className="calendar-project-card">
-                  <summary
-                    className="calendar-project-summary"
-                    draggable
-                    onMouseEnter={(event) => hoverInfo ? showSidebarProjectHover(event.currentTarget, hoverInfo) : undefined}
-                    onMouseLeave={() => setSidebarProjectHover(null)}
-                    onFocus={(event) => hoverInfo ? showSidebarProjectHover(event.currentTarget, hoverInfo) : undefined}
-                    onBlur={() => setSidebarProjectHover(null)}
-                    onDragStart={(event) => startCalendarDrag(event, { kind: "initiative", initiativeId: initiative.id, title: displayInitiativeName(initiative) })}
-                    onDragEnd={() => setActiveCalendarDrag(null)}
-                  >
-                    <span className="calendar-category-dot" style={{ background: category?.color ?? "#27806f" }} />
-                    <span>
-                      <strong>{displayInitiativeName(initiative)}</strong>
-                      <small>{category?.name ?? "Ohne Kategorie"}</small>
-                    </span>
-                  </summary>
-                  <div className="calendar-task-palette">
-                    {projectTasks.length === 0 ? <span>Keine offenen Massnahmen</span> : null}
-                    {projectTasks.map((task) => (
-                      <button
-                        key={task.id}
-                        type="button"
-                        draggable
-                        onClick={() => props.onOpenTask(task.id)}
-                        onDragStart={(event) => startCalendarDrag(event, { kind: "task", taskId: task.id, title: task.title })}
-                        onDragEnd={() => setActiveCalendarDrag(null)}
-                      >
-                        <Circle size={13} />
-                        {task.title}
-                      </button>
-                    ))}
-                  </div>
-                </details>
-              );
-            })}
-          </div>
-        </div>
-      </aside>
-
-      {sidebarProjectHover ? (
-        <CalendarProjectHoverCard
-          info={sidebarProjectHover.info}
-          placement="sidebar"
-          visible
-          style={{ top: sidebarProjectHover.top, left: sidebarProjectHover.left }}
-        />
-      ) : null}
-
-      <div className="calendar-workspace">
-        <div className={`calendar-frame ${props.controls.showAllDay ? "all-day-open" : "all-day-closed"}`} style={{ "--calendar-days": days.length } as CSSProperties}>
-          {busy ? <div className="calendar-loading-overlay">Lade...</div> : null}
-          <div className="calendar-day-header-spacer">
-            <button
-              className={`calendar-row-toggle ${props.controls.showAllDay ? "active" : ""}`}
-              type="button"
-              onClick={props.onShowAllDayChange}
-              aria-expanded={props.controls.showAllDay}
-              title={props.controls.showAllDay ? "Ganztag ausblenden" : "Ganztag einblenden"}
-            >
-              <ChevronDown size={15} />
-              <span>Ganztag</span>
-            </button>
-          </div>
-          {days.map((day) => (
-            <div className="calendar-day-header" key={day}>
-              <strong>{formatCalendarDayName(day)}</strong>
-              <span>{formatDateOnly(day)}</span>
-            </div>
-          ))}
-          {props.controls.showAllDay ? (
-            <>
-              <div className="calendar-all-day-label" aria-hidden="true" />
-              {days.map((day) => (
-                <div className="calendar-all-day-column" key={day}>
-                  {events.filter((event) => event.allDay && eventOverlapsDay(event, day)).map((event) => (
-                <button
-                  key={event.id}
-                  className={`calendar-all-day-event ${event.source}`}
-                  style={{ "--calendar-event-color": eventColor(event) } as CSSProperties}
-                  onClick={() => event.source === "initiative_span" ? props.onOpenInitiative(event.initiativeId) : undefined}
-                >
-                  {event.title}
-                </button>
-                  ))}
-                </div>
-              ))}
-            </>
-          ) : null}
-
-          <div className="calendar-time-scroll">
-            <div className="calendar-time-axis" style={{ height: gridHeight }}>
-              {Array.from({ length: endHour - calendarStartHour + 1 }, (_, index) => calendarStartHour + index).map((hour) => (
-                <span key={hour} style={{ top: (hour * 60 - calendarStartHour * 60) * calendarPixelsPerMinute }}>
-                  {String(hour).padStart(2, "0")}:00
-                </span>
-              ))}
-            </div>
-            {days.map((day) => (
-              <CalendarDayColumn
-                key={day}
-                date={day}
-                events={timedEvents.filter((event) => datePart(event.startAt) === day)}
-                allEvents={events}
-                activeCalendarDrag={activeCalendarDrag}
-                projectHoverInfoById={projectHoverInfoById}
-                height={gridHeight}
-                endHour={endHour}
-                onDropEntry={createDroppedEntry}
-                onOpenStandalone={setStandaloneDraft}
-                onComplete={async (entryId) => {
-                  await completeCalendarEntry(entryId);
-                  await reloadAfterMutation();
-                }}
-                onDelete={async (entryId) => {
-                  await deleteCalendarEntry(entryId);
-                  await reloadAfterMutation();
-                }}
-                onResize={async (entryId, input) => {
-                  await updateCalendarEntry(entryId, input);
-                  await reloadAfterMutation();
-                }}
-                onDragStart={startCalendarDrag}
-                onDragEnd={() => setActiveCalendarDrag(null)}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {standaloneDraft ? (
-        <StandaloneEntryDialog
-          draft={standaloneDraft}
-          onCancel={() => setStandaloneDraft(null)}
-          onCreate={createStandalone}
-        />
-      ) : null}
-    </section>
-  );
-}
 
 function CalendarHeaderControls(props: {
   mode: CalendarMode;
@@ -3276,250 +3044,104 @@ function CalendarHeaderControls(props: {
   );
 }
 
-function CalendarDayColumn(props: {
-  date: string;
-  events: CalendarViewEvent[];
-  allEvents: CalendarViewEvent[];
-  activeCalendarDrag: CalendarDragState | null;
-  projectHoverInfoById: Map<number, CalendarProjectHoverInfo>;
-  height: number;
-  endHour: number;
-  onDropEntry: (payload: CalendarDragPayload, date: string, startMinutes: number) => Promise<void>;
-  onOpenStandalone: (draft: { date: string; startMinutes: number }) => void;
-  onComplete: (entryId: number) => Promise<void>;
-  onDelete: (entryId: number) => Promise<void>;
-  onResize: (entryId: number, input: { startAt?: string; endAt?: string }) => Promise<void>;
-  onDragStart: (event: DragEvent<HTMLElement>, payload: CalendarDragPayload) => void;
-  onDragEnd: () => void;
-}) {
-  const [dragPreview, setDragPreview] = useState<CalendarDropPreview | null>(null);
-  const layouts = layoutCalendarEvents(props.events);
-  const previewTop = dragPreview ? (dragPreview.startMinutes - calendarStartHour * 60) * calendarPixelsPerMinute : 0;
-  const previewHeight = dragPreview ? Math.max(28, (dragPreview.endMinutes - dragPreview.startMinutes) * calendarPixelsPerMinute) : 0;
-  return (
-    <div
-      className={`calendar-day-column ${dragPreview ? "drag-active" : ""}`}
-      style={{ height: props.height }}
-      onDragOver={(event) => {
-        event.preventDefault();
-        const dragState = props.activeCalendarDrag ?? getCalendarDragState(event);
-        if (!dragState) return;
-        const { payload, offsetY } = dragState;
-        const startMinutes = snappedMinutesFromDraggedTop(event.currentTarget, event.clientY, offsetY);
-        const endMinutes = calendarDragEndMinutes(payload, props.date, startMinutes, props.allEvents);
-        setDragPreview((current) =>
-          current?.startMinutes === startMinutes && current.endMinutes === endMinutes && current.payload === payload
-            ? current
-            : { payload, startMinutes, endMinutes }
-        );
-      }}
-      onDragLeave={(event) => {
-        const nextTarget = event.relatedTarget;
-        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
-          setDragPreview(null);
-        }
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        const dragState = props.activeCalendarDrag ?? getCalendarDragState(event);
-        if (!dragState) return;
-        const startMinutes = dragPreview?.startMinutes ?? snappedMinutesFromDraggedTop(event.currentTarget, event.clientY, dragState.offsetY);
-        setDragPreview(null);
-        void props.onDropEntry(dragState.payload, props.date, startMinutes);
-      }}
-      onDoubleClick={(event) => {
-        if (event.target !== event.currentTarget) return;
-        props.onOpenStandalone({ date: props.date, startMinutes: snappedMinutesFromPointer(event.currentTarget, event.clientY) });
-      }}
-    >
-      {Array.from({ length: props.endHour - calendarStartHour + 1 }, (_, index) => calendarStartHour + index).map((hour) => (
-        <span className="calendar-hour-line" key={hour} style={{ top: (hour * 60 - calendarStartHour * 60) * calendarPixelsPerMinute }} />
-      ))}
-      {dragPreview ? (
-        <>
-          <span className="calendar-drop-line" style={{ top: previewTop }}>
-            <span>{timeFromMinutes(dragPreview.startMinutes)}</span>
-          </span>
-          <div
-            className="calendar-drop-preview"
-            style={{ top: previewTop, height: previewHeight }}
-          >
-            <strong>{calendarDragPreviewTitle(dragPreview.payload)}</strong>
-            <span>{timeFromMinutes(dragPreview.startMinutes)}-{timeFromMinutes(dragPreview.endMinutes)}</span>
-          </div>
-        </>
-      ) : null}
-      {layouts.map((layout) => (
-        <CalendarEventBlock
-          key={layout.event.id}
-          event={layout.event}
-          layout={layout}
-          onComplete={props.onComplete}
-          onDelete={props.onDelete}
-          onResize={props.onResize}
-          onDragStart={props.onDragStart}
-          onDragEnd={props.onDragEnd}
-          projectHoverInfoById={props.projectHoverInfoById}
-        />
-      ))}
-    </div>
-  );
-}
-
-function CalendarEventBlock(props: {
-  event: CalendarViewEvent;
-  layout: CalendarEventLayout;
-  onComplete: (entryId: number) => Promise<void>;
-  onDelete: (entryId: number) => Promise<void>;
-  onResize: (entryId: number, input: { startAt?: string; endAt?: string }) => Promise<void>;
-  onDragStart: (event: DragEvent<HTMLElement>, payload: CalendarDragPayload) => void;
-  onDragEnd: () => void;
-  projectHoverInfoById: Map<number, CalendarProjectHoverInfo>;
-}) {
-  const event = props.event;
-  const color = eventColor(event);
-  const draggable = event.source === "dmax";
-  const projectHoverInfo = event.source === "dmax" && event.initiativeId ? props.projectHoverInfoById.get(event.initiativeId) ?? null : null;
-  return (
-    <article
-      className={`calendar-event-block ${event.source} ${event.source === "dmax" && event.status === "done" ? "done" : ""} ${projectHoverInfo ? "has-project-info" : ""}`}
-      draggable={draggable}
-      onDragStart={(dragEvent) => {
-        if (event.source !== "dmax") return;
-        props.onDragStart(dragEvent, {
-          kind: "entry",
-          entryId: event.entryId,
-          durationMinutes: Math.max(calendarSnapMinutes, durationMinutesBetween(event.startAt, event.endAt))
-        });
-      }}
-      onDragEnd={props.onDragEnd}
-      style={
-        {
-          top: props.layout.top,
-          height: props.layout.height,
-          left: `${props.layout.left}%`,
-          width: `${props.layout.width}%`,
-          "--calendar-event-color": color
-        } as CSSProperties
-      }
-    >
-      {event.source === "dmax" ? (
-        <button className="calendar-resize-handle top" title="Start anpassen" onPointerDown={(pointerEvent) => startCalendarResize(pointerEvent, event, "top", props.onResize)} />
-      ) : null}
-      <div className="calendar-event-main">
-        {event.source === "dmax" ? (
-          <button
-            className="calendar-complete-toggle"
-            title={event.status === "done" ? "Erledigt" : "Erledigen"}
-            onClick={() => void props.onComplete(event.entryId)}
-          >
-            {event.status === "done" ? <CheckCircle2 size={15} /> : <Circle size={15} />}
-          </button>
-        ) : null}
-        <div>
-          <strong>{event.title}</strong>
-          <span>{formatTimeRange(event.startAt, event.endAt)}</span>
-        </div>
-        {event.source === "dmax" ? (
-          <button className="calendar-delete-button" title="Loeschen" onClick={() => void props.onDelete(event.entryId)}>
-            <Trash2 size={14} />
-          </button>
-        ) : null}
-      </div>
-      {event.source === "dmax" ? (
-        <button className="calendar-resize-handle bottom" title="Ende anpassen" onPointerDown={(pointerEvent) => startCalendarResize(pointerEvent, event, "bottom", props.onResize)} />
-      ) : null}
-      {projectHoverInfo ? <CalendarProjectHoverCard info={projectHoverInfo} placement="calendar" /> : null}
-    </article>
-  );
-}
-
-function CalendarProjectHoverCard({
-  info,
-  placement,
-  visible = false,
-  style
-}: {
-  info: CalendarProjectHoverInfo;
-  placement: "sidebar" | "calendar";
-  visible?: boolean;
-  style?: CSSProperties;
-}) {
-  return (
-    <div className={`calendar-project-hover-card ${placement} ${visible ? "visible" : ""}`} role="tooltip" style={style}>
-      <strong>{info.name}</strong>
-      <dl>
-        <div>
-          <dt>Kategorie</dt>
-          <dd>{info.categoryName}</dd>
-        </div>
-        <div>
-          <dt>Status</dt>
-          <dd>{info.statusLabel}</dd>
-        </div>
-        {info.dateRange ? (
-          <div>
-            <dt>Zeitraum</dt>
-            <dd>{info.dateRange}</dd>
-          </div>
-        ) : null}
-        <div>
-          <dt>Offene Tasks</dt>
-          <dd>{info.openTaskCount}</dd>
-        </div>
-      </dl>
-      {info.summary ? <p>{info.summary}</p> : null}
-    </div>
-  );
-}
-
-function StandaloneEntryDialog(props: {
-  draft: { date: string; startMinutes: number };
-  onCancel: () => void;
-  onCreate: (title: string) => Promise<void>;
-}) {
-  const [title, setTitle] = useState("");
-  return (
-    <div className="modal-backdrop">
-      <form
-        className="compact-modal"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void props.onCreate(title);
-        }}
-      >
-        <h3>Termin</h3>
-        <p>{formatDateOnly(props.draft.date)} · {timeFromMinutes(props.draft.startMinutes)}</p>
-        <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Titel" autoFocus />
-        <div className="modal-actions">
-          <button type="button" className="secondary-action compact" onClick={props.onCancel}>Abbrechen</button>
-          <button type="submit" className="primary-action compact" disabled={!title.trim()}>Anlegen</button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 function ConfigView() {
+  const initialGoogleAccountFromUrl = new URLSearchParams(window.location.search).get("account");
+  const initialGoogleAccount = initialGoogleAccountFromUrl || "dw@b42.io";
   const [sources, setSources] = useState<CalendarSource[]>([]);
-  const [googleStatus, setGoogleStatus] = useState<GoogleCalendarAuthStatus | null>(null);
-  const [googleCalendars, setGoogleCalendars] = useState<GoogleCalendarListItem[]>([]);
-  const [draft, setDraft] = useState({ accountLabel: "dw@b42.io", calendarId: "", displayName: "", color: "#27806f" });
+  const [accounts, setAccounts] = useState<GoogleCalendarAccountStatus[]>([]);
+  const [globalStatus, setGlobalStatus] = useState<GoogleCalendarAuthStatus | null>(null);
+  const [accountCalendars, setAccountCalendars] = useState<Record<string, { loading: boolean; calendars: GoogleCalendarListItem[]; error: string | null }>>({});
+  const [newAccountLabel, setNewAccountLabel] = useState(initialGoogleAccount);
+  const [addAccountOpen, setAddAccountOpen] = useState(false);
+  const [manualSourceDraft, setManualSourceDraft] = useState({ calendarId: "", displayName: "", color: "#27806f" });
   const [error, setError] = useState<string | null>(null);
+  const activeSources = sources.filter((source) => source.enabled);
+  const knownAccountLabels = useMemo(() => {
+    const labels = new Set(accounts.map((account) => account.accountLabel));
+    for (const source of sources) {
+      labels.add(source.accountLabel);
+    }
+    if (newAccountLabel.trim()) {
+      labels.add(newAccountLabel.trim());
+    }
+    return [...labels].sort((left, right) => left.localeCompare(right));
+  }, [accounts, newAccountLabel, sources]);
 
-  async function loadSources() {
-    const [nextSources, nextStatus] = await Promise.all([fetchCalendarSources(), fetchGoogleCalendarAuthStatus()]);
+  async function loadConfig() {
+    const [nextSources, nextAccounts, nextGlobalStatus] = await Promise.all([
+      fetchCalendarSources(),
+      fetchGoogleCalendarAccounts(),
+      fetchGoogleCalendarAuthStatus()
+    ]);
     setSources(nextSources);
-    setGoogleStatus(nextStatus);
-    if (nextStatus.connected) {
-      setGoogleCalendars(await fetchGoogleCalendars());
-    } else {
-      setGoogleCalendars([]);
+    setAccounts(nextAccounts);
+    setGlobalStatus(nextGlobalStatus);
+    await Promise.all(nextAccounts.filter((account) => account.status.connected).map((account) => loadAccountCalendars(account.accountLabel)));
+  }
+
+  async function loadAccountCalendars(accountLabel: string) {
+    setAccountCalendars((current) => ({
+      ...current,
+      [accountLabel]: { loading: true, calendars: current[accountLabel]?.calendars ?? [], error: null }
+    }));
+    try {
+      const calendars = await fetchGoogleCalendars(accountLabel);
+      setAccountCalendars((current) => ({
+        ...current,
+        [accountLabel]: { loading: false, calendars, error: null }
+      }));
+    } catch (err) {
+      setAccountCalendars((current) => ({
+        ...current,
+        [accountLabel]: {
+          loading: false,
+          calendars: current[accountLabel]?.calendars ?? [],
+          error: err instanceof Error ? err.message : "Google Kalender konnten nicht geladen werden."
+        }
+      }));
     }
   }
 
+  async function connectAccount(accountLabel: string) {
+    try {
+      setError(null);
+      const authUrl = await createGoogleCalendarAuthUrl({ loginHint: accountLabel.trim() });
+      window.location.href = authUrl;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google OAuth konnte nicht gestartet werden.");
+    }
+  }
+
+  async function toggleCalendarSource(accountLabel: string, calendar: GoogleCalendarListItem, enabled: boolean) {
+    const existing = sources.find((source) => source.provider === "google" && source.accountLabel === accountLabel && source.calendarId === calendar.id);
+    if (existing) {
+      await updateCalendarSource(existing.id, {
+        enabled,
+        displayName: calendar.summary,
+        color: normalizeGoogleColor(calendar.backgroundColor),
+        readOnly: calendar.readOnly
+      });
+    } else if (enabled) {
+      const reusableSource = sources.find((source) => source.provider === "google" && source.calendarId === calendar.id && !source.enabled);
+      const sourceInput = {
+        accountLabel,
+        calendarId: calendar.id,
+        displayName: calendar.summary,
+        color: normalizeGoogleColor(calendar.backgroundColor),
+        enabled: true,
+        readOnly: calendar.readOnly
+      };
+      if (reusableSource) {
+        await updateCalendarSource(reusableSource.id, sourceInput);
+      } else {
+        await createCalendarSource(sourceInput);
+      }
+    }
+    await loadConfig();
+  }
+
   useEffect(() => {
-    loadSources().catch((err: unknown) => setError(err instanceof Error ? err.message : "Calendar sources konnten nicht geladen werden."));
+    loadConfig().catch((err: unknown) => setError(err instanceof Error ? err.message : "Calendar sources konnten nicht geladen werden."));
   }, []);
 
   return (
@@ -3529,82 +3151,157 @@ function ConfigView() {
         <div className="config-section-header">
           <div>
             <h2>Google Kalenderquellen</h2>
-            <p>OAuth verbindet den Account; die Quellen legen fest, welche Kalender d-max live read-only lädt.</p>
+            <p>Verbinde Google-Konten und waehle pro Konto aus, welche Kalender DMAX lesen und schreiben darf.</p>
           </div>
-          <div className="google-auth-actions">
-            <span className={`google-auth-status ${googleStatus?.connected ? "connected" : ""}`}>
-              {googleStatus?.connected ? "Verbunden" : googleStatus?.configured ? "Nicht verbunden" : "Nicht konfiguriert"}
-            </span>
-            <button
-              className="secondary-action compact"
-              type="button"
-              disabled={!googleStatus?.configured}
-              onClick={async () => {
-                try {
-                  const authUrl = await createGoogleCalendarAuthUrl({ loginHint: draft.accountLabel });
-                  window.location.href = authUrl;
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Google OAuth konnte nicht gestartet werden.");
+        </div>
+        {globalStatus && !globalStatus.configured ? (
+          <div className="config-hint">
+            Setze `GOOGLE_OAUTH_CLIENT_ID` und `GOOGLE_OAUTH_CLIENT_SECRET`. Authorized redirect URI in Google:
+            <code>{globalStatus.redirectUri}</code>
+          </div>
+        ) : null}
+
+        <div className="google-connect-action">
+          <button className="primary-action compact" type="button" disabled={!globalStatus?.configured} onClick={() => setAddAccountOpen(true)}>
+            <Clock size={16} />
+            Google-Konto hinzufuegen
+          </button>
+        </div>
+
+        {addAccountOpen ? (
+          <div className="modal-backdrop" role="presentation" onMouseDown={() => setAddAccountOpen(false)}>
+            <form
+              className="compact-modal"
+              onMouseDown={(mouseEvent) => mouseEvent.stopPropagation()}
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (newAccountLabel.trim()) {
+                  void connectAccount(newAccountLabel);
                 }
               }}
             >
-              <Clock size={16} />
-              Google verbinden
-            </button>
-            {googleStatus?.connected ? (
-              <button
-                className="secondary-action compact"
-                type="button"
-                onClick={async () => {
-                  await disconnectGoogleCalendar();
-                  await loadSources();
-                }}
-              >
-                Trennen
-              </button>
-            ) : null}
-          </div>
-        </div>
-        {googleStatus && !googleStatus.configured ? (
-          <div className="config-hint">
-            Setze `GOOGLE_OAUTH_CLIENT_ID` und `GOOGLE_OAUTH_CLIENT_SECRET`. Authorized redirect URI in Google:
-            <code>{googleStatus.redirectUri}</code>
+              <h3>Google-Konto hinzufuegen</h3>
+              <label className="config-field">
+                <span>Google-Konto</span>
+                <input
+                  list="google-account-options"
+                  value={newAccountLabel}
+                  onChange={(event) => setNewAccountLabel(event.target.value)}
+                  placeholder="name@gmail.com"
+                  autoFocus
+                />
+                <datalist id="google-account-options">
+                  {knownAccountLabels.map((accountLabel) => <option key={accountLabel} value={accountLabel} />)}
+                </datalist>
+              </label>
+              <div className="modal-actions">
+                <button className="secondary-action compact" type="button" onClick={() => setAddAccountOpen(false)}>Abbrechen</button>
+                <button className="primary-action compact" type="submit" disabled={!globalStatus?.configured || !newAccountLabel.trim()}>
+                  <Clock size={16} />
+                  OAuth starten
+                </button>
+              </div>
+            </form>
           </div>
         ) : null}
-        {googleCalendars.length > 0 ? (
-          <div className="google-calendar-picker">
-            {googleCalendars.map((calendar) => {
-              const existing = sources.find((source) => source.provider === "google" && source.calendarId === calendar.id);
+
+        <section className="config-subsection">
+          <div className="config-subsection-title">
+            <strong>Verbundene Google-Konten</strong>
+            <span>{accounts.length} Konten</span>
+          </div>
+          {accounts.length === 0 ? <EmptyState title="Noch kein Google-Konto verbunden" /> : null}
+          <div className="google-account-card-list">
+            {accounts.map((account) => {
+              const calendarsState = accountCalendars[account.accountLabel] ?? { loading: false, calendars: [], error: null };
+              const accountSources = sources.filter((source) => source.accountLabel === account.accountLabel);
               return (
-                <article key={calendar.id} className="google-calendar-choice">
-                  <span className="calendar-category-dot" style={{ background: calendar.backgroundColor ?? "#5167b8" }} />
-                  <div>
-                    <strong>{calendar.summary}</strong>
-                    <span>{calendar.primary ? "primary · " : ""}{calendar.id}</span>
-                  </div>
-                  <button
-                    className="secondary-action compact"
-                    type="button"
-                    disabled={Boolean(existing)}
-                    onClick={async () => {
-                      await createCalendarSource({
-                        accountLabel: draft.accountLabel,
-                        calendarId: calendar.id,
-                        displayName: calendar.summary,
-                        color: normalizeGoogleColor(calendar.backgroundColor),
-                        enabled: true,
-                        readOnly: true
-                      });
-                      await loadSources();
-                    }}
-                  >
-                    {existing ? "Hinzugefuegt" : "Hinzufuegen"}
-                  </button>
+                <article className="google-account-card" key={account.accountLabel}>
+                  <header className="google-account-card-header">
+                    <div>
+                      <strong>
+                        {account.accountLabel}{" "}
+                        <span className={`google-account-heading-status ${account.status.connected ? "connected" : "disconnected"}`}>
+                          ({account.status.connected ? "verbunden" : "getrennt"})
+                        </span>
+                      </strong>
+                      <span>{accountSources.filter((source) => source.enabled).length} aktive Kalenderquellen</span>
+                    </div>
+                    <div className="google-auth-actions">
+                      {account.status.connected ? (
+                        <>
+                          <button className="secondary-action compact" type="button" onClick={() => void loadAccountCalendars(account.accountLabel)}>
+                            Kalender neu laden
+                          </button>
+                          <button
+                            className="secondary-action compact"
+                            type="button"
+                            onClick={async () => {
+                              await disconnectGoogleCalendar(account.accountLabel);
+                              await loadConfig();
+                            }}
+                          >
+                            Konto trennen
+                          </button>
+                        </>
+                      ) : (
+                        <button className="primary-action compact" type="button" onClick={() => void connectAccount(account.accountLabel)}>
+                          Erneut verbinden
+                        </button>
+                      )}
+                    </div>
+                  </header>
+                  {account.status.connected && !account.status.hasRequiredScope ? (
+                    <div className="config-hint warning">
+                      Dieses Konto nutzt noch einen alten read-only Token. Trenne es und verbinde es erneut, um Schreibzugriff zu aktivieren.
+                    </div>
+                  ) : null}
+                  {!account.status.connected ? (
+                    <div className="config-hint">
+                      Dieses Konto ist in DMAX bekannt, aber aktuell nicht per OAuth verbunden. Bestehende Quellen bleiben sichtbar, koennen aber erst nach dem erneuten Verbinden live geladen werden.
+                    </div>
+                  ) : null}
+                  {calendarsState.error ? <div className="error-banner">{calendarsState.error}</div> : null}
+                  {account.status.connected ? (
+                    <div className="google-calendar-picker">
+                      {calendarsState.loading ? <span className="muted-inline">Kalender werden geladen...</span> : null}
+                      {!calendarsState.loading && calendarsState.calendars.length === 0 ? <span className="muted-inline">Keine Kalender geladen.</span> : null}
+                      {calendarsState.calendars.map((calendar) => {
+                        const source = accountSources.find((candidate) => candidate.calendarId === calendar.id) ?? null;
+                        const active = Boolean(source?.enabled);
+                        return (
+                          <article key={calendar.id} className="google-calendar-choice">
+                            <span className="calendar-category-dot" style={{ background: calendar.backgroundColor ?? "#5167b8" }} />
+                            <div>
+                              <strong>{calendar.summary}</strong>
+                              <span>{calendar.primary ? "primary · " : ""}{calendar.accessRole ?? "unknown"} · {calendar.id}</span>
+                            </div>
+                            <button
+                              className={active ? "secondary-action compact" : "primary-action compact"}
+                              type="button"
+                              onClick={() => void toggleCalendarSource(account.accountLabel, calendar, !active)}
+                            >
+                              {active ? "Aus DMAX entfernen" : "In DMAX hinzufuegen"}
+                            </button>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </article>
               );
             })}
           </div>
-        ) : null}
+        </section>
+
+        <section className="config-subsection">
+          <div className="config-subsection-title">
+            <strong>DMAX-Kalenderquellen</strong>
+            <span>{activeSources.length} aktive Quellen</span>
+          </div>
+          <div className="config-hint">
+            DMAX-Kalenderquellen sind die gespeicherte Auswahl, welche Google-Kalender DMAX im Kalender anzeigen und fuer Sync/Schreiben verwenden soll. Ein verbundenes Google-Konto kann viele Kalender haben; erst eine aktive DMAX-Quelle macht einen Kalender in DMAX sichtbar.
+          </div>
         <form
           className="config-source-form"
           onSubmit={async (event) => {
@@ -3612,32 +3309,36 @@ function ConfigView() {
             try {
               setError(null);
               await createCalendarSource({
-                accountLabel: draft.accountLabel,
-                calendarId: draft.calendarId,
-                displayName: draft.displayName || draft.calendarId,
-                color: draft.color || null,
+                accountLabel: newAccountLabel.trim(),
+                calendarId: manualSourceDraft.calendarId,
+                displayName: manualSourceDraft.displayName || manualSourceDraft.calendarId,
+                color: manualSourceDraft.color || null,
                 enabled: true,
                 readOnly: true
               });
-              setDraft({ accountLabel: draft.accountLabel, calendarId: "", displayName: "", color: "#27806f" });
-              await loadSources();
+              setManualSourceDraft({ calendarId: "", displayName: "", color: "#27806f" });
+              await loadConfig();
             } catch (err) {
               setError(err instanceof Error ? err.message : "Calendar source konnte nicht gespeichert werden.");
             }
           }}
         >
-          <input value={draft.accountLabel} onChange={(event) => setDraft((current) => ({ ...current, accountLabel: event.target.value }))} placeholder="Account" />
-          <input value={draft.calendarId} onChange={(event) => setDraft((current) => ({ ...current, calendarId: event.target.value }))} placeholder="Google Calendar ID" />
-          <input value={draft.displayName} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Anzeigename" />
-          <input className="color-input" value={draft.color} onChange={(event) => setDraft((current) => ({ ...current, color: event.target.value }))} placeholder="#27806f" />
-          <button className="primary-action compact" type="submit" disabled={!draft.accountLabel.trim() || !draft.calendarId.trim()}>
+          <div className="config-subsection-title config-source-form-title">
+            <strong>Manuelle Quelle</strong>
+            <span>{newAccountLabel.trim()}</span>
+          </div>
+          <input value={manualSourceDraft.calendarId} onChange={(event) => setManualSourceDraft((current) => ({ ...current, calendarId: event.target.value }))} placeholder="Google Calendar ID" />
+          <input value={manualSourceDraft.displayName} onChange={(event) => setManualSourceDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Anzeigename" />
+          <input className="color-input" value={manualSourceDraft.color} onChange={(event) => setManualSourceDraft((current) => ({ ...current, color: event.target.value }))} placeholder="#27806f" />
+          <button className="primary-action compact" type="submit" disabled={!newAccountLabel.trim() || !manualSourceDraft.calendarId.trim()}>
             <Plus size={16} />
             Quelle
           </button>
         </form>
+
         <div className="config-source-list">
-          {sources.length === 0 ? <EmptyState title="Noch keine Kalenderquellen konfiguriert" /> : null}
-          {sources.map((source) => (
+          {activeSources.length === 0 ? <EmptyState title="Noch keine aktiven Kalenderquellen" /> : null}
+          {activeSources.map((source) => (
             <article className="config-source-row" key={source.id}>
               <span className="calendar-category-dot" style={{ background: source.color ?? "#27806f" }} />
               <div>
@@ -3650,15 +3351,27 @@ function ConfigView() {
                   checked={source.enabled}
                   onChange={async (event) => {
                     await updateCalendarSource(source.id, { enabled: event.target.checked });
-                    await loadSources();
+                    await loadConfig();
                   }}
                 />
                 Aktiv
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={!source.readOnly}
+                  onChange={async (event) => {
+                    await updateCalendarSource(source.id, { readOnly: !event.target.checked });
+                    await loadConfig();
+                  }}
+                />
+                Schreiben
               </label>
               <span className="readonly-pill">{source.readOnly ? "read-only" : "write"}</span>
             </article>
           ))}
         </div>
+        </section>
       </div>
     </section>
   );
@@ -3952,6 +3665,11 @@ function PlanningCanvasView(props: {
   };
 
   const startTimeDrag = (event: ReactPointerEvent<HTMLElement>, visual: PlanningCanvasTimeVisual, mode: PlanningCanvasTimeDragMode) => {
+    if (visual.isLocked && mode !== "move") {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const node = nodes.find((candidate) => candidate.id === visual.nodeId);
     if (!node) return;
     const group = relationGroups.byInitiativeId.get(visual.initiativeId);
@@ -3972,6 +3690,7 @@ function PlanningCanvasView(props: {
       originY: node.y,
       originStartDate: node.initiative.startDate,
       originEndDate: node.initiative.endDate,
+      locksTimeframe: visual.isLocked,
       draftY: node.y,
       draftStartDate: node.initiative.startDate,
       draftEndDate: node.initiative.endDate,
@@ -4163,17 +3882,18 @@ function PlanningCanvasView(props: {
                 visual.kind === "bar" ? (
                   <div
                     key={`time-${visual.nodeId}`}
-                    className={`planning-canvas-time-bar ${visual.projectPhase} ${visual.status === "completed" ? "completed" : ""}`}
+                    className={`planning-canvas-time-bar ${visual.projectPhase} ${visual.status === "completed" ? "completed" : ""} ${visual.isLocked ? "locked" : ""}`}
                     style={{ left: visual.left * canvasZoom, top: visual.top, width: visual.width * canvasZoom, backgroundColor: visual.color, color: visual.textColor }}
-                    title={visual.title}
+                    title={visual.isLocked ? LOCKED_CANVAS_TIMEFRAME_TOOLTIP : visual.title}
                     role="button"
                     tabIndex={0}
-                    aria-label={`Move dates for ${visual.name}`}
+                    aria-label={visual.isLocked ? `${visual.name}: ${LOCKED_CANVAS_TIMEFRAME_TOOLTIP}` : `Move dates for ${visual.name}`}
                     onPointerDown={(event) => startTimeDrag(event, visual, "move")}
                     onPointerMove={onTimePointerMove}
                     onPointerUp={(event) => void finishTimeDrag(event)}
                     onPointerCancel={cancelTimeDrag}
                   >
+                    {visual.isLocked ? <span className="planning-canvas-time-lock-badge" aria-hidden="true"><Lock size={10} /></span> : null}
                     <span className="planning-canvas-time-bar-label">
                       {visual.name}
                     </span>
@@ -4221,37 +3941,41 @@ function PlanningCanvasView(props: {
                     >
                       <Plus size={13} />
                     </button>
-                    <button
-                      type="button"
-                      className="planning-canvas-time-handle start"
-                      aria-label={`Change start date for ${visual.name}`}
-                      title="Change start date"
-                      onPointerDown={(event) => startTimeDrag(event, visual, "resize-start")}
-                      onPointerMove={onTimePointerMove}
-                      onPointerUp={(event) => void finishTimeDrag(event)}
-                      onPointerCancel={cancelTimeDrag}
-                      onClick={(event) => event.stopPropagation()}
-                    />
-                    <button
-                      type="button"
-                      className="planning-canvas-time-handle end"
-                      aria-label={`Change end date for ${visual.name}`}
-                      title="Change end date"
-                      onPointerDown={(event) => startTimeDrag(event, visual, "resize-end")}
-                      onPointerMove={onTimePointerMove}
-                      onPointerUp={(event) => void finishTimeDrag(event)}
-                      onPointerCancel={cancelTimeDrag}
-                      onClick={(event) => event.stopPropagation()}
-                    />
+                    {!visual.isLocked ? (
+                      <>
+                        <button
+                          type="button"
+                          className="planning-canvas-time-handle start"
+                          aria-label={`Change start date for ${visual.name}`}
+                          title="Change start date"
+                          onPointerDown={(event) => startTimeDrag(event, visual, "resize-start")}
+                          onPointerMove={onTimePointerMove}
+                          onPointerUp={(event) => void finishTimeDrag(event)}
+                          onPointerCancel={cancelTimeDrag}
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                        <button
+                          type="button"
+                          className="planning-canvas-time-handle end"
+                          aria-label={`Change end date for ${visual.name}`}
+                          title="Change end date"
+                          onPointerDown={(event) => startTimeDrag(event, visual, "resize-end")}
+                          onPointerMove={onTimePointerMove}
+                          onPointerUp={(event) => void finishTimeDrag(event)}
+                          onPointerCancel={cancelTimeDrag}
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                      </>
+                    ) : null}
                   </div>
                 ) : (
                   <button
                     type="button"
                     key={`time-${visual.nodeId}`}
-                    className={`planning-canvas-time-marker ${visual.kind}`}
+                    className={`planning-canvas-time-marker ${visual.kind} ${visual.isLocked ? "locked" : ""}`}
                     style={{ left: visual.left * canvasZoom, top: visual.top, borderColor: visual.color, backgroundColor: visual.color, color: visual.color }}
-                    title={visual.title}
-                    aria-label={`${visual.kind === "start" ? "Move start date" : "Move end date"} for ${visual.name}`}
+                    title={visual.isLocked ? LOCKED_TIMEFRAME_TOOLTIP : visual.title}
+                    aria-label={visual.isLocked ? `${visual.name}: ${LOCKED_TIMEFRAME_TOOLTIP}` : `${visual.kind === "start" ? "Move start date" : "Move end date"} for ${visual.name}`}
                     onPointerDown={(event) => startTimeDrag(event, visual, visual.kind === "start" ? "move-start" : "move-end")}
                     onPointerMove={onTimePointerMove}
                     onPointerUp={(event) => void finishTimeDrag(event)}
@@ -4401,15 +4125,18 @@ function PlanningCanvasProjectModal(props: {
     setBusy(true);
     setError(null);
     try {
-      await props.onSave(initiative.id, {
+      const input: UpdateInitiativeInput = {
         name: draft.name.trim(),
         categoryId: draft.categoryId,
         status: draft.status,
         projectPhase: draft.projectPhase,
-        startDate: draft.startDate || null,
-        endDate: draft.endDate || null,
         summary: nullableText(draft.summary)
-      });
+      };
+      if (!initiative.isLocked) {
+        input.startDate = draft.startDate || null;
+        input.endDate = draft.endDate || null;
+      }
+      await props.onSave(initiative.id, input);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Project could not be saved.");
       setBusy(false);
@@ -4466,7 +4193,13 @@ function PlanningCanvasProjectModal(props: {
           <div className="planning-canvas-modal-date-grid">
             <label>
               From
-              <input type="date" value={draft.startDate} onChange={(event) => setDraft((current) => ({ ...current, startDate: event.target.value }))} />
+              <input
+                type="date"
+                value={draft.startDate}
+                disabled={initiative.isLocked}
+                title={initiative.isLocked ? LOCKED_TIMEFRAME_TOOLTIP : undefined}
+                onChange={(event) => setDraft((current) => ({ ...current, startDate: event.target.value }))}
+              />
             </label>
             <label>
               To
@@ -4474,6 +4207,8 @@ function PlanningCanvasProjectModal(props: {
                 type="date"
                 value={draft.endDate}
                 min={draft.startDate || undefined}
+                disabled={initiative.isLocked}
+                title={initiative.isLocked ? LOCKED_TIMEFRAME_TOOLTIP : undefined}
                 onPointerDown={(event) => primeEmptyDatePickerMonth(event, draft.startDate, draft.endDate)}
                 onFocus={(event) => primeEmptyDatePickerMonth(event, draft.startDate, draft.endDate)}
                 onBlur={(event) => restorePrimedEmptyDateInput(event, draft.endDate)}
@@ -4481,6 +4216,12 @@ function PlanningCanvasProjectModal(props: {
               />
             </label>
           </div>
+          {initiative.isLocked ? (
+            <div className="planning-canvas-lock-note" title={LOCKED_TIMEFRAME_TOOLTIP}>
+              <Lock size={14} aria-hidden="true" />
+              <span>Zeitraum ist gesperrt. Aendere ihn auf der Projekt-Detailseite.</span>
+            </div>
+          ) : null}
           <label>
             Summary
             <textarea value={draft.summary} onChange={(event) => setDraft((current) => ({ ...current, summary: event.target.value }))} rows={4} />
@@ -5346,13 +5087,16 @@ function InitiativeRelationColumn(props: {
 
 function InitiativeDetailHeader(props: {
   initiative: Initiative | null;
+  projectCalendarBinding: InitiativeDetail["projectCalendarBinding"] | null;
   onUpdateInitiative: (initiativeId: number, input: UpdateInitiativeInput) => Promise<void>;
+  onCalendarBindingChange: () => Promise<void>;
 }) {
   const [editingName, setEditingName] = useState(false);
-  const [editingDateRange, setEditingDateRange] = useState(false);
+  const [dateModalOpen, setDateModalOpen] = useState(false);
   const [name, setName] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [isLocked, setIsLocked] = useState(false);
   const [dateRangeError, setDateRangeError] = useState<string | null>(null);
   const [headerError, setHeaderError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -5361,12 +5105,13 @@ function InitiativeDetailHeader(props: {
     setName(props.initiative?.name ?? "");
     setStartDate(props.initiative?.startDate ?? "");
     setEndDate(props.initiative?.endDate ?? "");
+    setIsLocked(props.initiative?.isLocked ?? false);
     setEditingName(false);
-    setEditingDateRange(false);
+    setDateModalOpen(false);
     setDateRangeError(null);
     setHeaderError(null);
     setBusy(false);
-  }, [props.initiative?.id, props.initiative?.name, props.initiative?.startDate, props.initiative?.endDate]);
+  }, [props.initiative?.id, props.initiative?.name, props.initiative?.startDate, props.initiative?.endDate, props.initiative?.isLocked]);
 
   if (!props.initiative) {
     return (
@@ -5383,8 +5128,9 @@ function InitiativeDetailHeader(props: {
   const resetDateRangeDraft = () => {
     setStartDate(initiative.startDate ?? "");
     setEndDate(initiative.endDate ?? "");
+    setIsLocked(initiative.isLocked);
     setDateRangeError(null);
-    setEditingDateRange(false);
+    setDateModalOpen(false);
   };
   const saveName = async () => {
     const trimmedName = name.trim();
@@ -5424,15 +5170,15 @@ function InitiativeDetailHeader(props: {
     }
     const nextStartDate = startDate || null;
     const nextEndDate = endDate || null;
-    if (nextStartDate === initiative.startDate && nextEndDate === initiative.endDate) {
-      setEditingDateRange(false);
+    if (nextStartDate === initiative.startDate && nextEndDate === initiative.endDate && isLocked === initiative.isLocked) {
+      setDateModalOpen(false);
       return;
     }
     setBusy(true);
     setDateRangeError(null);
     try {
-      await props.onUpdateInitiative(initiative.id, { startDate: nextStartDate, endDate: nextEndDate });
-      setEditingDateRange(false);
+      await props.onUpdateInitiative(initiative.id, { startDate: nextStartDate, endDate: nextEndDate, isLocked });
+      setDateModalOpen(false);
       setHeaderError(null);
     } catch (err) {
       setHeaderError(err instanceof Error ? err.message : "Zeitraum konnte nicht gespeichert werden.");
@@ -5519,48 +5265,40 @@ function InitiativeDetailHeader(props: {
               </label>
             ) : null}
             {initiative.type === "project" ? (
-              editingDateRange ? (
-                <form
-                  className="initiative-date-editor"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void saveDateRange();
-                  }}
-                >
-                  <CalendarDays size={14} />
-                  <input type="date" value={startDate} disabled={busy} aria-label="Projektstart" onChange={(event) => setStartDate(event.target.value)} />
-                  <span>-</span>
-                  <input
-                    type="date"
-                    value={endDate}
-                    min={startDate || undefined}
-                    disabled={busy}
-                    aria-label="Projektende"
-                    onPointerDown={(event) => primeEmptyDatePickerMonth(event, startDate, endDate)}
-                    onFocus={(event) => primeEmptyDatePickerMonth(event, startDate, endDate)}
-                    onBlur={(event) => restorePrimedEmptyDateInput(event, endDate)}
-                    onChange={(event) => setEndDate(event.target.value)}
-                  />
-                  <button type="submit" className="icon-button compact" disabled={busy} title="Zeitraum speichern">
-                    <CheckCircle2 size={15} />
-                  </button>
-                  <button type="button" className="icon-button compact" disabled={busy} onClick={resetDateRangeDraft} title="Abbrechen">
-                    <X size={15} />
-                  </button>
-                  {dateRangeError ? <span className="initiative-date-error">{dateRangeError}</span> : null}
-                </form>
-              ) : (
-                <button type="button" className="initiative-date-pill" onClick={() => setEditingDateRange(true)} title="Projektzeitraum bearbeiten">
-                  <CalendarDays size={14} />
-                  {dateRange ?? "Zeitraum setzen"}
-                </button>
-              )
+              <button
+                type="button"
+                className="initiative-date-pill"
+                onClick={() => setDateModalOpen(true)}
+                title={initiative.isLocked ? "Zeitraum ist gesperrt und kann nicht verschoben werden" : "Projektzeitraum und Google-Verknüpfung bearbeiten"}
+              >
+                <CalendarDays size={14} />
+                <span>{dateRange ?? "Zeitraum setzen"}</span>
+                {initiative.isLocked ? <Lock size={13} aria-hidden="true" /> : null}
+                {props.projectCalendarBinding ? <span className="calendar-google-badge" title="Mit Google Calendar verknüpft">G</span> : null}
+              </button>
             ) : null}
             {initiative.isSystem ? <span className="system-badge">System</span> : null}
             {headerError ? <span className="initiative-date-error">{headerError}</span> : null}
           </>
         ) : null}
       </div>
+      {dateModalOpen && initiative.type === "project" ? (
+        <ProjectDateCalendarModal
+          initiative={initiative}
+          binding={props.projectCalendarBinding ?? null}
+          startDate={startDate}
+          endDate={endDate}
+          isLocked={isLocked}
+          busy={busy}
+          error={dateRangeError}
+          onStartDateChange={setStartDate}
+          onEndDateChange={setEndDate}
+          onLockedChange={setIsLocked}
+          onSaveDateRange={saveDateRange}
+          onCancel={resetDateRangeDraft}
+          onCalendarBindingChange={props.onCalendarBindingChange}
+        />
+      ) : null}
     </div>
   );
 }
@@ -5666,6 +5404,179 @@ function TaskDetailHeader(props: {
           </>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function ProjectDateCalendarModal(props: {
+  initiative: Initiative;
+  binding: InitiativeDetail["projectCalendarBinding"] | null;
+  startDate: string;
+  endDate: string;
+  isLocked: boolean;
+  busy: boolean;
+  error: string | null;
+  onStartDateChange: (value: string) => void;
+  onEndDateChange: (value: string) => void;
+  onLockedChange: (value: boolean) => void;
+  onSaveDateRange: () => Promise<void>;
+  onCancel: () => void;
+  onCalendarBindingChange: () => Promise<void>;
+}) {
+  const [sources, setSources] = useState<CalendarSource[]>([]);
+  const [calendarSourceId, setCalendarSourceId] = useState<number | null>(null);
+  const [calendarBusy, setCalendarBusy] = useState(false);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
+  const writableSources = sources.filter((source) => source.enabled && !source.readOnly);
+  const hasCompleteDateRange = Boolean(props.startDate && props.endDate);
+  const dateRangeChanged = props.startDate !== (props.initiative.startDate ?? "") || props.endDate !== (props.initiative.endDate ?? "") || props.isLocked !== props.initiative.isLocked;
+  const lockTitle = props.isLocked
+    ? "Start- und Endzeitpunkt sind gesperrt und sollen nicht verschoben werden"
+    : "Zeitraum ist flexibel und kann verschoben werden";
+  const bindingCalendarLabel = props.binding?.calendarSource
+    ? props.binding.calendarSource.accountLabel
+    : props.binding?.externalCalendarId ?? "nicht verknüpft";
+
+  useEffect(() => {
+    fetchCalendarSources()
+      .then((nextSources) => {
+        setSources(nextSources);
+        const firstWritable = nextSources.find((source) => source.enabled && !source.readOnly) ?? null;
+        setCalendarSourceId(firstWritable?.id ?? null);
+      })
+      .catch((err: unknown) => setCalendarError(err instanceof Error ? err.message : "Kalenderquellen konnten nicht geladen werden."));
+  }, []);
+
+  async function createGoogleEvent() {
+    if (!calendarSourceId || calendarBusy || !hasCompleteDateRange || dateRangeChanged) return;
+    setCalendarBusy(true);
+    setCalendarError(null);
+    try {
+      await createGoogleEventFromDmax({
+        localEntityType: "initiative_project_span",
+        localEntityId: props.initiative.id,
+        calendarSourceId
+      });
+      await props.onCalendarBindingChange();
+      props.onCancel();
+    } catch (err) {
+      setCalendarError(err instanceof Error ? err.message : "Google Event konnte nicht erstellt werden.");
+    } finally {
+      setCalendarBusy(false);
+    }
+  }
+
+  async function unlinkGoogleEvent() {
+    if (!props.binding || calendarBusy) return;
+    const deleteGoogleEvent = window.confirm("Google Event ebenfalls löschen?");
+    setCalendarBusy(true);
+    setCalendarError(null);
+    try {
+      await unlinkCalendarBinding(props.binding.id, { deleteGoogleEvent });
+      await props.onCalendarBindingChange();
+      props.onCancel();
+    } catch (err) {
+      setCalendarError(err instanceof Error ? err.message : "Google-Verknüpfung konnte nicht gelöst werden.");
+    } finally {
+      setCalendarBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
+      <section className="compact-modal project-date-calendar-modal" role="dialog" aria-modal="true" aria-label="Projektzeitraum und Google Calendar" onMouseDown={(event) => event.stopPropagation()}>
+        <header className="google-event-modal-header">
+          <div>
+            <span>Projektzeitraum</span>
+            <strong>{displayInitiativeName(props.initiative)}</strong>
+          </div>
+          <button className="icon-button" type="button" title="Schließen" onClick={props.onCancel}>
+            <X size={16} />
+          </button>
+        </header>
+
+        <form
+          className="project-date-modal-section"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void props.onSaveDateRange();
+          }}
+        >
+          <label className="google-event-field">
+            <span>Start</span>
+            <input type="date" value={props.startDate} disabled={props.busy} onChange={(event) => props.onStartDateChange(event.target.value)} />
+          </label>
+          <label className="google-event-field">
+            <span>Ende</span>
+            <input
+              type="date"
+              value={props.endDate}
+              min={props.startDate || undefined}
+              disabled={props.busy}
+              onPointerDown={(event) => primeEmptyDatePickerMonth(event, props.startDate, props.endDate)}
+              onFocus={(event) => primeEmptyDatePickerMonth(event, props.startDate, props.endDate)}
+              onBlur={(event) => restorePrimedEmptyDateInput(event, props.endDate)}
+              onChange={(event) => props.onEndDateChange(event.target.value)}
+            />
+          </label>
+          {props.error ? <div className="error-banner project-date-modal-full">{props.error}</div> : null}
+          <div className="project-date-lock-row project-date-modal-full">
+            <span>{props.isLocked ? "Fixierter Zeitraum" : "Flexibler Zeitraum"}</span>
+            <button
+              type="button"
+              className={`project-timeframe-lock-toggle ${props.isLocked ? "locked" : "unlocked"}`}
+              disabled={props.busy}
+              title={lockTitle}
+              aria-label={lockTitle}
+              aria-pressed={props.isLocked}
+              onClick={() => props.onLockedChange(!props.isLocked)}
+            >
+              {props.isLocked ? <Lock size={17} aria-hidden="true" /> : <LockOpen size={17} aria-hidden="true" />}
+            </button>
+          </div>
+        </form>
+
+        <section className="project-date-modal-section project-google-section">
+          <div className="project-google-summary project-date-modal-full">
+            <span>Google Kalender</span>
+            {props.binding ? (
+              <strong>{bindingCalendarLabel}</strong>
+            ) : writableSources.length > 0 ? (
+              <select value={calendarSourceId ?? ""} onChange={(event) => setCalendarSourceId(Number(event.target.value))}>
+                {writableSources.map((source) => (
+                  <option key={source.id} value={source.id}>{source.accountLabel}</option>
+                ))}
+              </select>
+            ) : (
+              <strong>nicht verknüpft</strong>
+            )}
+          </div>
+          {props.binding ? (
+            <button type="button" className="project-date-text-link project-date-modal-full" disabled={calendarBusy} onClick={() => void unlinkGoogleEvent()}>
+              Verknüpfung lösen
+            </button>
+          ) : (
+            <>
+              {writableSources.length === 0 ? <div className="config-hint project-date-modal-full">Keine schreibbare Google-Kalenderquelle konfiguriert.</div> : null}
+              <button
+                type="button"
+                className="project-date-text-link project-date-modal-full"
+                disabled={calendarBusy || !calendarSourceId || !hasCompleteDateRange || dateRangeChanged}
+                onClick={() => void createGoogleEvent()}
+              >
+                Google Event erstellen
+              </button>
+              {!hasCompleteDateRange ? <div className="config-hint project-date-modal-full">Start und Ende sind nötig, bevor ein Google-Ganztags-Event erstellt werden kann.</div> : null}
+              {dateRangeChanged ? <div className="config-hint project-date-modal-full">OK speichert den Zeitraum. Danach kann ein Google Event erstellt werden.</div> : null}
+            </>
+          )}
+          {calendarError ? <div className="error-banner project-date-modal-full">{calendarError}</div> : null}
+        </section>
+
+        <div className="modal-actions">
+          <button type="button" className="primary-action compact" disabled={props.busy || calendarBusy} onClick={() => void props.onSaveDateRange()}>OK</button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -7533,6 +7444,7 @@ type PlanningCanvasTimeVisual = {
   kind: "bar" | "start" | "end";
   status: Initiative["status"];
   projectPhase: ProjectPhase;
+  isLocked: boolean;
   left: number;
   width: number;
   top: number;
@@ -7734,6 +7646,7 @@ function planningCanvasTimeVisual(node: PlanningCanvasInitiativeNode, range: Pla
     nodeY: node.y,
     status: node.initiative.status,
     projectPhase: node.initiative.projectPhase,
+    isLocked: node.initiative.isLocked,
     top,
     color,
     textColor: node.initiative.projectPhase === "planning" ? "#17211c" : "#ffffff"
@@ -7807,10 +7720,11 @@ function planningCanvasShiftDatesForDrag(
     mode: PlanningCanvasTimeDragMode;
     originStartDate: string | null;
     originEndDate: string | null;
+    locksTimeframe?: boolean;
   },
   dayDelta: number
 ): { startDate: string | null; endDate: string | null } {
-  if (dayDelta === 0) {
+  if (dayDelta === 0 || drag.locksTimeframe) {
     return { startDate: drag.originStartDate, endDate: drag.originEndDate };
   }
 
@@ -7971,167 +7885,6 @@ function formatTaskDueDate(value: string): string {
   return formatDateOnly(datePart(value));
 }
 
-type CalendarEventLayout = {
-  event: CalendarViewEvent;
-  top: number;
-  height: number;
-  left: number;
-  width: number;
-};
-
-function calendarDragOffsetY(event: DragEvent<HTMLElement>): number {
-  const rect = event.currentTarget.getBoundingClientRect();
-  return Math.max(0, Math.min(rect.height, event.clientY - rect.top));
-}
-
-function setCalendarDragData(event: DragEvent<HTMLElement>, payload: CalendarDragPayload, offsetY: number): void {
-  event.dataTransfer.effectAllowed = "copyMove";
-  event.dataTransfer.setData("application/x-dmax-calendar", JSON.stringify(payload));
-  event.dataTransfer.setData("application/x-dmax-calendar-offset-y", String(offsetY));
-}
-
-function getCalendarDragData(event: DragEvent<HTMLElement>): CalendarDragPayload | null {
-  const raw = event.dataTransfer.getData("application/x-dmax-calendar");
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as CalendarDragPayload;
-    return parsed && typeof parsed === "object" && "kind" in parsed ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function getCalendarDragState(event: DragEvent<HTMLElement>): CalendarDragState | null {
-  const payload = getCalendarDragData(event);
-  if (!payload) return null;
-  const rawOffsetY = Number(event.dataTransfer.getData("application/x-dmax-calendar-offset-y"));
-  return { payload, offsetY: Number.isFinite(rawOffsetY) ? Math.max(0, rawOffsetY) : 0 };
-}
-
-function snappedMinutesFromPointer(element: HTMLElement, clientY: number): number {
-  const rect = element.getBoundingClientRect();
-  const minutes = calendarStartHour * 60 + (clientY - rect.top + element.scrollTop) / calendarPixelsPerMinute;
-  return Math.max(0, Math.round(minutes / calendarSnapMinutes) * calendarSnapMinutes);
-}
-
-function snappedMinutesFromDraggedTop(element: HTMLElement, clientY: number, offsetY: number): number {
-  return Math.max(calendarStartHour * 60, snappedMinutesFromPointer(element, clientY - offsetY));
-}
-
-function boundedEndMinutes(date: string, startMinutes: number, events: CalendarViewEvent[]): number {
-  const defaultEnd = startMinutes + calendarDefaultDurationMinutes;
-  const followerStart = events
-    .filter((event) => !event.allDay && datePart(event.startAt) === date)
-    .map((event) => minutesFromDateTime(event.startAt))
-    .filter((minutes) => minutes > startMinutes && minutes < defaultEnd)
-    .sort((left, right) => left - right)[0];
-  return followerStart ?? defaultEnd;
-}
-
-function calendarDragEndMinutes(payload: CalendarDragPayload, date: string, startMinutes: number, events: CalendarViewEvent[]): number {
-  if (payload.kind === "entry") {
-    return startMinutes + payload.durationMinutes;
-  }
-  return boundedEndMinutes(date, startMinutes, events);
-}
-
-function calendarDragPreviewTitle(payload: CalendarDragPayload): string {
-  if (payload.kind === "initiative") {
-    return `Projekt: ${payload.title}`;
-  }
-  if (payload.kind === "task") {
-    return payload.title;
-  }
-  return "Termin verschieben";
-}
-
-function layoutCalendarEvents(events: CalendarViewEvent[]): CalendarEventLayout[] {
-  const sorted = [...events].sort((left, right) => minutesFromDateTime(left.startAt) - minutesFromDateTime(right.startAt));
-  const groups: CalendarViewEvent[][] = [];
-  let currentGroup: CalendarViewEvent[] = [];
-  let currentEnd = -1;
-
-  for (const event of sorted) {
-    const start = minutesFromDateTime(event.startAt);
-    const end = minutesFromDateTime(event.endAt);
-    if (currentGroup.length === 0 || start < currentEnd) {
-      currentGroup.push(event);
-      currentEnd = Math.max(currentEnd, end);
-    } else {
-      groups.push(currentGroup);
-      currentGroup = [event];
-      currentEnd = end;
-    }
-  }
-  if (currentGroup.length) groups.push(currentGroup);
-
-  return groups.flatMap((group) => {
-    const columns: CalendarViewEvent[][] = [];
-    const placements = new Map<string, number>();
-    for (const event of group) {
-      const start = minutesFromDateTime(event.startAt);
-      let columnIndex = columns.findIndex((column) => {
-        const last = column.at(-1);
-        return !last || eventEndMinutes(last) <= start;
-      });
-      if (columnIndex === -1) {
-        columnIndex = columns.length;
-        columns.push([]);
-      }
-      columns[columnIndex]!.push(event);
-      placements.set(event.id, columnIndex);
-    }
-    const columnCount = Math.max(columns.length, 1);
-    return group.map((event) => {
-      const start = minutesFromDateTime(event.startAt);
-      const end = eventEndMinutes(event);
-      const top = (start - calendarStartHour * 60) * calendarPixelsPerMinute;
-      const height = Math.max(28, (end - start) * calendarPixelsPerMinute);
-      const columnIndex = placements.get(event.id) ?? 0;
-      return {
-        event,
-        top,
-        height,
-        left: (columnIndex / columnCount) * 100,
-        width: 100 / columnCount
-      };
-    });
-  });
-}
-
-function startCalendarResize(
-  event: ReactPointerEvent<HTMLButtonElement>,
-  calendarEvent: Extract<CalendarViewEvent, { source: "dmax" }>,
-  edge: "top" | "bottom",
-  onResize: (entryId: number, input: { startAt?: string; endAt?: string }) => Promise<void>
-): void {
-  event.preventDefault();
-  event.stopPropagation();
-  const initialY = event.clientY;
-  const initialStart = minutesFromDateTime(calendarEvent.startAt);
-  const initialEnd = minutesFromDateTime(calendarEvent.endAt);
-  const date = datePart(calendarEvent.startAt);
-
-  const onPointerMove = (moveEvent: PointerEvent) => {
-    moveEvent.preventDefault();
-  };
-  const onPointerUp = (upEvent: PointerEvent) => {
-    const deltaMinutes = Math.round(((upEvent.clientY - initialY) / calendarPixelsPerMinute) / calendarSnapMinutes) * calendarSnapMinutes;
-    if (edge === "top") {
-      const nextStart = Math.min(initialEnd - calendarSnapMinutes, Math.max(0, initialStart + deltaMinutes));
-      void onResize(calendarEvent.entryId, { startAt: dateTimeFromMinutes(date, nextStart) });
-    } else {
-      const nextEnd = Math.max(initialStart + calendarSnapMinutes, initialEnd + deltaMinutes);
-      void onResize(calendarEvent.entryId, { endAt: dateTimeFromMinutes(date, nextEnd) });
-    }
-    window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", onPointerUp);
-  };
-
-  window.addEventListener("pointermove", onPointerMove);
-  window.addEventListener("pointerup", onPointerUp);
-}
-
 function calendarVisibleRange(anchorDate: string, mode: CalendarMode): { start: string; end: string } {
   if (mode === "day") {
     return { start: anchorDate, end: anchorDate };
@@ -8194,18 +7947,6 @@ function durationMinutesBetween(startAt: string, endAt: string): number {
   return dayDelta * 1440 + minutesFromDateTime(endAt) - minutesFromDateTime(startAt);
 }
 
-function eventEndMinutes(event: CalendarViewEvent): number {
-  return minutesFromDateTime(event.startAt) + durationMinutesBetween(event.startAt, event.endAt);
-}
-
-function eventOverlapsDay(event: CalendarViewEvent, day: string): boolean {
-  return datePart(event.startAt) <= day && datePart(event.endAt) >= day;
-}
-
-function eventColor(event: CalendarViewEvent): string {
-  return event.color ?? (event.source === "google" ? "#5167b8" : event.source === "initiative_span" ? "#27806f" : "#101714");
-}
-
 function normalizeGoogleColor(color: string | null): string | null {
   return color && /^#[0-9a-f]{6}$/i.test(color) ? color : null;
 }
@@ -8219,6 +7960,14 @@ function formatCalendarRange(days: string[]): string {
   if (days.length === 0) return "";
   if (days.length === 1) return formatDateOnly(days[0]!);
   return `${formatDateOnly(days[0]!)} - ${formatDateOnly(days.at(-1)!)}`;
+}
+
+function formatDateTimeForUi(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" });
 }
 
 function timeFromMinutes(minutes: number): string {

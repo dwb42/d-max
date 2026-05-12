@@ -1,6 +1,6 @@
 # d-max Current State
 
-Date: 2026-05-11
+Date: 2026-05-12
 
 Short handoff for fresh Codex/OpenClaw sessions. This file describes the
 implemented repository state; older plans are historical unless this file or
@@ -31,7 +31,7 @@ categories, initiatives, initiative_relations,
 planning_canvases, planning_canvas_nodes,
 tasks,
 task_checklist_items,
-calendar_entries, calendar_sources,
+calendar_entries, calendar_sources, calendar_event_bindings,
 media_assets, media_links,
 app_chat_messages, app_conversations, app_prompt_logs, app_state_events
 ```
@@ -55,10 +55,16 @@ candidates, but that UI guard is not a data-integrity guarantee.
 across all initiative types, supports many-to-many predecessor and successor
 links, rejects self-relations and duplicate edges, and the repository prevents
 cycles. Initiatives with `type = project` may have nullable `start_date` and
-`end_date` fields for a bounded initiative time span; those project spans are
-editable in the initiative detail header and shown in the `/calendar` all-day
-row when they overlap the visible day/week. The product invariant is that
-`project_phase`, `start_date`, and `end_date` are meaningful only for
+`end_date` fields for a bounded initiative time span plus `is_locked`, exposed
+as `isLocked`, to mark the span as fixed. Those project spans are editable in
+the initiative detail header modal, shown in the `/calendar` all-day area when
+they overlap the visible day/week, and marked with a lock icon in project
+detail, `/calendar`, and `/planning-canvas` when locked. The project detail
+timeframe modal is the canonical UI for changing `start_date`, `end_date`, and
+`is_locked`; it uses an icon-only open/closed lock toggle, one `OK` save action,
+and a compact Google Calendar section for creating, showing, or unlinking the
+project span's Google binding. The product invariant is that `project_phase`,
+`start_date`, `end_date`, and `is_locked` are meaningful only for
 `type = project`; current schemas and repository writes do not yet enforce or
 auto-clear those fields for ideas/habits, so callers should not set them on
 non-project initiatives.
@@ -91,6 +97,12 @@ Planning Canvas edit modal. Hovering a timeline bar reveals edit, predecessor,
 and successor controls; predecessor/successor creation creates the project,
 creates the appropriate `precedes` relation, and places the new timeline on the
 anchor's lane.
+Locked project spans (`is_locked = 1`) render with a lock icon and
+small top-right badge on the Planning Canvas. Dragging the timeline bar can
+still move the project vertically between visual rows, but horizontal date
+movement is ignored. Start/end markers and resize handles cannot change locked
+dates, resize handles are hidden, and the Planning Canvas edit modal leaves
+date inputs disabled so timeframe changes go through the project detail modal.
 Parent-child and predecessor/successor relation lines connect timeline
 bars/markers directly; predecessor/successor lines do not use arrowheads. A
 parent-only group can be moved up/down in rows by dragging the parent timeline
@@ -112,9 +124,29 @@ for project focus, task work, and standalone appointments. Entries have concrete
 `start_at`/`end_at` timestamps and a simple `open`/`done` status. A task can have
 multiple calendar entries; completing a task calendar entry also completes the
 linked task. `calendar_sources` stores non-secret calendar source configuration
-such as enabled Google calendar IDs; Google event credentials/tokens are not
-stored in SQLite. Google Calendar read-only OAuth stores its local token file at
-`GOOGLE_CALENDAR_TOKEN_PATH` under `data/` by default, which is gitignored.
+such as enabled Google calendar IDs and the Google account label DMAX should use
+for access. A calendar source is the durable DMAX-side selection that makes a
+Google calendar visible in `/calendar` and eligible for sync/write operations;
+disabling a source removes that calendar from DMAX without deleting the Google
+calendar or account token. The current `calendar_sources` schema still has a
+unique `(provider, calendar_id)` constraint, so if the same Google calendar is
+re-added through its own account after being seen as a shared calendar, DMAX
+reuses/updates the existing source row rather than storing duplicate rows.
+Google event credentials/tokens are not stored in SQLite. Google Calendar OAuth
+stores its legacy local token file at `GOOGLE_CALENDAR_TOKEN_PATH` under
+`data/` by default, and account-specific tokens beside it under
+`${GOOGLE_CALENDAR_TOKEN_PATH}.accounts/`; both locations are gitignored.
+`calendar_event_bindings` stores the identity layer for Google sync. It can
+connect one concrete DMAX time object (`calendar_entry` or a project
+initiative's date span) to one Google calendar event, with at most one active
+binding per local time object and per external provider event. Linked
+`calendar_entry` rows sync title/start/end with linked timed Google events.
+Linked project spans sync `initiative.name`, `start_date`, and `end_date` with
+linked Google all-day events. Sync runs lazily when `/api/calendar` is loaded,
+uses last-edit-wins for shared fields unless the project span is locked, marks
+external deletion/read-only/error states on the binding, and surfaces sync
+warnings in the calendar UI. Locked project spans remain DMAX-authoritative for
+the linked Google event so Google-side date moves do not shift the project.
 `media_assets` stores metadata for uploaded media files and `media_links`
 connects those assets to d-max entities. Binary media files are stored outside
 SQLite under `DMAX_MEDIA_STORAGE_DIR` (`data/media` by default, gitignored).
@@ -136,7 +168,23 @@ already includes `category`, `initiative`, `task`, `calendar_entry`, and
 validation supports attachment operations only for categories, initiatives, and
 tasks. Browser upload UI exists for initiatives and tasks only.
 Configured and authorized Google calendar sources are fetched live in
-`/api/calendar`. Ideas are loose thoughts
+`/api/calendar` using the account token indicated by each source's
+`account_label`, with legacy-token fallback for older sources. Google event
+fetch returns partial calendar results when individual Google sources or auth
+refresh fail, includes warning metadata, and normalizes richer Google event
+metadata such as provider IDs, links, ETag/update data, recurring status,
+organizer, attendees, ownership, editability, and read-only reason. Events from
+external organizers are included when their calendar source is active, but
+remain read-only in DMAX. Event-list reads use Google partial-response fields,
+a short in-memory per-source/range cache, in-flight request deduplication, and
+an 8s Google fetch timeout so a slow provider call does not keep `/calendar`
+loading indefinitely. Loading a calendar range also prefetches the following
+two one-week ranges in the background so near-future week navigation can hit the
+local cache. Cache entries are invalidated after Google event
+create/update/delete, binding link/unlink, OAuth, and calendar-source changes.
+Google OAuth now
+requests calendar write scope; existing read-only token files may need
+reconnecting before write actions succeed. Ideas are loose thoughts
 without time binding, and habits are ongoing practices without a clear
 start/end. Categories are life areas; their `description` field is Markdown for
 scope, current situation/satisfaction, target state, and high-level measures.
@@ -277,12 +325,43 @@ Implemented behavior:
 - `/calendar`: day/week planning view with Google-Calendar-style day columns and
   a 10-minute time grid. Local d-max entries can be created by dragging active
   projects or open project tasks into the grid, moved by drag/drop, resized via
-  top/bottom handles, deleted, and marked done. Project date ranges appear in
-  the all-day row. Configured Google calendar sources are fetched live read-only
-  through the Google Calendar API after OAuth is connected in `/config`.
-- `/config`: configuration surface for Google calendar sources. It stores
-  provider/account/calendar/display metadata and enabled/read-only flags only;
-  no credentials or provider tokens.
+  top/bottom handles, deleted, and marked done. Project date ranges and
+  multi-day timed events appear in the all-day area. That area is split into
+  `Fixierte Zeitraeume` for Google all-day/multi-day events plus locked project
+  spans, and `Flexible Planung` for unlocked project spans; the flexible lane is
+  collapsible and compact by default. Linked project spans render as the DMAX
+  project event with a small Google badge rather than duplicating the Google
+  event. The selected calendar view is encoded in the URL as
+  `/calendar?view=day|week&date=YYYY-MM-DD&allDay=0|1`, so reloads, direct
+  links, and browser back/forward preserve the visible timeframe. Configured
+  Google calendar sources are fetched live through the Google Calendar API after
+  OAuth is connected in `/config`. Google-only events are clickable and open a
+  compact metadata/edit modal showing calendar, time, editability, last Google
+  update, organizer, and attendees when available. Writable, non-recurring,
+  self-organized Google-only events can be edited in the modal without creating
+  DMAX objects. Link/promote choices for existing project, new project,
+  project entry, existing task, or new task are progressively disclosed and
+  committed through the modal's single `Speichern` action. Local timed DMAX
+  `calendar_entries` can be published to a writable Google calendar from their
+  calendar card. Linked events can be unlinked, with an explicit prompt for
+  whether the Google event should also be deleted. Google source/auth/sync
+  failures appear as dismissible warning banners instead of failing the entire
+  calendar view. The frontend calendar view is split into a lazy-loaded
+  `CalendarRoute` chunk so non-calendar routes do not parse the calendar UI
+  module at startup.
+- `/config`: configuration surface for Google Calendar accounts and DMAX
+  calendar sources. It has a single `Google-Konto hinzufuegen` action that
+  opens an OAuth modal, then renders one card per known Google account. Each
+  card shows the account label with `(verbunden)` in green or `(getrennt)` in
+  red, account-level reconnect/disconnect controls, and the calendars available
+  through that account. Calendar rows can be added to or removed from DMAX; this
+  toggles the corresponding `calendar_sources.enabled` selection. The separate
+  `DMAX-Kalenderquellen` section lists only active DMAX-side calendar source
+  selections. Source rows store provider/account/calendar/display metadata and
+  enabled/read-only flags only; no credentials or provider tokens. Writable
+  Google calendar sources can be toggled to allow DMAX write actions; calendars
+  discovered from Google default to read-only unless Google reports owner/writer
+  access.
 - `/initiatives/:id`: type badge, editable basic fields (name, category, status,
   summary, `projectPhase` for `type=project`, and start/end dates for
   `type=project`), markdown initiative memory rendered as UI, media attachments
@@ -326,10 +405,15 @@ POST /api/calendar/entries
 PATCH /api/calendar/entries/:id
 POST /api/calendar/entries/:id/complete
 DELETE /api/calendar/entries/:id
+POST /api/calendar/google-events
+PATCH /api/calendar/google-events
+POST /api/calendar/bindings/from-google
+DELETE /api/calendar/bindings/:id
 GET  /api/config/calendar-sources
 POST /api/config/calendar-sources
 PATCH /api/config/calendar-sources/:id
 GET  /api/config/google-calendar/status
+GET  /api/config/google-calendar/accounts
 POST /api/config/google-calendar/auth-url
 GET  /api/config/google-calendar/calendars
 GET  /api/config/google-calendar/oauth/callback
@@ -437,9 +521,14 @@ Known issue:
 - Add initiative-relation tools to the browser app-chat static tool-context
   summary so OpenClaw receives the same high-level affordance list that the MCP
   registry exposes.
-- Consider frontend code-splitting; `npm run web:build` currently passes but
-  warns that the main JavaScript chunk is larger than Vite's default 500 kB
-  threshold.
+- Continue advanced Google Calendar integration from
+  `docs/google-calendar-integration-plan.md`: a first pragmatic multi-account
+  OAuth/token UI exists, but a first-class connected-account table, account
+  metadata from Google identity APIs, background sync/webhooks, recurrence for
+  habits, attendee/location/reminder fields, default target calendars, and
+  deeper sync history are still future work.
+- Frontend build uses manual Vite chunks for React, LiveKit, and icons; keep an
+  eye on chunk sizes as the browser app grows.
 
 ## Environment And Secrets
 
@@ -460,11 +549,11 @@ data.
 
 ## Verification
 
-Last checked on 2026-05-11:
+Last checked on 2026-05-12:
 
 - `npm run typecheck` passed.
-- `npm test` passed: 21 test files, 78 tests.
-- `npm run web:build` passed with the known large-chunk warning.
+- `npm test` passed: 24 test files, 89 tests.
+- `npm run web:build` passed without Vite large-chunk warnings.
 
 ```bash
 npm run typecheck

@@ -16,6 +16,25 @@ export default defineConfig({
   },
   build: {
     outDir: "../dist-web",
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) {
+            return undefined;
+          }
+          if (id.includes("/react/") || id.includes("/react-dom/") || id.includes("/scheduler/")) {
+            return "vendor-react";
+          }
+          if (id.includes("/livekit-client/") || id.includes("/@livekit/")) {
+            return "vendor-livekit";
+          }
+          if (id.includes("/lucide-react/")) {
+            return "vendor-icons";
+          }
+          return "vendor";
+        }
+      }
+    }
   }
 });

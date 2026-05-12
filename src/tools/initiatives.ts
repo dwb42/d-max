@@ -29,6 +29,7 @@ const createInitiativeInput = z.object({
   markdown: z.string().optional().describe("Durable initiative memory markdown. Use adaptive sections, not a hard template."),
   startDate: initiativeDateSchema.optional().describe("Optional start date for type=project initiatives, in YYYY-MM-DD. Ideas and habits are not time-bound."),
   endDate: initiativeDateSchema.optional().describe("Optional end date for type=project initiatives, in YYYY-MM-DD. Ideas and habits are not time-bound."),
+  isLocked: z.boolean().optional().describe("For type=project initiatives, locks the start/end timeframe against canvas dragging. Defaults to false."),
   isSystem: z.boolean().optional().describe("Only true for system-created initiatives.")
 });
 const updateInitiativeInput = z.object({
@@ -42,6 +43,7 @@ const updateInitiativeInput = z.object({
   summary: z.string().trim().min(1).nullable().optional().describe("New optional summary."),
   startDate: initiativeDateSchema.optional().describe("New start date for type=project initiatives, in YYYY-MM-DD, or null to clear."),
   endDate: initiativeDateSchema.optional().describe("New end date for type=project initiatives, in YYYY-MM-DD, or null to clear."),
+  isLocked: z.boolean().optional().describe("For type=project initiatives, lock or unlock the project timeframe against canvas dragging."),
   confirmed: z.boolean().optional().describe("Set true only after Dietrich confirms a risky change.")
 });
 const archiveInitiativeInput = z.object({
@@ -57,7 +59,7 @@ export const initiativeTools: ToolDefinition<any>[] = [
   defineTool({
     name: "listInitiatives",
     description:
-      "List d-max initiatives. Optional filters include categoryId, status, and type (idea, project, habit). Returned type=project initiatives may include projectPhase, startDate, and endDate.",
+      "List d-max initiatives. Optional filters include categoryId, status, and type (idea, project, habit). Returned type=project initiatives may include projectPhase, startDate, endDate, and isLocked.",
     inputSchema: listInitiativesInput,
     run: (input, context) => {
       if (!context.db) {
@@ -72,7 +74,7 @@ export const initiativeTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "getInitiative",
-    description: "Get one d-max initiative, including its type, projectPhase, and optional startDate/endDate for type=project initiatives.",
+    description: "Get one d-max initiative, including its type, projectPhase, optional startDate/endDate, and isLocked for type=project initiatives.",
     inputSchema: getInitiativeInput,
     run: (input, context) => {
       if (!context.db) {
@@ -102,7 +104,7 @@ export const initiativeTools: ToolDefinition<any>[] = [
   defineTool({
     name: "updateInitiative",
     description:
-      "Update a d-max initiative. For type=project initiatives, maintain projectPhase and startDate/endDate when Dietrich gives project phase or time-span changes. Ideas are loose thoughts and habits are ongoing practices. Changing type is a lifecycle decision such as idea -> project or idea -> habit and requires Dietrich's confirmation.",
+      "Update a d-max initiative. For type=project initiatives, maintain projectPhase, startDate/endDate, and isLocked when Dietrich gives project phase, time-span, or timeframe lock changes. Ideas are loose thoughts and habits are ongoing practices. Changing type is a lifecycle decision such as idea -> project or idea -> habit and requires Dietrich's confirmation.",
     inputSchema: updateInitiativeInput,
     run: (input, context) => {
       if (!context.db) {

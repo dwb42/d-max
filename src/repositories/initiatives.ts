@@ -17,6 +17,7 @@ export type Initiative = {
   markdown: string;
   startDate: string | null;
   endDate: string | null;
+  isLocked: boolean;
   sortOrder: number;
   isSystem: boolean;
   createdAt: string;
@@ -35,6 +36,7 @@ type InitiativeRow = {
   markdown: string;
   start_date: string | null;
   end_date: string | null;
+  is_locked: number;
   sort_order: number;
   is_system: number;
   created_at: string;
@@ -51,6 +53,7 @@ export type CreateInitiativeInput = {
   markdown?: string;
   startDate?: string | null;
   endDate?: string | null;
+  isLocked?: boolean;
   isSystem?: boolean;
 };
 
@@ -66,6 +69,7 @@ export type UpdateInitiativeInput = {
   markdown?: string;
   startDate?: string | null;
   endDate?: string | null;
+  isLocked?: boolean;
 };
 
 function toInitiative(row: InitiativeRow): Initiative {
@@ -81,6 +85,7 @@ function toInitiative(row: InitiativeRow): Initiative {
     markdown: row.markdown,
     startDate: row.start_date,
     endDate: row.end_date,
+    isLocked: row.is_locked === 1,
     sortOrder: row.sort_order,
     isSystem: row.is_system === 1,
     createdAt: row.created_at,
@@ -128,7 +133,7 @@ export class InitiativeRepository {
 
     const result = this.db
       .prepare(
-        "insert into initiatives (category_id, parent_id, type, project_phase, name, status, summary, markdown, start_date, end_date, sort_order, is_system, created_at, updated_at) values (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)"
+        "insert into initiatives (category_id, parent_id, type, project_phase, name, status, summary, markdown, start_date, end_date, is_locked, sort_order, is_system, created_at, updated_at) values (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       )
       .run(
         input.categoryId,
@@ -140,6 +145,7 @@ export class InitiativeRepository {
         input.markdown ?? "",
         input.startDate ?? null,
         input.endDate ?? null,
+        input.isLocked ? 1 : 0,
         this.nextSortOrder(input.categoryId),
         input.isSystem ? 1 : 0,
         now,
@@ -162,7 +168,7 @@ export class InitiativeRepository {
 
     this.db
       .prepare(
-        "update initiatives set category_id = ?, parent_id = ?, type = ?, project_phase = ?, name = ?, status = ?, summary = ?, markdown = ?, start_date = ?, end_date = ?, updated_at = ? where id = ?"
+        "update initiatives set category_id = ?, parent_id = ?, type = ?, project_phase = ?, name = ?, status = ?, summary = ?, markdown = ?, start_date = ?, end_date = ?, is_locked = ?, updated_at = ? where id = ?"
       )
       .run(
         input.categoryId ?? existing.categoryId,
@@ -175,6 +181,7 @@ export class InitiativeRepository {
         input.markdown === undefined ? existing.markdown : input.markdown,
         nextStartDate,
         nextEndDate,
+        input.isLocked === undefined ? (existing.isLocked ? 1 : 0) : (input.isLocked ? 1 : 0),
         now,
         input.id
       );

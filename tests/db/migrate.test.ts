@@ -63,10 +63,11 @@ describe("migrate", () => {
     try {
       const initiativeColumns = db.prepare("pragma table_info(initiatives)").all() as Array<{ name: string }>;
       const initiativeRelationColumns = db.prepare("pragma table_info(initiative_relations)").all() as Array<{ name: string }>;
-      const initiative = db.prepare("select type, start_date, end_date from initiatives where id = 1").get() as {
+      const initiative = db.prepare("select type, start_date, end_date, is_locked from initiatives where id = 1").get() as {
         type: string;
         start_date: string | null;
         end_date: string | null;
+        is_locked: number;
       };
       const categoryColumns = db.prepare("pragma table_info(categories)").all() as Array<{ name: string }>;
       const mediaAssetColumns = db.prepare("pragma table_info(media_assets)").all() as Array<{ name: string }>;
@@ -86,6 +87,7 @@ describe("migrate", () => {
       expect(initiativeColumns.some((column) => column.name === "type")).toBe(true);
       expect(initiativeColumns.some((column) => column.name === "start_date")).toBe(true);
       expect(initiativeColumns.some((column) => column.name === "end_date")).toBe(true);
+      expect(initiativeColumns.some((column) => column.name === "is_locked")).toBe(true);
       expect(initiativeRelationColumns.some((column) => column.name === "predecessor_initiative_id")).toBe(true);
       expect(initiativeRelationColumns.some((column) => column.name === "successor_initiative_id")).toBe(true);
       expect(initiativeRelationColumns.some((column) => column.name === "relation_type")).toBe(true);
@@ -96,6 +98,7 @@ describe("migrate", () => {
       expect(initiative.type).toBe("project");
       expect(initiative.start_date).toBeNull();
       expect(initiative.end_date).toBeNull();
+      expect(initiative.is_locked).toBe(0);
       expect(legacyTask.status).toBe("open");
       expect(legacyTask.completed_at).toBeNull();
       expect(inbox.is_system).toBe(1);

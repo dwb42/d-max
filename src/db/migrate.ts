@@ -20,8 +20,10 @@ export function migrate(databasePath?: string): void {
     migrateInitiativeTypes(db);
     migrateInitiativeProjectPhase(db);
     migrateInitiativeDates(db);
+    migrateInitiativeLockedTimeframes(db);
     migrateTaskStatusModel(db);
     migrateCalendarDomain(db);
+    migrateCalendarEventBindings(db);
     migrateTaskChecklistItems(db);
     migrateMediaDomain(db);
     db.exec(schema);
@@ -320,6 +322,20 @@ function migrateInitiativeDates(db: ReturnType<typeof openDatabase>): void {
   `);
 }
 
+function migrateInitiativeLockedTimeframes(db: ReturnType<typeof openDatabase>): void {
+  const existing = db
+    .prepare("select name from sqlite_master where type = 'table' and name = 'initiatives'")
+    .get() as { name: string } | undefined;
+  if (!existing) {
+    return;
+  }
+
+  const columns = db.prepare("pragma table_info(initiatives)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "is_locked")) {
+    db.exec("alter table initiatives add column is_locked integer not null default 0 check (is_locked in (0, 1))");
+  }
+}
+
 function migrateTaskStatusModel(db: ReturnType<typeof openDatabase>): void {
   const existing = db
     .prepare("select name from sqlite_master where type = 'table' and name = 'tasks'")
@@ -407,6 +423,36 @@ function migrateCalendarDomain(db: ReturnType<typeof openDatabase>): void {
       unique(provider, calendar_id)
     );
     create index if not exists idx_calendar_sources_enabled on calendar_sources(enabled, provider);
+  `);
+}
+
+function migrateCalendarEventBindings(db: ReturnType<typeof openDatabase>): void {
+  db.exec(`
+    create table if not exists calendar_event_bindings (
+      id integer primary key,
+      local_entity_type text not null check (local_entity_type in ('calendar_entry', 'initiative_project_span')),
+      local_entity_id integer not null,
+      provider text not null check (provider in ('google')),
+      calendar_source_id integer references calendar_sources(id),
+      external_calendar_id text not null,
+      external_event_id text not null,
+      external_etag text,
+      external_updated_at text,
+      sync_status text not null default 'synced' check (sync_status in ('synced', 'pending_sync', 'sync_error', 'external_deleted', 'sync_blocked_readonly')),
+      sync_message text,
+      last_synced_at text,
+      unlinked_at text,
+      created_at text not null,
+      updated_at text not null
+    );
+    create unique index if not exists idx_calendar_event_bindings_active_local
+      on calendar_event_bindings(local_entity_type, local_entity_id)
+      where unlinked_at is null;
+    create unique index if not exists idx_calendar_event_bindings_active_external
+      on calendar_event_bindings(provider, external_calendar_id, external_event_id)
+      where unlinked_at is null;
+    create index if not exists idx_calendar_event_bindings_source on calendar_event_bindings(calendar_source_id);
+    create index if not exists idx_calendar_event_bindings_status on calendar_event_bindings(sync_status, id);
   `);
 }
 

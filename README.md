@@ -44,7 +44,7 @@ npm run smoke:mcp
 LiveKit Drive Mode requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
 `LIVEKIT_API_SECRET`. xAI realtime voice requires `XAI_API_KEY`.
 
-Google Calendar read-only integration requires a Google OAuth web client:
+Google Calendar integration requires a Google OAuth web client:
 
 ```bash
 GOOGLE_OAUTH_CLIENT_ID=...
@@ -53,7 +53,9 @@ GOOGLE_OAUTH_REDIRECT_URI=http://localhost:3088/api/config/google-calendar/oauth
 ```
 
 Then open `/config`, connect Google, and add the calendar IDs that should appear
-in `/calendar`.
+in `/calendar`. The config UI supports multiple Google accounts: connect each
+account via OAuth, then enable the calendars DMAX should read/write from that
+account. Those enabled selections are stored as DMAX calendar sources.
 
 Media uploads default to local files under `data/media` with metadata in SQLite.
 Override with `DMAX_MEDIA_STORAGE_DIR` and `DMAX_MEDIA_MAX_UPLOAD_BYTES` when
@@ -87,8 +89,7 @@ openclaw agent --local \
 
 ## Verification
 
-Last context-sync verification: 2026-05-11. The commands below passed locally;
-`web:build` emitted only Vite's large JavaScript chunk warning.
+Last context-sync verification: 2026-05-12. The commands below passed locally.
 
 ```bash
 npm run typecheck

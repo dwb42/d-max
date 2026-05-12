@@ -396,6 +396,12 @@ h1 {
   color: #872515;
 }
 
+.config-hint.warning {
+  border-color: #e3d08d;
+  background: #fff9dc;
+  color: #5c4810;
+}
+
 .drive-layout {
   display: grid;
   grid-template-columns: minmax(280px, 420px) 1fr;
@@ -1253,6 +1259,124 @@ textarea {
 .initiative-date-pill:hover {
   background: #e6ece5;
   color: #17211c;
+}
+
+.project-date-calendar-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.project-date-modal-section {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  border-top: 1px solid #edf1eb;
+  padding-top: 12px;
+}
+
+.project-date-modal-section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.project-google-section {
+  border-top: 1px solid #dde6da;
+  padding-top: 14px;
+}
+
+.project-date-modal-full {
+  grid-column: 1 / -1;
+}
+
+.project-date-lock-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  color: #66726b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.project-timeframe-lock-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #d6ddd3;
+  border-radius: 999px;
+  padding: 0;
+  background: #ffffff;
+  color: #66726b;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.project-timeframe-lock-toggle:hover {
+  border-color: #bcc8b8;
+  background: #f7faf6;
+  color: #17211c;
+}
+
+.project-timeframe-lock-toggle.locked {
+  border-color: #101714;
+  background: #101714;
+  color: #ffffff;
+}
+
+.project-timeframe-lock-toggle:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.project-google-summary {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: #66726b;
+  font-size: 12px;
+}
+
+.project-google-summary strong {
+  min-width: 0;
+  color: #26342d;
+  font-size: 13px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-google-summary select {
+  width: 100%;
+  border: 1px solid #d6ddd3;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #ffffff;
+  color: #101714;
+  font: inherit;
+}
+
+.project-date-text-link {
+  justify-self: start;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #66726b;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.project-date-text-link:hover {
+  color: #17211c;
+}
+
+.project-date-text-link:disabled {
+  cursor: default;
+  opacity: 0.48;
 }
 
 .initiative-date-editor {
@@ -2318,6 +2442,31 @@ button.initiative-markdown-panel:hover {
   font-size: 12px;
 }
 
+.calendar-sync-banners {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.calendar-sync-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e3d08d;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fff9dc;
+  color: #5c4810;
+  font-size: 13px;
+}
+
+.calendar-sync-banner .icon-button {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+}
+
 .calendar-frame {
   --calendar-days: 7;
   position: relative;
@@ -2330,7 +2479,7 @@ button.initiative-markdown-panel:hover {
 }
 
 .calendar-frame.all-day-open {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
 }
 
 .calendar-frame.all-day-closed {
@@ -2347,7 +2496,7 @@ button.initiative-markdown-panel:hover {
 }
 
 .calendar-frame.all-day-open .calendar-time-scroll {
-  grid-row: 3;
+  grid-row: 4;
 }
 
 .calendar-frame.all-day-closed .calendar-time-scroll {
@@ -2357,7 +2506,7 @@ button.initiative-markdown-panel:hover {
 .calendar-day-header-spacer,
 .calendar-day-header,
 .calendar-all-day-label,
-.calendar-all-day-column {
+.calendar-all-day-bars {
   border-bottom: 1px solid #dfe4dc;
 }
 
@@ -2409,13 +2558,31 @@ button.initiative-markdown-panel:hover {
 .calendar-all-day-label {
   display: flex;
   align-items: flex-start;
-  grid-row: 2;
   min-height: 32px;
   max-height: 132px;
   overflow: auto;
   padding: 5px 7px;
   color: #66726b;
   font-size: 12px;
+}
+
+.calendar-all-day-label.fixed,
+.calendar-all-day-bars.fixed {
+  grid-row: 2;
+}
+
+.calendar-all-day-label.flexible,
+.calendar-all-day-bars.flexible {
+  grid-row: 3;
+}
+
+.calendar-all-day-label.fixed > span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  color: #17211c;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .calendar-row-toggle {
@@ -2467,20 +2634,41 @@ button.initiative-markdown-panel:hover {
   transform: rotate(-90deg);
 }
 
-.calendar-all-day-column {
-  display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
-  grid-row: 2;
-  gap: 5px;
+.calendar-all-day-bars {
+  --calendar-all-day-rows: 1;
+  display: grid;
+  grid-column: 2 / -1;
+  grid-template-columns: repeat(var(--calendar-days), minmax(150px, 1fr));
+  grid-template-rows: repeat(var(--calendar-all-day-rows), 24px);
+  gap: 5px 0;
   min-height: 32px;
   max-height: 132px;
   overflow-y: auto;
-  border-right: 1px solid #edf1eb;
   padding: 4px 6px;
 }
 
+.calendar-all-day-bars.collapsed {
+  max-height: 32px;
+  overflow: hidden;
+}
+
+.calendar-all-day-bars.expanded {
+  overflow-y: auto;
+}
+
+.calendar-all-day-cell {
+  z-index: 0;
+  min-width: 0;
+  border-right: 1px solid #edf1eb;
+  pointer-events: none;
+}
+
 .calendar-all-day-event {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   max-width: 100%;
   min-height: 24px;
   border: 1px solid color-mix(in srgb, var(--calendar-event-color) 58%, #ffffff);
@@ -2492,6 +2680,63 @@ button.initiative-markdown-panel:hover {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.calendar-all-day-event > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-all-day-event.locked {
+  cursor: pointer;
+}
+
+.calendar-all-day-event.flexible {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--calendar-event-color) 9%, #ffffff);
+}
+
+.calendar-all-day-more {
+  z-index: 3;
+  justify-self: end;
+  align-self: center;
+  min-width: 26px;
+  height: 20px;
+  border: 1px solid #d7ded4;
+  border-radius: 999px;
+  padding: 0 7px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #66726b;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.calendar-all-day-more:hover {
+  border-color: #bfc9bc;
+  background: #ffffff;
+  color: #17211c;
+}
+
+.calendar-lock-icon {
+  flex: 0 0 auto;
+  opacity: 0.78;
+}
+
+.calendar-google-badge {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #4285f4;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  vertical-align: 1px;
 }
 
 .calendar-time-axis,
@@ -2610,6 +2855,7 @@ button.initiative-markdown-panel:hover {
 
 .calendar-event-block.google {
   background: #f3f5ff;
+  cursor: pointer;
 }
 
 .calendar-project-hover-card {
@@ -2721,15 +2967,16 @@ button.initiative-markdown-panel:hover {
 }
 
 .calendar-event-main strong {
-  display: -webkit-box;
   overflow: hidden;
   font-size: 13px;
   line-height: 1.15;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
-.calendar-event-main span {
+.calendar-event-main strong .calendar-google-badge {
+  margin-left: 5px;
+}
+
+.calendar-event-main > div > span:not(.calendar-google-badge) {
   display: block;
   color: #66726b;
   font-size: 11px;
@@ -2804,6 +3051,8 @@ button.initiative-markdown-panel:hover {
 }
 
 .compact-modal input,
+.compact-modal select,
+.config-field input,
 .config-source-form input {
   min-height: 40px;
   border: 1px solid #d7ddd5;
@@ -2817,6 +3066,146 @@ button.initiative-markdown-panel:hover {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.google-event-modal {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.google-event-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.google-event-modal-header div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.google-event-modal-header span {
+  color: #66726b;
+  font-size: 12px;
+}
+
+.google-event-modal-header strong {
+  overflow-wrap: anywhere;
+  font-size: 18px;
+}
+
+.google-event-meta {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.google-event-meta div {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 10px;
+}
+
+.google-event-meta dt {
+  color: #66726b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.google-event-meta dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #17211c;
+  font-size: 13px;
+}
+
+.google-event-attendee-list {
+  display: grid;
+  gap: 3px;
+}
+
+.google-event-edit-form,
+.google-event-link-actions {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid #edf1eb;
+  padding-top: 12px;
+}
+
+.google-event-link-actions {
+  grid-template-columns: 1fr;
+}
+
+.google-event-date-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.google-event-link-mode-control {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  width: 100%;
+}
+
+.google-event-link-section {
+  display: grid;
+  gap: 10px;
+  padding: 4px 0 0;
+  border-top: 1px solid #edf1eb;
+}
+
+.google-event-link-section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.google-event-section-title {
+  display: grid;
+  gap: 3px;
+}
+
+.google-event-section-title strong {
+  color: #17211c;
+  font-size: 14px;
+}
+
+.google-event-section-title span,
+.google-event-field > span,
+.google-event-sync-hint {
+  color: #66726b;
+  font-size: 12px;
+}
+
+.google-event-field {
+  display: grid;
+  gap: 5px;
+}
+
+.google-event-direction-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+}
+
+.google-event-direction-control button {
+  white-space: normal;
+}
+
+.google-event-sync-hint {
+  line-height: 1.35;
+}
+
+.google-event-sync-hint.warning {
+  color: #8a5a00;
+}
+
+.google-event-link-actions input,
+.google-event-link-actions select {
+  width: 100%;
+  min-width: 0;
 }
 
 .config-layout {
@@ -2838,6 +3227,7 @@ button.initiative-markdown-panel:hover {
 
 .google-auth-actions {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
@@ -2845,21 +3235,143 @@ button.initiative-markdown-panel:hover {
 
 .google-auth-status {
   display: inline-grid;
-  min-height: 40px;
+  min-height: 30px;
   place-items: center;
   border: 1px solid #dfe4dc;
   border-radius: 999px;
-  padding: 0 12px;
+  padding: 0 10px;
   background: #f7f8f5;
   color: #66726b;
   font-size: 13px;
   font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .google-auth-status.connected {
   border-color: #94cf9a;
   background: #edf9ee;
   color: #20662a;
+}
+
+.config-subsection,
+.google-connect-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.google-connect-action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.google-connect-action .primary-action {
+  width: auto;
+}
+
+.config-subsection-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #17211c;
+}
+
+.config-subsection-title strong {
+  font-size: 15px;
+}
+
+.config-subsection-title span {
+  overflow-wrap: anywhere;
+  color: #66726b;
+  font-size: 13px;
+}
+
+.google-auth-actions .google-auth-status {
+  flex: 0 0 auto;
+  align-self: center;
+  min-height: 0;
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.google-auth-actions .google-auth-status.connected {
+  color: #20662a;
+}
+
+.google-account-controls {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.google-account-card-list {
+  display: grid;
+  gap: 12px;
+}
+
+.google-account-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #dfe4dc;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fbfcfa;
+}
+
+.google-account-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.google-account-card-header strong,
+.google-account-card-header span {
+  display: block;
+}
+
+.google-account-card-header strong {
+  color: #17211c;
+  font-size: 17px;
+}
+
+.google-account-card-header .google-account-heading-status {
+  display: inline;
+  font-size: inherit;
+  font-weight: 800;
+}
+
+.google-account-heading-status.connected {
+  color: #20662a;
+}
+
+.google-account-heading-status.disconnected {
+  color: #9b2f25;
+}
+
+.google-account-card-header span {
+  color: #66726b;
+  font-size: 13px;
+}
+
+.muted-inline {
+  color: #66726b;
+  font-size: 13px;
+}
+
+.config-field {
+  display: grid;
+  gap: 4px;
+}
+
+.config-field span {
+  color: #66726b;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .config-hint {
@@ -2917,8 +3429,12 @@ button.initiative-markdown-panel:hover {
 
 .config-source-form {
   display: grid;
-  grid-template-columns: 1fr 1.3fr 1fr 100px auto;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 100px auto;
   gap: 8px;
+}
+
+.config-source-form-title {
+  grid-column: 1 / -1;
 }
 
 .config-source-form .color-input {
@@ -4339,6 +4855,16 @@ button.task-notes-panel:hover {
 }
 
 @media (max-width: 900px) {
+  .google-account-controls,
+  .config-source-form,
+  .google-account-card-header {
+    grid-template-columns: 1fr;
+  }
+
+  .google-account-card-header {
+    display: grid;
+  }
+
   .app-shell,
   .app-shell.sidebar-collapsed,
   .app-shell.sidebar-collapsed.with-agent-drawer,
@@ -4835,6 +5361,20 @@ button.task-notes-panel:hover {
   cursor: grabbing;
 }
 
+.planning-canvas-time-bar.locked,
+.planning-canvas-time-bar.locked:active {
+  cursor: ns-resize;
+}
+
+.planning-canvas-time-marker.locked {
+  cursor: not-allowed;
+}
+
+.planning-canvas-time-bar.locked {
+  opacity: 0.92;
+  box-shadow: inset 0 0 0 1px rgba(16, 23, 20, 0.28), 0 3px 8px rgba(16, 23, 20, 0.08);
+}
+
 .planning-canvas-time-bar.planning {
   opacity: 0.9;
 }
@@ -4939,6 +5479,23 @@ button.task-notes-panel:hover {
 
 .planning-canvas-time-handle.end {
   right: -8px;
+}
+
+.planning-canvas-time-lock-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  display: inline-grid;
+  place-items: center;
+  z-index: 6;
+  width: 17px;
+  height: 17px;
+  border: 1px solid rgba(16, 23, 20, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #26342d;
+  box-shadow: 0 2px 5px rgba(16, 23, 20, 0.12);
+  pointer-events: none;
 }
 
 .planning-canvas-time-bar-label {
@@ -5226,6 +5783,19 @@ button.task-notes-panel:hover {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+.planning-canvas-lock-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #d6ddd3;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f7faf6;
+  color: #43524a;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .planning-canvas-modal-actions {

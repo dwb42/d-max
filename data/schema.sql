@@ -24,6 +24,7 @@ create table if not exists initiatives (
   markdown text not null default '',
   start_date text,
   end_date text,
+  is_locked integer not null default 0 check (is_locked in (0, 1)),
   sort_order integer not null default 0,
   is_system integer not null default 0 check (is_system in (0, 1)),
   created_at text not null,
@@ -115,6 +116,24 @@ create table if not exists calendar_sources (
   created_at text not null,
   updated_at text not null,
   unique(provider, calendar_id)
+);
+
+create table if not exists calendar_event_bindings (
+  id integer primary key,
+  local_entity_type text not null check (local_entity_type in ('calendar_entry', 'initiative_project_span')),
+  local_entity_id integer not null,
+  provider text not null check (provider in ('google')),
+  calendar_source_id integer references calendar_sources(id),
+  external_calendar_id text not null,
+  external_event_id text not null,
+  external_etag text,
+  external_updated_at text,
+  sync_status text not null default 'synced' check (sync_status in ('synced', 'pending_sync', 'sync_error', 'external_deleted', 'sync_blocked_readonly')),
+  sync_message text,
+  last_synced_at text,
+  unlinked_at text,
+  created_at text not null,
+  updated_at text not null
 );
 
 create table if not exists media_assets (
@@ -228,6 +247,14 @@ create index if not exists idx_calendar_entries_status on calendar_entries(statu
 create index if not exists idx_calendar_entries_initiative_id on calendar_entries(initiative_id);
 create index if not exists idx_calendar_entries_task_id on calendar_entries(task_id);
 create index if not exists idx_calendar_sources_enabled on calendar_sources(enabled, provider);
+create unique index if not exists idx_calendar_event_bindings_active_local
+  on calendar_event_bindings(local_entity_type, local_entity_id)
+  where unlinked_at is null;
+create unique index if not exists idx_calendar_event_bindings_active_external
+  on calendar_event_bindings(provider, external_calendar_id, external_event_id)
+  where unlinked_at is null;
+create index if not exists idx_calendar_event_bindings_source on calendar_event_bindings(calendar_source_id);
+create index if not exists idx_calendar_event_bindings_status on calendar_event_bindings(sync_status, id);
 create index if not exists idx_media_assets_kind on media_assets(kind);
 create index if not exists idx_media_assets_sha256 on media_assets(sha256);
 create index if not exists idx_media_links_entity on media_links(entity_type, entity_id, sort_order, id);

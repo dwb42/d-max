@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { CalendarEntryRepository } from "../../src/repositories/calendar-entries.js";
+import { CalendarEventBindingRepository } from "../../src/repositories/calendar-event-bindings.js";
 import { CalendarSourceRepository } from "../../src/repositories/calendar-sources.js";
 import { CategoryRepository } from "../../src/repositories/categories.js";
 import { InitiativeRelationRepository } from "../../src/repositories/initiative-relations.js";
@@ -49,19 +50,21 @@ describe("repositories", () => {
     expect(project.type).toBe("project");
     expect(project.startDate).toBe("2026-05-02");
     expect(project.endDate).toBe("2026-06-15");
+    expect(project.isLocked).toBe(false);
     expect(task.priority).toBe("high");
     expect(tasks.list({ initiativeId: project.id })).toHaveLength(1);
   });
 
-  it("updates initiative date ranges", () => {
+  it("updates initiative date ranges and lock status", () => {
     const category = new CategoryRepository(db).create({ name: "Reisen" });
     const initiatives = new InitiativeRepository(db);
     const project = initiatives.create({ categoryId: category.id, name: "Portugal Trip", startDate: "2026-07-01" });
 
-    const updated = initiatives.update({ id: project.id, endDate: "2026-07-21" });
+    const updated = initiatives.update({ id: project.id, endDate: "2026-07-21", isLocked: true });
 
     expect(updated.startDate).toBe("2026-07-01");
     expect(updated.endDate).toBe("2026-07-21");
+    expect(updated.isLocked).toBe(true);
   });
 
   it("rejects initiative date ranges where start is after end", () => {
@@ -302,5 +305,59 @@ describe("repositories", () => {
       enabled: false,
       readOnly: true
     });
+  });
+
+  it("stores one active Google binding per concrete DMAX time object", () => {
+    const category = new CategoryRepository(db).create({ name: "Business" });
+    const initiative = new InitiativeRepository(db).create({ categoryId: category.id, name: "d-max" });
+    const entry = new CalendarEntryRepository(db).create({
+      type: "initiative_focus",
+      title: "Focus block",
+      startAt: "2026-05-04T09:00:00.000",
+      endAt: "2026-05-04T10:30:00.000",
+      initiativeId: initiative.id
+    });
+    const source = new CalendarSourceRepository(db).create({
+      accountLabel: "dw@b42.io",
+      calendarId: "primary",
+      displayName: "Business"
+    });
+    const bindings = new CalendarEventBindingRepository(db);
+
+    const binding = bindings.create({
+      localEntityType: "calendar_entry",
+      localEntityId: entry.id,
+      calendarSourceId: source.id,
+      externalCalendarId: "primary",
+      externalEventId: "google-event-1",
+      externalEtag: "etag-1",
+      externalUpdatedAt: "2026-05-04T08:00:00.000Z"
+    });
+
+    expect(bindings.findActiveByLocal({ localEntityType: "calendar_entry", localEntityId: entry.id })).toMatchObject({
+      id: binding.id,
+      syncStatus: "synced",
+      externalEventId: "google-event-1"
+    });
+    expect(() =>
+      bindings.create({
+        localEntityType: "calendar_entry",
+        localEntityId: entry.id,
+        calendarSourceId: source.id,
+        externalCalendarId: "primary",
+        externalEventId: "google-event-2"
+      })
+    ).toThrow();
+
+    bindings.unlink(binding.id, "2026-05-04T11:00:00.000Z");
+    expect(() =>
+      bindings.create({
+        localEntityType: "calendar_entry",
+        localEntityId: entry.id,
+        calendarSourceId: source.id,
+        externalCalendarId: "primary",
+        externalEventId: "google-event-2"
+      })
+    ).not.toThrow();
   });
 });

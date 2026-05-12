@@ -25,6 +25,7 @@ export type Initiative = {
   markdown: string;
   startDate: string | null;
   endDate: string | null;
+  isLocked: boolean;
   sortOrder: number;
   isSystem: boolean;
   createdAt?: string;
@@ -198,7 +199,14 @@ export type GoogleCalendarAuthStatus = {
   tokenPath: string;
   redirectUri: string;
   scope: string;
+  tokenScope: string | null;
+  hasRequiredScope: boolean;
   detail: string | null;
+};
+
+export type GoogleCalendarAccountStatus = {
+  accountLabel: string;
+  status: GoogleCalendarAuthStatus;
 };
 
 export type GoogleCalendarListItem = {
@@ -206,6 +214,26 @@ export type GoogleCalendarListItem = {
   summary: string;
   backgroundColor: string | null;
   primary: boolean;
+  accessRole: string | null;
+  readOnly: boolean;
+};
+
+export type CalendarViewWarning = {
+  scope: "auth" | "source" | "calendar_list" | "sync";
+  sourceId: number | null;
+  message: string;
+};
+
+export type CalendarEventBindingView = {
+  id: number;
+  localEntityType: "calendar_entry" | "initiative_project_span";
+  localEntityId: number;
+  calendarSourceId: number | null;
+  externalCalendarId: string;
+  externalEventId: string;
+  syncStatus: "synced" | "pending_sync" | "sync_error" | "external_deleted" | "sync_blocked_readonly";
+  syncMessage: string | null;
+  lastSyncedAt: string | null;
 };
 
 export type CalendarViewEvent =
@@ -224,21 +252,45 @@ export type CalendarViewEvent =
       taskId: number | null;
       categoryId: number | null;
       categoryName: string | null;
-      color: string | null;
-      notes: string | null;
-    }
+	      color: string | null;
+	      notes: string | null;
+	      binding: CalendarEventBindingView | null;
+	    }
   | {
       id: string;
       source: "google";
       readOnly: true;
       allDay: boolean;
       sourceId: number;
+      externalCalendarId: string;
+      externalEventId: string;
       title: string;
       startAt: string;
       endAt: string;
       color: string | null;
       sourceDisplayName: string;
-    }
+      htmlLink: string | null;
+      etag: string | null;
+      updatedAt: string | null;
+      recurring: boolean;
+      organizerSelf: boolean;
+      organizer: {
+        email: string | null;
+        displayName: string | null;
+        self: boolean;
+      } | null;
+      attendees: Array<{
+        email: string | null;
+        displayName: string | null;
+        self: boolean;
+        responseStatus: string | null;
+        optional: boolean;
+      }>;
+      sourceReadOnly: boolean;
+	      editable: boolean;
+	      readOnlyReason: string | null;
+	      binding: CalendarEventBindingView | null;
+	    }
   | {
       id: string;
       source: "initiative_span";
@@ -248,13 +300,16 @@ export type CalendarViewEvent =
       title: string;
       startAt: string;
       endAt: string;
-      categoryId: number;
-      categoryName: string | null;
-      color: string | null;
-    };
+	      categoryId: number;
+	      categoryName: string | null;
+	      color: string | null;
+	      isLocked: boolean;
+	      binding: CalendarEventBindingView | null;
+	    };
 
 export type CalendarViewData = {
   events: CalendarViewEvent[];
+  warnings: CalendarViewWarning[];
 };
 
 export type InitiativeDetail = {
@@ -263,6 +318,9 @@ export type InitiativeDetail = {
   successors?: InitiativeRelationWithInitiatives[];
   tasks: Task[];
   mediaAttachments?: MediaAttachment[];
+  projectCalendarBinding?: (CalendarEventBindingView & {
+    calendarSource: CalendarSource | null;
+  }) | null;
 };
 
 export type TaskDetail = {

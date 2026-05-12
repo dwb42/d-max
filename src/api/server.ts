@@ -7,8 +7,10 @@ import { openDatabase } from "../db/connection.js";
 import { migrate } from "../db/migrate.js";
 import { CategoryRepository } from "../repositories/categories.js";
 import { CalendarService } from "../calendar/calendar-service.js";
+import { assertCanLinkExistingProjectSpan } from "../calendar/calendar-linking-rules.js";
 import { GoogleCalendarAuth } from "../calendar/google-calendar-auth.js";
 import { GoogleCalendarProvider } from "../calendar/google-calendar-provider.js";
+import { CalendarEventBindingRepository } from "../repositories/calendar-event-bindings.js";
 import { CalendarEntryRepository } from "../repositories/calendar-entries.js";
 import { CalendarSourceRepository } from "../repositories/calendar-sources.js";
 import { InitiativeRelationRepository } from "../repositories/initiative-relations.js";
@@ -47,6 +49,7 @@ migrate(env.databasePath);
 const db = openDatabase();
 const categories = new CategoryRepository(db);
 const calendarEntries = new CalendarEntryRepository(db);
+const calendarBindings = new CalendarEventBindingRepository(db);
 const calendarSources = new CalendarSourceRepository(db);
 const googleCalendarAuth = new GoogleCalendarAuth();
 const initiatives = new InitiativeRepository(db);
@@ -201,13 +204,85 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/calendar/google-events") {
+      const body = createGoogleEventFromDmaxBody.parse(await readJson(req));
+      const result = await createGoogleEventFromDmax(body);
+      emitApiStateEvent({
+        operation: "createGoogleCalendarEvent",
+        entityType: result.binding.localEntityType === "calendar_entry" ? "calendar_entry" : "initiative",
+        entityId: result.binding.localEntityId,
+        initiativeId: result.binding.localEntityType === "initiative_project_span" ? result.binding.localEntityId : result.entry?.initiativeId ?? null,
+        taskId: result.entry?.taskId ?? null
+      });
+      sendJson(res, 200, result);
+      return;
+    }
+
+    if (req.method === "PATCH" && url.pathname === "/api/calendar/google-events") {
+      const body = updateGoogleOnlyEventBody.parse(await readJson(req));
+      const source = requireWritableCalendarSource(body.calendarSourceId);
+      const event = await new GoogleCalendarProvider().updateEvent(source, body.externalEventId, {
+        title: body.title,
+        startAt: body.startAt,
+        endAt: body.endAt,
+        allDay: body.allDay
+      });
+      sendJson(res, 200, { event });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/calendar/bindings/from-google") {
+      const body = linkGoogleEventBody.parse(await readJson(req));
+      const result = await linkGoogleEventToDmax(body);
+      GoogleCalendarProvider.clearEventListCache();
+      emitApiStateEvent({
+        operation: "linkGoogleCalendarEvent",
+        entityType: result.binding.localEntityType === "calendar_entry" ? "calendar_entry" : "initiative",
+        entityId: result.binding.localEntityId,
+        initiativeId: result.binding.localEntityType === "initiative_project_span" ? result.binding.localEntityId : result.entry?.initiativeId ?? null,
+        taskId: result.entry?.taskId ?? null
+      });
+      sendJson(res, 200, result);
+      return;
+    }
+
+    const calendarBindingMatch = url.pathname.match(/^\/api\/calendar\/bindings\/(\d+)$/);
+    if (req.method === "DELETE" && calendarBindingMatch) {
+      const body = unlinkCalendarBindingBody.parse(await readJson(req).catch(() => ({})));
+      const existing = calendarBindings.findById(Number(calendarBindingMatch[1]));
+      if (!existing) {
+        sendJson(res, 404, { error: "Calendar event binding not found" });
+        return;
+      }
+      if (body.deleteGoogleEvent) {
+        const source = existing.calendarSourceId ? calendarSources.findById(existing.calendarSourceId) : null;
+        if (source) {
+          await new GoogleCalendarProvider().deleteEvent(source, existing.externalEventId);
+        }
+      }
+      const binding = calendarBindings.unlink(existing.id);
+      GoogleCalendarProvider.clearEventListCache();
+      emitApiStateEvent({
+        operation: "unlinkGoogleCalendarEvent",
+        entityType: binding.localEntityType === "calendar_entry" ? "calendar_entry" : "initiative",
+        entityId: binding.localEntityId
+      });
+      sendJson(res, 200, { binding });
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/config/calendar-sources") {
       sendJson(res, 200, { sources: calendarSources.list() });
       return;
     }
 
     if (req.method === "GET" && url.pathname === "/api/config/google-calendar/status") {
-      sendJson(res, 200, { googleCalendar: googleCalendarAuth.status() });
+      sendJson(res, 200, { googleCalendar: googleCalendarAuth.status(url.searchParams.get("accountLabel")) });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/config/google-calendar/accounts") {
+      sendJson(res, 200, { accounts: googleCalendarAuth.listAccountStatuses(calendarSources.list().map((source) => source.accountLabel)) });
       return;
     }
 
@@ -218,13 +293,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/api/config/google-calendar/disconnect") {
-      googleCalendarAuth.disconnect();
+      const body = googleCalendarDisconnectBody.parse(await readJson(req).catch(() => ({})));
+      googleCalendarAuth.disconnect(body.accountLabel ?? null);
+      GoogleCalendarProvider.clearEventListCache();
       sendJson(res, 200, { disconnected: true });
       return;
     }
 
     if (req.method === "GET" && url.pathname === "/api/config/google-calendar/calendars") {
-      sendJson(res, 200, { calendars: await new GoogleCalendarProvider().listCalendars() });
+      sendJson(res, 200, { calendars: await new GoogleCalendarProvider().listCalendars(url.searchParams.get("accountLabel")) });
       return;
     }
 
@@ -240,14 +317,17 @@ const server = http.createServer(async (req, res) => {
         sendHtmlRedirect(res, "/config?google=error&detail=missing_code_or_state");
         return;
       }
-      await googleCalendarAuth.handleCallback({ code, state });
-      sendHtmlRedirect(res, "/config?google=connected");
+      const result = await googleCalendarAuth.handleCallback({ code, state });
+      GoogleCalendarProvider.clearEventListCache();
+      const accountQuery = result.accountLabel ? `&account=${encodeURIComponent(result.accountLabel)}` : "";
+      sendHtmlRedirect(res, `/config?google=connected${accountQuery}`);
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/config/calendar-sources") {
       const body = createCalendarSourceBody.parse(await readJson(req));
       const source = calendarSources.create(body);
+      GoogleCalendarProvider.clearEventListCache();
       emitApiStateEvent({ operation: "createCalendarSource", entityType: "calendar_source", entityId: source.id });
       sendJson(res, 200, { source });
       return;
@@ -257,6 +337,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "PATCH" && calendarSourceMatch) {
       const body = updateCalendarSourceBody.parse(await readJson(req));
       const source = calendarSources.update({ id: Number(calendarSourceMatch[1]), ...body });
+      GoogleCalendarProvider.clearEventListCache();
       emitApiStateEvent({ operation: "updateCalendarSource", entityType: "calendar_source", entityId: source.id });
       sendJson(res, 200, { source });
       return;
@@ -437,7 +518,8 @@ const server = http.createServer(async (req, res) => {
         predecessors: initiativeRelations.getInitiativePredecessors(initiative.id),
         successors: initiativeRelations.getInitiativeSuccessors(initiative.id),
         tasks: tasks.list({ initiativeId: initiative.id }),
-        mediaAttachments: mediaLinks.listForEntity("initiative", initiative.id).map(mediaAttachmentForApi)
+        mediaAttachments: mediaLinks.listForEntity("initiative", initiative.id).map(mediaAttachmentForApi),
+        projectCalendarBinding: initiative.type === "project" ? projectCalendarBindingForApi(initiative.id) : null
       });
       return;
     }
@@ -445,6 +527,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "PATCH" && initiativeMatch) {
       const body = updateInitiativeBody.parse(await readJson(req));
       const initiative = initiatives.update({ id: Number(initiativeMatch[1]), ...body });
+      if (initiative.type === "project") {
+        await new CalendarService(db).syncLinkedLocalEntity({
+          localEntityType: "initiative_project_span",
+          localEntityId: initiative.id
+        });
+      }
       emitApiStateEvent({ operation: "updateInitiative", entityType: "initiative", entityId: initiative.id, initiativeId: initiative.id, categoryId: initiative.categoryId });
       sendJson(res, 200, { initiative });
       return;
@@ -988,6 +1076,47 @@ const updateCalendarEntryBody = z.object({
   notes: z.string().nullable().optional()
 });
 
+const calendarBindingLocalEntityType = z.enum(["calendar_entry", "initiative_project_span"]);
+
+const createGoogleEventFromDmaxBody = z.object({
+  localEntityType: calendarBindingLocalEntityType,
+  localEntityId: z.number().int().positive(),
+  calendarSourceId: z.number().int().positive()
+});
+
+const updateGoogleOnlyEventBody = z.object({
+  calendarSourceId: z.number().int().positive(),
+  externalEventId: z.string().trim().min(1),
+  title: z.string().trim().min(1),
+  startAt: z.string().trim().min(1),
+  endAt: z.string().trim().min(1),
+  allDay: z.boolean()
+});
+
+const linkGoogleEventBody = z.object({
+  calendarSourceId: z.number().int().positive(),
+  externalCalendarId: z.string().trim().min(1),
+  externalEventId: z.string().trim().min(1),
+  externalEtag: z.string().nullable().optional(),
+  externalUpdatedAt: z.string().nullable().optional(),
+  title: z.string().trim().min(1),
+  startAt: z.string().trim().min(1),
+  endAt: z.string().trim().min(1),
+  allDay: z.boolean(),
+  initialDirection: z.enum(["google_to_dmax", "dmax_to_google"]).optional(),
+  target: z.discriminatedUnion("type", [
+    z.object({ type: z.literal("existing_project_span"), initiativeId: z.number().int().positive() }),
+    z.object({ type: z.literal("new_project"), categoryId: z.number().int().positive(), name: z.string().trim().min(1).optional() }),
+    z.object({ type: z.literal("existing_project_entry"), initiativeId: z.number().int().positive() }),
+    z.object({ type: z.literal("existing_task_entry"), taskId: z.number().int().positive() }),
+    z.object({ type: z.literal("new_task_entry"), initiativeId: z.number().int().positive(), title: z.string().trim().min(1).optional() })
+  ])
+});
+
+const unlinkCalendarBindingBody = z.object({
+  deleteGoogleEvent: z.boolean().optional()
+});
+
 const createCalendarSourceBody = z.object({
   provider: z.literal("google").optional(),
   accountLabel: z.string().trim().min(1),
@@ -1009,6 +1138,10 @@ const updateCalendarSourceBody = z.object({
 
 const googleCalendarAuthUrlBody = z.object({
   loginHint: z.string().trim().min(1).nullable().optional()
+});
+
+const googleCalendarDisconnectBody = z.object({
+  accountLabel: z.string().trim().min(1).nullable().optional()
 });
 
 const createCategoryBody = z.object({
@@ -1035,7 +1168,8 @@ const createInitiativeBody = z.object({
   summary: z.string().trim().min(1).nullable().optional(),
   markdown: z.string().optional(),
   startDate: initiativeDateBody.optional(),
-  endDate: initiativeDateBody.optional()
+  endDate: initiativeDateBody.optional(),
+  isLocked: z.boolean().optional()
 });
 
 const updateInitiativeBody = z.object({
@@ -1048,7 +1182,8 @@ const updateInitiativeBody = z.object({
   summary: z.string().trim().min(1).nullable().optional(),
   markdown: z.string().optional(),
   startDate: initiativeDateBody.optional(),
-  endDate: initiativeDateBody.optional()
+  endDate: initiativeDateBody.optional(),
+  isLocked: z.boolean().optional()
 });
 
 const reorderCategoriesBody = z.object({
@@ -1284,6 +1419,215 @@ function parseOptionalPositiveInt(value: string | null): number | null {
 
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function createGoogleEventFromDmax(input: z.infer<typeof createGoogleEventFromDmaxBody>) {
+  const source = requireWritableCalendarSource(input.calendarSourceId);
+  const provider = new GoogleCalendarProvider();
+
+  if (calendarBindings.findActiveByLocal({ localEntityType: input.localEntityType, localEntityId: input.localEntityId })) {
+    throw new Error("This DMAX time object is already linked to a Google event.");
+  }
+
+  if (input.localEntityType === "calendar_entry") {
+    const entry = calendarEntries.findById(input.localEntityId);
+    if (!entry) {
+      throw new Error(`Calendar entry not found: ${input.localEntityId}`);
+    }
+    const event = await provider.createEvent(source, {
+      title: entry.title,
+      startAt: entry.startAt,
+      endAt: entry.endAt,
+      allDay: false,
+      description: googleMarkerDescription("calendar_entry", entry.id)
+    });
+    const binding = calendarBindings.create({
+      localEntityType: "calendar_entry",
+      localEntityId: entry.id,
+      calendarSourceId: source.id,
+      externalCalendarId: event.externalCalendarId,
+      externalEventId: event.externalEventId,
+      externalEtag: event.etag,
+      externalUpdatedAt: event.updatedAt,
+      lastSyncedAt: new Date().toISOString()
+    });
+    return { binding, event, entry };
+  }
+
+  const initiative = initiatives.findById(input.localEntityId);
+  if (!initiative || initiative.type !== "project") {
+    throw new Error(`Project initiative not found: ${input.localEntityId}`);
+  }
+  if (!initiative.startDate || !initiative.endDate) {
+    throw new Error("Project span Google events require project startDate and endDate.");
+  }
+  const event = await provider.createEvent(source, {
+    title: initiative.name,
+    startAt: initiative.startDate,
+    endAt: initiative.endDate,
+    allDay: true,
+    description: googleMarkerDescription("initiative_project_span", initiative.id)
+  });
+  const binding = calendarBindings.create({
+    localEntityType: "initiative_project_span",
+    localEntityId: initiative.id,
+    calendarSourceId: source.id,
+    externalCalendarId: event.externalCalendarId,
+    externalEventId: event.externalEventId,
+    externalEtag: event.etag,
+    externalUpdatedAt: event.updatedAt,
+    lastSyncedAt: new Date().toISOString()
+  });
+  return { binding, event, initiative };
+}
+
+async function linkGoogleEventToDmax(input: z.infer<typeof linkGoogleEventBody>) {
+  const source = calendarSources.findById(input.calendarSourceId);
+  if (!source) {
+    throw new Error(`Calendar source not found: ${input.calendarSourceId}`);
+  }
+  if (calendarBindings.findActiveByExternal({ externalCalendarId: input.externalCalendarId, externalEventId: input.externalEventId })) {
+    throw new Error("This Google event is already linked to DMAX.");
+  }
+
+  if (input.target.type === "existing_project_span" || input.target.type === "new_project") {
+    if (!input.allDay) {
+      throw new Error("Only all-day Google events can be linked to project spans.");
+    }
+    const initialDirection = input.initialDirection ?? "google_to_dmax";
+    const provider = new GoogleCalendarProvider();
+    let initiative;
+    if (input.target.type === "new_project") {
+      initiative = initiatives.create({
+        categoryId: input.target.categoryId,
+        type: "project",
+        name: input.target.name ?? input.title,
+        startDate: input.startAt,
+        endDate: input.endAt
+      });
+    } else {
+      const existing = initiatives.findById(input.target.initiativeId);
+      const project = assertCanLinkExistingProjectSpan({
+        initiative: existing,
+        initiativeId: input.target.initiativeId,
+        hasActiveBinding: existing ? Boolean(calendarBindings.findActiveByLocal({ localEntityType: "initiative_project_span", localEntityId: existing.id })) : false,
+        initialDirection
+      });
+      initiative = initialDirection === "google_to_dmax"
+        ? initiatives.update({ id: project.id, name: input.title, startDate: input.startAt, endDate: input.endAt })
+        : project;
+    }
+
+    let externalEtag = input.externalEtag ?? null;
+    let externalUpdatedAt = input.externalUpdatedAt ?? null;
+    if (initialDirection === "dmax_to_google") {
+      const updatedEvent = await provider.updateEvent(requireWritableCalendarSource(input.calendarSourceId), input.externalEventId, {
+        title: initiative.name,
+        startAt: initiative.startDate ?? input.startAt,
+        endAt: initiative.endDate ?? input.endAt,
+        allDay: true
+      });
+      externalEtag = updatedEvent.etag;
+      externalUpdatedAt = updatedEvent.updatedAt;
+    }
+
+    const binding = calendarBindings.create({
+      localEntityType: "initiative_project_span",
+      localEntityId: initiative.id,
+      calendarSourceId: source.id,
+      externalCalendarId: input.externalCalendarId,
+      externalEventId: input.externalEventId,
+      externalEtag,
+      externalUpdatedAt,
+      lastSyncedAt: new Date().toISOString()
+    });
+    return { binding, initiative };
+  }
+
+  if (input.allDay) {
+    throw new Error("All-day Google events cannot be linked as calendar entries in this flow.");
+  }
+
+  let taskId: number | null = null;
+  let initiativeId: number | null = null;
+  if (input.target.type === "existing_project_entry") {
+    const initiative = initiatives.findById(input.target.initiativeId);
+    if (!initiative || initiative.type !== "project") {
+      throw new Error(`Project initiative not found: ${input.target.initiativeId}`);
+    }
+    initiativeId = initiative.id;
+  } else if (input.target.type === "existing_task_entry") {
+    const task = tasks.findById(input.target.taskId);
+    if (!task) {
+      throw new Error(`Task not found: ${input.target.taskId}`);
+    }
+    taskId = task.id;
+  } else {
+    const initiative = initiatives.findById(input.target.initiativeId);
+    if (!initiative || initiative.type !== "project") {
+      throw new Error(`Project initiative not found: ${input.target.initiativeId}`);
+    }
+    const task = tasks.create({ initiativeId: initiative.id, title: input.target.title ?? input.title });
+    taskId = task.id;
+  }
+
+  const entry = calendarEntries.create({
+    type: taskId ? "task_work" : "initiative_focus",
+    title: input.title,
+    startAt: input.startAt,
+    endAt: input.endAt,
+    initiativeId,
+    taskId
+  });
+  const binding = calendarBindings.create({
+    localEntityType: "calendar_entry",
+    localEntityId: entry.id,
+    calendarSourceId: source.id,
+    externalCalendarId: input.externalCalendarId,
+    externalEventId: input.externalEventId,
+    externalEtag: input.externalEtag ?? null,
+    externalUpdatedAt: input.externalUpdatedAt ?? null,
+    lastSyncedAt: new Date().toISOString()
+  });
+  return { binding, entry };
+}
+
+function requireWritableCalendarSource(id: number): NonNullable<ReturnType<CalendarSourceRepository["findById"]>> {
+  const source = calendarSources.findById(id);
+  if (!source) {
+    throw new Error(`Calendar source not found: ${id}`);
+  }
+  if (source.readOnly) {
+    throw new Error("Calendar source is read-only.");
+  }
+  return source;
+}
+
+function googleMarkerDescription(localEntityType: "calendar_entry" | "initiative_project_span", localEntityId: number): string {
+  return `Created by DMAX\nLinked DMAX object: ${localEntityType}:${localEntityId}`;
+}
+
+function projectCalendarBindingForApi(initiativeId: number) {
+  const binding = calendarBindings.findActiveByLocal({
+    localEntityType: "initiative_project_span",
+    localEntityId: initiativeId
+  });
+  if (!binding) {
+    return null;
+  }
+
+  return {
+    id: binding.id,
+    localEntityType: binding.localEntityType,
+    localEntityId: binding.localEntityId,
+    calendarSourceId: binding.calendarSourceId,
+    externalCalendarId: binding.externalCalendarId,
+    externalEventId: binding.externalEventId,
+    syncStatus: binding.syncStatus,
+    syncMessage: binding.syncMessage,
+    lastSyncedAt: binding.lastSyncedAt,
+    calendarSource: binding.calendarSourceId ? calendarSources.findById(binding.calendarSourceId) : null
+  };
 }
 
 function parseOptionalNonNegativeInt(value: string | null): number | null {
