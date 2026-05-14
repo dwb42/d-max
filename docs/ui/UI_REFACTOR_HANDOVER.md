@@ -20,7 +20,11 @@ Core reusable UI primitives have been extracted under `web/src/components/ui`. P
 
 Phase 21 consolidated the canonical list-page system across `/categories`, `/people`, `/organizations`, `/projects`, `/ideas`, `/habits` and `/tasks`. The migrated list pages now share a stable scan-first anatomy, compact row model, hidden-by-default create flows, lightweight search where present and drawer-safe behavior.
 
-Phase 22 reviewed worktree hygiene, refactor boundaries, package/Playwright state and next-surface readiness. The current recommended next step is a narrow `App.tsx` decomposition pass for the stabilized canonical list pages before starting a new major UI surface.
+Phase 22 reviewed worktree hygiene, refactor boundaries, package/Playwright state and next-surface readiness.
+
+Phase 23 completed a narrow `App.tsx` decomposition pass for the stabilized canonical list pages. The canonical list route compositions now live under `web/src/pages/lists/`, while `App.tsx` still owns routing, data loading, mutations, modal open state, drawer/chat handling and non-list surfaces.
+
+Phase 24 completed the same narrow decomposition for canonical detail pages. The canonical detail route compositions now live under `web/src/pages/details/`, while `App.tsx` remains responsible for route orchestration, data loading, API mutation callbacks, drawer/chat handling and unreworked surfaces.
 
 Do not start calendar/timeline/planning, utility/debug pages, or broad `App.tsx` cleanup before explicit scope.
 
@@ -57,6 +61,8 @@ Do not start calendar/timeline/planning, utility/debug pages, or broad `App.tsx`
 | Phase 20: task list migration | complete | Migrated `/tasks` to the canonical list-page pattern as the small operational action list reference. Added a calm page-level create action and `EditModal`, added simple search, rendered tasks through `EntityListPage`/`EntityList`/`EntityListItem`, showed title/status/priority/due date/parent context compactly, preserved status toggle/delete behavior as calm row actions, and added drawer-safe list behavior. | `web/src/App.tsx`, `web/src/styles.css`, `web/src/components/ui/EntityListPage.tsx`, `docs/ui/UI_REFERENCE_REVIEW_TASK_LIST.md`, `docs/ui/screenshots/reference-task-list/` | Validation passed: `npm run typecheck`, `npm run web:build`, `npm test` on 2026-05-14. The overview API provides open tasks only; completed task archive/filtering remains deferred. |
 | Phase 21: list-page consolidation and regression review | complete | Reviewed all migrated canonical list pages as one system. Fixed task list/product label drift from `Massnahmen` to `Maßnahmen`, fixed `/tasks` collection DMAX context so the drawer no longer opens as `Global Chat`, added accessible open labels to openable `EntityListItem` rows without row actions, documented the final list-page system and refreshed consolidated screenshots. | `web/src/App.tsx`, `web/src/components/ui/EntityListPage.tsx`, `docs/ui/UI_REFERENCE_REVIEW_LIST_PAGE_SYSTEM.md`, `docs/ui/UI_REFACTOR_HANDOVER.md`, `docs/ui/UI_COMPONENTS.md`, `docs/ui/UI_PATTERNS.md`, `docs/ui/UI_REVIEW_CHECKLIST.md`, `docs/ui/screenshots/list-page-system-review/` | Validation passed: `npm run typecheck`, `npm run web:build`, `npm test` on 2026-05-14. No new route migration. |
 | Phase 22: worktree hygiene and boundary review | complete | Classified the current worktree, confirmed package/Playwright state, identified unrelated non-UI `src/chat/openclaw-agent.ts` changes, reviewed `App.tsx` extraction risks and documented deferred boundaries before the next major surface. | `docs/ui/UI_PHASE_22_WORKTREE_HYGIENE.md`, `docs/ui/UI_REFACTOR_HANDOVER.md` | Validation passed: `npm run typecheck`, `npm run web:build`, `npm test` on 2026-05-14. No route migration and no app code changes for Phase 22. |
+| Phase 23: narrow list-page decomposition | complete | Extracted canonical list page route compositions and their create modals from `App.tsx` into `web/src/pages/lists/`. `App.tsx` remains the orchestrator for routing, data, mutations, modal open state and drawer/chat behavior. | `web/src/App.tsx`, `web/src/pages/lists/*`, `docs/ui/UI_PHASE_23_LIST_PAGE_DECOMPOSITION.md`, `docs/ui/UI_REFACTOR_HANDOVER.md` | Validation passed: `npm run typecheck`, `npm run web:build`, `npm test` on 2026-05-14. No visual redesign and no screenshots required. |
+| Phase 24: narrow detail-page decomposition | complete | Extracted canonical detail page route compositions from `App.tsx` into `web/src/pages/details/`. Category, person, organization, project/initiative and task detail pages now live in route-level modules with shared detail panels/utilities where needed. | `web/src/App.tsx`, `web/src/pages/details/*`, `docs/ui/UI_PHASE_24_DETAIL_PAGE_DECOMPOSITION.md`, `docs/ui/UI_REFACTOR_HANDOVER.md` | Validation passed: `npm run typecheck`, `npm run web:build`, `npm test` on 2026-05-14. No visual redesign and no screenshots required. |
 
 ## 3. Current Canonical UI Principles
 
@@ -171,10 +177,13 @@ Completed:
 - First minimal entity list primitives extracted to `web/src/components/ui/EntityListPage.tsx`.
 - Party contact/address primitives extracted to `web/src/components/party`.
 - Organization, project/initiative, person, task and category detail consume shared primitives where appropriate. `/categories`, `/people`, `/organizations`, `/projects`, `/ideas`, `/habits` and `/tasks` consume the first list primitives.
+- Canonical list-page route compositions and create modals are extracted to `web/src/pages/lists/`.
+- Canonical detail-page route compositions are extracted to `web/src/pages/details/`.
 
 Partially complete:
 
-- `ParticipantsPanel`, `MediaAttachmentsPanel`, `TaskChecklistPanel`, project relationship editor, DMAX drawer and several route compositions remain in `web/src/App.tsx`.
+- DMAX drawer, calendar/timeline/planning surfaces, config/prompts/debug surfaces and app-shell orchestration remain in `web/src/App.tsx`.
+- `ParticipantsPanel`, `MediaAttachmentsPanel`, task checklist, project relationship editing and detail-page utilities now live under `web/src/pages/details/`; they are still route-level/detail-level code, not generalized product primitives.
 - `MetadataGrid` is extracted and now has no default explanatory subtitle.
 - `RelationList` supports `emptyMode` for card/inline/none empty behavior.
 
@@ -233,6 +242,8 @@ Important review docs:
 - `docs/ui/UI_REFERENCE_REVIEW_TASK_LIST.md`
 - `docs/ui/UI_REFERENCE_REVIEW_LIST_PAGE_SYSTEM.md`
 - `docs/ui/UI_PHASE_22_WORKTREE_HYGIENE.md`
+- `docs/ui/UI_PHASE_23_LIST_PAGE_DECOMPOSITION.md`
+- `docs/ui/UI_PHASE_24_DETAIL_PAGE_DECOMPOSITION.md`
 
 Important screenshot directories:
 
@@ -266,7 +277,7 @@ Important screenshot directories:
 - Normal entity list pages are migrated; calendar/planning/utility list-like surfaces are still deferred.
 - `/categories`, `/people`, `/organizations`, `/projects`, `/ideas`, `/habits` and `/tasks` have been migrated as canonical list-page references.
 - Broad copy/language cleanup is still pending.
-- `web/src/App.tsx` still contains route-local logic and should not be broadly refactored without explicit scope.
+- `web/src/App.tsx` still contains route orchestration, planning, drawer/chat and utility/debug logic and should not be broadly refactored without explicit scope.
 - Sparse fixture data limits visual validation for populated person contact/address/relationship states.
 - Sparse fixture data limits visual validation for populated task participant/media states.
 - Sparse fixture data limits visual validation for long category markdown containment.
@@ -286,61 +297,59 @@ Important screenshot directories:
 - Many UI docs/components/screenshots are currently untracked or modified; a new session must inspect `git status` before editing.
 - The current worktree includes application-code changes from multiple UI phases. A new session must review current diffs before continuing and must not assume a clean baseline.
 
-## 13. Recommended Next Phase
+## 13. Current Completion Status
 
-Recommended next phase: **list-page consolidation/review**.
+The canonical entity detail and list-page UI refactor is complete through Phase 24.
 
-Phase 20 completed the `/tasks` list migration:
+Completed list-page extraction:
 
-1. The page is now scan-first rather than category-board/form-first.
-2. Task rows show task titles first, then compact status/priority/due date facts.
-3. Parent initiative and category context are visible without turning the list into a board.
-4. The task create form is hidden by default and opens through `Maßnahme hinzufügen`.
-5. Creation uses `EditModal` and navigates to the new task detail after creation.
-6. Simple search is available as a compact list toolbar.
-7. The empty collection state uses a proper `EmptyState`.
-8. The list route uses drawer-safe behavior so the DMAX drawer does not squeeze rows into unreadable columns.
-9. Status toggle and delete behavior remain available as calm row actions.
-10. Checklist progress, task archive filtering and planning/board behavior were intentionally not added.
-11. `/categories`, `/people`, `/organizations`, `/projects`, `/ideas`, `/habits` and `/tasks` now validate the minimal reusable list primitives: `EntityListPage`, `EntityList`, `EntityListItem`.
+- `web/src/pages/lists/CategoryListPage.tsx`
+- `web/src/pages/lists/PersonListPage.tsx`
+- `web/src/pages/lists/OrganizationListPage.tsx`
+- `web/src/pages/lists/ProjectListPage.tsx`
+- `web/src/pages/lists/IdeaListPage.tsx`
+- `web/src/pages/lists/HabitListPage.tsx`
+- `web/src/pages/lists/TaskListPage.tsx`
+- `web/src/pages/lists/listUtils.ts`
+- `web/src/pages/lists/index.ts`
 
-Current completion status:
+`App.tsx` still owns:
 
-- Implemented in `web/src/App.tsx` and `web/src/styles.css`.
-- `web/src/components/ui/EntityListPage.tsx` created and exported.
-- `docs/ui/UI_REFERENCE_REVIEW_CATEGORY_LIST.md` created.
-- `docs/ui/UI_REFERENCE_REVIEW_PERSON_LIST.md` created.
-- `docs/ui/UI_REFERENCE_REVIEW_ORGANIZATION_LIST.md` created.
-- `docs/ui/UI_REFERENCE_REVIEW_PROJECT_LIST.md` created.
-- `docs/ui/UI_REFERENCE_REVIEW_IDEA_LIST.md` created.
-- `docs/ui/UI_REFERENCE_REVIEW_HABIT_LIST.md` created.
-- `docs/ui/UI_REFERENCE_REVIEW_TASK_LIST.md` created.
-- Screenshots captured under `docs/ui/screenshots/reference-category-list/`.
-- Screenshots captured under `docs/ui/screenshots/reference-person-list/`.
-- Screenshots captured under `docs/ui/screenshots/reference-organization-list/`.
-- Screenshots captured under `docs/ui/screenshots/reference-project-list/`.
-- Screenshots captured under `docs/ui/screenshots/reference-idea-list/`.
-- Screenshots captured under `docs/ui/screenshots/reference-habit-list/`.
-- Screenshots captured under `docs/ui/screenshots/reference-task-list/`.
-- `npm run typecheck`, `npm run web:build` and `npm test` passed on 2026-05-14.
+- routing and navigation;
+- overview/person/organization data ownership;
+- create/update/delete API calls;
+- modal open state;
+- entity detail routes;
+- calendar/timeline/planning surfaces;
+- config/prompts/debug surfaces;
+- DMAX drawer, chat and voice handling.
 
-Do not start calendar/timeline/planning, utility/debug routes or broad `App.tsx` cleanup before explicit scope.
+Completed detail-page extraction:
+
+- `web/src/pages/details/CategoryDetailPage.tsx`
+- `web/src/pages/details/PersonDetailPage.tsx`
+- `web/src/pages/details/OrganizationDetailPage.tsx`
+- `web/src/pages/details/ProjectDetailPage.tsx`
+- `web/src/pages/details/TaskDetailPage.tsx`
+- `web/src/pages/details/SharedDetailPanels.tsx`
+- `web/src/pages/details/detailUtils.tsx`
+- `web/src/pages/details/index.ts`
+
+Validation after Phase 24:
+
+- `npm run typecheck`: passed on 2026-05-14.
+- `npm run web:build`: passed on 2026-05-14.
+- `npm test`: passed on 2026-05-14, 28 test files / 115 tests.
 
 ## 14. Recommended Next Phase
 
-Phase 22 recommends a narrow `App.tsx` decomposition pass for the stabilized canonical list pages before starting a new major UI surface.
+Choose one next phase deliberately:
 
-Recommended scope:
+- narrow extraction of canonical detail pages from `App.tsx`, if maintainability remains the priority;
+- config/prompts/debug containment, if reducing utility-view noise is the product priority;
+- calendar/timeline/planning surface audit, if time planning is next.
 
-- Extract only migrated list route components and their create modals.
-- Preserve all behavior, APIs, schemas, drawer behavior and routes.
-- Do not extract detail pages in the same phase.
-- Do not introduce new UI primitives.
-
-Alternative next phases remain valid if product priority changes:
-
-- calendar/timeline/planning surfaces;
-- config/prompts/debug containment.
+Do not start any of these without explicit scope.
 
 ## 15. Files A New Session Must Read First
 
@@ -358,6 +367,8 @@ Alternative next phases remain valid if product priority changes:
 - `docs/ui/UI_REFERENCE_REVIEW_TASK_DETAIL.md`
 - `docs/ui/UI_REFERENCE_REVIEW_LIST_PAGE_SYSTEM.md`
 - `docs/ui/UI_PHASE_22_WORKTREE_HYGIENE.md`
+- `docs/ui/UI_PHASE_23_LIST_PAGE_DECOMPOSITION.md`
+- `docs/ui/UI_PHASE_24_DETAIL_PAGE_DECOMPOSITION.md`
 - `docs/ui/UI_REFACTOR_HANDOVER.md`
 - `web/src/App.tsx`
 - `web/src/styles.css`
