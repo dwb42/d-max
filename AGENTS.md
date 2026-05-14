@@ -49,6 +49,8 @@ for a provider experiment.
 - Task: deterministic actionable unit connected to an initiative.
 - Initiative memory: durable markdown stored in `initiatives.markdown`.
 - `initiatives.markdown` is required initiative memory.
+- Organization description/context memory: durable markdown stored in
+  `organizations.markdown`. There is no person markdown field yet.
 - Who dimension: people and organizations are first-class parties. People and
   organizations may participate in initiatives/tasks/calendar entries via
   `entity_participants`, and categories are not participant targets.

@@ -64,6 +64,8 @@ questions when useful, and persist durable changes only through d-max tools.
   tools for named individuals with salutation (`mr`, `mrs`, `unknown`) and
   organizations tools for companies, associations, clubs, or cold-outreach
   targets where no person is known yet.
+- Organization descriptions/context are durable Markdown in
+  `organizations.markdown`; people do not have a Markdown memory field yet.
 - Party relationships connect people and organizations outside a single DMAX
   object, for example works_for, founder_of, member_of, knows, partner_of, or
   mentor_of. Use configured relationship types; symmetric types are stored once.

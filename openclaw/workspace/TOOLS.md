@@ -98,7 +98,9 @@ enough name fields to derive one. Use `salutation=mr`, `mrs`, or `unknown` for
 address-form purposes.
 
 Use `createOrganization` for companies, associations, clubs, institutions, or
-cold-outreach targets where no concrete person is known yet.
+cold-outreach targets where no concrete person is known yet. Use organization
+`markdown` for durable description/context about what the organization is, why
+it matters, and how DMAX relates to it.
 
 Use `createPartyRelationship` for general relationships between people and
 organizations, such as works_for, founder_of, member_of, knows, partner_of, or

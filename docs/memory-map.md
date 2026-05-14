@@ -1,6 +1,6 @@
 # d-max Memory Map
 
-Date: 2026-05-12
+Date: 2026-05-14
 
 This file defines where Markdown-based memory and configuration belongs.
 
@@ -31,6 +31,9 @@ This file defines where Markdown-based memory and configuration belongs.
 ## Rules
 
 - `docs/current-state.md` wins over older plans.
+- Durable initiative memory lives in `initiatives.markdown`; durable
+  organization description/context memory lives in `organizations.markdown`.
+  There is no person Markdown memory field yet.
 - Treat `docs/archive/` as historical background only. Do not rely on archived
   specs or handoffs as current behavior without checking code and
   `docs/current-state.md`.
