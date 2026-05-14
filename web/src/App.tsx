@@ -64,6 +64,7 @@ import {
   createCategory,
   createOrganization,
   createPerson,
+  createPartyRelationship,
   createEntityParticipant,
   createGoogleEventFromDmax,
   createGoogleOnlyEvent,
@@ -76,10 +77,12 @@ import {
   createTask,
   createTaskChecklistItem,
   createPartyContactPoint,
+  createPartyAddress,
   createVoiceSession,
   deleteInitiativeRelation,
   deleteEntityParticipant,
   deletePartyContactPoint,
+  deletePartyAddress,
   deleteTask,
   deleteMediaAttachment,
   deleteTaskChecklistItem,
@@ -106,6 +109,7 @@ import {
   fetchParticipantRoleTypes,
   fetchPeople,
   fetchPersonDetail,
+  fetchRelationshipTypes,
   fetchTaskDetail,
   prewarmOpenClaw,
   reanalyzeMediaAsset,
@@ -122,6 +126,7 @@ import {
   updateCategory,
   updateOrganization,
   updatePartyContactPoint,
+  updatePartyAddress,
   updatePerson,
   updateInitiative,
   updateGoogleOnlyEvent,
@@ -154,9 +159,11 @@ import type {
   Organization,
   OrganizationDetail,
   ParticipantRoleType,
+  PartyAddress,
   PartyContactPoint,
   Person,
   PersonDetail,
+  RelationshipType,
   EntityParticipant,
   MediaAttachment,
   MediaAsset,
@@ -631,6 +638,8 @@ export default function App() {
   const [personDetail, setPersonDetail] = useState<PersonDetail | null>(null);
   const [organizationDetail, setOrganizationDetail] = useState<OrganizationDetail | null>(null);
   const [participantRoleTypes, setParticipantRoleTypes] = useState<ParticipantRoleType[]>([]);
+  const [relationshipTypes, setRelationshipTypes] = useState<RelationshipType[]>([]);
+  const [organizationCoreModalOpen, setOrganizationCoreModalOpen] = useState(false);
   const [initiativeDetail, setInitiativeDetail] = useState<InitiativeDetail | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [calendarControls, setCalendarControls] = useState<CalendarControlsState>(() => calendarControlsFromPath(`${window.location.pathname}${window.location.search}`));
@@ -1305,17 +1314,25 @@ export default function App() {
   useEffect(() => {
     if (route.view !== "organization" || !route.partyId) {
       setOrganizationDetail(null);
+      setOrganizationCoreModalOpen(false);
       return;
     }
 
+    setOrganizationCoreModalOpen(false);
     fetchOrganizationDetail(route.partyId)
       .then(setOrganizationDetail)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load organization."));
+    fetchPeople()
+      .then(setPeopleList)
+      .catch(() => undefined);
   }, [route]);
 
   useEffect(() => {
     fetchParticipantRoleTypes()
       .then(setParticipantRoleTypes)
+      .catch(() => undefined);
+    fetchRelationshipTypes()
+      .then(setRelationshipTypes)
       .catch(() => undefined);
   }, []);
 
@@ -1492,7 +1509,15 @@ export default function App() {
           <div className="section-heading">
             <div className="initiative-title-line">
               <Building2 size={24} />
-              <h1>{organizationDetail?.organization.displayName ?? "Organisation"}</h1>
+              <button
+                type="button"
+                className="page-title-button"
+                onClick={() => setOrganizationCoreModalOpen(true)}
+                disabled={!organizationDetail}
+                title="Stammdaten bearbeiten"
+              >
+                {organizationDetail?.organization.displayName ?? "Organisation"}
+              </button>
             </div>
             <p>{organizationDetail?.organization.organizationType ?? "Organisation"}</p>
           </div>
@@ -1976,6 +2001,10 @@ export default function App() {
             detail={organizationDetail}
             initiatives={overview?.initiatives ?? []}
             tasks={overview?.tasks ?? []}
+            people={peopleList ?? []}
+            relationshipTypes={relationshipTypes}
+            coreModalOpen={organizationCoreModalOpen}
+            onCloseCoreModal={() => setOrganizationCoreModalOpen(false)}
             onUpdateOrganization={async (partyId, input) => {
               await updateOrganization(partyId, input);
               setOrganizationDetail(await fetchOrganizationDetail(partyId));
@@ -1993,8 +2022,25 @@ export default function App() {
               await deletePartyContactPoint(contactPointId);
               if (route.partyId) setOrganizationDetail(await fetchOrganizationDetail(route.partyId));
             }}
+            onCreateAddress={async (partyId, input) => {
+              await createPartyAddress({ partyId, ...input });
+              setOrganizationDetail(await fetchOrganizationDetail(partyId));
+            }}
+            onUpdateAddress={async (addressId, input) => {
+              await updatePartyAddress(addressId, input);
+              if (route.partyId) setOrganizationDetail(await fetchOrganizationDetail(route.partyId));
+            }}
+            onDeleteAddress={async (addressId) => {
+              await deletePartyAddress(addressId);
+              if (route.partyId) setOrganizationDetail(await fetchOrganizationDetail(route.partyId));
+            }}
+            onCreateRelationship={async (input) => {
+              await createPartyRelationship(input);
+              if (route.partyId) setOrganizationDetail(await fetchOrganizationDetail(route.partyId));
+            }}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
+            onOpenPerson={(partyId) => navigate(`/people/${partyId}`)}
           />
           )}
           {view === "promptTemplates" && (
@@ -8361,71 +8407,49 @@ function OrganizationDetailView(props: {
   detail: OrganizationDetail | null;
   initiatives: Initiative[];
   tasks: Task[];
-  onUpdateOrganization: (partyId: number, input: { name?: string; legalName?: string | null; organizationType?: string | null }) => Promise<void>;
+  people: Person[];
+  relationshipTypes: RelationshipType[];
+  coreModalOpen: boolean;
+  onCloseCoreModal: () => void;
+  onUpdateOrganization: (partyId: number, input: { name?: string; legalName?: string | null; organizationType?: string | null; markdown?: string | null }) => Promise<void>;
   onCreateContactPoint: (partyId: number, input: Omit<CreateContactPointDraft, "partyId">) => Promise<void>;
   onUpdateContactPoint: (contactPointId: number, input: Partial<Omit<CreateContactPointDraft, "partyId">>) => Promise<void>;
   onDeleteContactPoint: (contactPointId: number) => Promise<void>;
+  onCreateAddress: (partyId: number, input: Omit<CreateAddressDraft, "partyId">) => Promise<void>;
+  onUpdateAddress: (addressId: number, input: Partial<Omit<CreateAddressDraft, "partyId">>) => Promise<void>;
+  onDeleteAddress: (addressId: number) => Promise<void>;
+  onCreateRelationship: (input: {
+    fromPartyId: number;
+    toPartyId: number;
+    relationshipTypeId: number;
+    roleLabel?: string | null;
+    status?: "active" | "inactive";
+  }) => Promise<void>;
   onOpenInitiative: (initiativeId: number) => void;
   onOpenTask: (taskId: number) => void;
+  onOpenPerson: (partyId: number) => void;
 }) {
   const organization = props.detail?.organization;
-  const [name, setName] = useState("");
-  const [legalName, setLegalName] = useState("");
-  const [organizationType, setOrganizationType] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const canSave = Boolean(name.trim());
-
-  useEffect(() => {
-    setName(organization?.name ?? "");
-    setLegalName(organization?.legalName ?? "");
-    setOrganizationType(organization?.organizationType ?? "");
-    setSaving(false);
-    setError(null);
-  }, [organization?.id, organization?.name, organization?.legalName, organization?.organizationType]);
 
   if (!props.detail || !organization) return <EmptyState title="Organisation wird geladen" />;
 
   return (
-    <section className="split-view party-detail-layout">
-      <div className="detail-pane">
-        <Panel title="Stammdaten">
-          <form
-            className="detail-edit-form"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              if (!canSave || saving) return;
-              setSaving(true);
-              setError(null);
-              try {
-                await props.onUpdateOrganization(organization.id, {
-                  name: name.trim(),
-                  legalName: legalName.trim() || null,
-                  organizationType: organizationType.trim() || null
-                });
-              } catch (err) {
-                setError(err instanceof Error ? err.message : "Organisation konnte nicht gespeichert werden.");
-              } finally {
-                setSaving(false);
-              }
-            }}
-          >
-            <label>
-              Name
-              <input value={name} onChange={(event) => setName(event.target.value)} />
-            </label>
-            <label>
-              Rechtlicher Name
-              <input value={legalName} onChange={(event) => setLegalName(event.target.value)} />
-            </label>
-            <label>
-              Typ
-              <input value={organizationType} onChange={(event) => setOrganizationType(event.target.value)} />
-            </label>
-            <button type="submit" className="primary-button" disabled={!canSave || saving}>Speichern</button>
-            {error ? <p className="inline-error">{error}</p> : null}
-          </form>
-        </Panel>
+    <section className="organization-detail-layout">
+      {props.coreModalOpen ? (
+        <OrganizationCoreModal
+          organization={organization}
+          onCancel={props.onCloseCoreModal}
+          onSave={async (input) => {
+            await props.onUpdateOrganization(organization.id, input);
+            props.onCloseCoreModal();
+          }}
+        />
+      ) : null}
+      <OrganizationDescriptionPanel
+        organization={organization}
+        onUpdateOrganization={(input) => props.onUpdateOrganization(organization.id, input)}
+      />
+      <div className="organization-detail-grid">
         <ContactPointsPanel
           partyId={organization.id}
           contactPoints={props.detail.contactPoints}
@@ -8433,8 +8457,23 @@ function OrganizationDetailView(props: {
           onUpdate={props.onUpdateContactPoint}
           onDelete={props.onDeleteContactPoint}
         />
+        <AddressesPanel
+          partyId={organization.id}
+          addresses={props.detail.addresses}
+          onCreate={props.onCreateAddress}
+          onUpdate={props.onUpdateAddress}
+          onDelete={props.onDeleteAddress}
+        />
       </div>
-      <div className="detail-pane">
+      <OrganizationMembersPanel
+        organization={organization}
+        people={props.people}
+        relationshipTypes={props.relationshipTypes}
+        relationships={props.detail.relationships}
+        onCreateRelationship={props.onCreateRelationship}
+        onOpenPerson={props.onOpenPerson}
+      />
+      <section className="organization-secondary-grid">
         <PartyRelationshipsPanel partyId={organization.id} relationships={props.detail.relationships} />
         <PartyParticipationsPanel
           participants={props.detail.participants}
@@ -8443,7 +8482,140 @@ function OrganizationDetailView(props: {
           onOpenInitiative={props.onOpenInitiative}
           onOpenTask={props.onOpenTask}
         />
+      </section>
+    </section>
+  );
+}
+
+function OrganizationCoreModal(props: {
+  organization: Organization;
+  onCancel: () => void;
+  onSave: (input: { name: string; legalName: string | null; organizationType: string | null }) => Promise<void>;
+}) {
+  const [name, setName] = useState(props.organization.name);
+  const [legalName, setLegalName] = useState(props.organization.legalName ?? "");
+  const [organizationType, setOrganizationType] = useState(props.organization.organizationType ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
+      <form
+        className="compact-modal party-edit-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Organisation bearbeiten"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (!name.trim() || saving) return;
+          setSaving(true);
+          setError(null);
+          try {
+            await props.onSave({
+              name: name.trim(),
+              legalName: legalName.trim() || null,
+              organizationType: organizationType.trim() || null
+            });
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Organisation konnte nicht gespeichert werden.");
+          } finally {
+            setSaving(false);
+          }
+        }}
+      >
+        <header className="modal-title-block">
+          <h2>Organisation bearbeiten</h2>
+        </header>
+        <label>
+          Name
+          <input autoFocus value={name} onChange={(event) => setName(event.target.value)} />
+        </label>
+        <label>
+          Rechtlicher Name
+          <input value={legalName} onChange={(event) => setLegalName(event.target.value)} />
+        </label>
+        <label>
+          Typ
+          <input value={organizationType} onChange={(event) => setOrganizationType(event.target.value)} />
+        </label>
+        {error ? <p className="inline-error">{error}</p> : null}
+        <footer className="modal-actions">
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={saving}>Abbrechen</button>
+          <button type="submit" className="primary-button" disabled={!name.trim() || saving}>Speichern</button>
+        </footer>
+      </form>
+    </div>
+  );
+}
+
+function OrganizationDescriptionPanel(props: {
+  organization: Organization;
+  onUpdateOrganization: (input: { markdown: string }) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [markdown, setMarkdown] = useState(props.organization.markdown);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMarkdown(props.organization.markdown);
+    setEditing(false);
+    setSaving(false);
+    setError(null);
+  }, [props.organization.id, props.organization.markdown]);
+
+  return (
+    <section className="panel organization-description-panel">
+      <div className="panel-heading-row">
+        <h3>Beschreibung</h3>
+        <button type="button" className="small-button" onClick={() => setEditing(true)}>Bearbeiten</button>
       </div>
+      <div className="organization-description-content">
+        <RichText text={props.organization.markdown || "Noch keine Beschreibung."} />
+      </div>
+      {editing ? (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setEditing(false)}>
+          <form
+            className="compact-modal markdown-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Organisationsbeschreibung bearbeiten"
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (saving) return;
+              setSaving(true);
+              setError(null);
+              try {
+                await props.onUpdateOrganization({ markdown });
+                setEditing(false);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Beschreibung konnte nicht gespeichert werden.");
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            <header className="modal-title-block">
+              <h2>Beschreibung</h2>
+            </header>
+            <textarea
+              autoFocus
+              className="initiative-markdown-editor"
+              value={markdown}
+              rows={18}
+              disabled={saving}
+              onChange={(event) => setMarkdown(event.target.value)}
+            />
+            {error ? <p className="inline-error">{error}</p> : null}
+            <footer className="modal-actions">
+              <button type="button" className="small-button" onClick={() => setEditing(false)} disabled={saving}>Abbrechen</button>
+              <button type="submit" className="primary-button" disabled={saving}>Speichern</button>
+            </footer>
+          </form>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -8458,6 +8630,18 @@ type CreateContactPointDraft = {
   canSend?: boolean;
   canReceive?: boolean;
   provider?: string | null;
+};
+
+type CreateAddressDraft = {
+  partyId: number;
+  label?: string | null;
+  line1: string;
+  line2?: string | null;
+  postalCode?: string | null;
+  city?: string | null;
+  region?: string | null;
+  country?: string | null;
+  isPrimary?: boolean;
 };
 
 const contactPointTypeOptions: Array<{
@@ -8496,16 +8680,18 @@ function ContactPointsPanel(props: {
   onUpdate: (contactPointId: number, input: Partial<Omit<CreateContactPointDraft, "partyId">>) => Promise<void>;
   onDelete: (contactPointId: number) => Promise<void>;
 }) {
-  const [type, setType] = useState<PartyContactPoint["type"]>("email");
-  const [label, setLabel] = useState("");
-  const [value, setValue] = useState("");
-  const [isPreferred, setIsPreferred] = useState(false);
+  const [editingContactPoint, setEditingContactPoint] = useState<PartyContactPoint | "new" | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const selectedType = contactPointTypeOption(type);
 
   return (
     <Panel title="Kontaktwege">
+      <div className="panel-heading-actions">
+        <button type="button" className="primary-button compact" onClick={() => setEditingContactPoint("new")} disabled={busyAction !== null}>
+          <Plus size={15} />
+          Kontaktweg
+        </button>
+      </div>
       <div className="relationship-list">
         {props.contactPoints.length === 0 ? <p className="muted-text">Noch keine Kontaktwege.</p> : null}
         {props.contactPoints.map((contactPoint) => (
@@ -8519,21 +8705,10 @@ function ContactPointsPanel(props: {
               type="button"
               className="icon-button compact"
               disabled={busyAction !== null}
-              title={contactPoint.isPreferred ? "Nicht bevorzugt" : "Bevorzugt"}
-              onClick={async () => {
-                if (busyAction) return;
-                setBusyAction(`update:${contactPoint.id}`);
-                setError(null);
-                try {
-                  await props.onUpdate(contactPoint.id, { isPreferred: !contactPoint.isPreferred });
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht aktualisiert werden.");
-                } finally {
-                  setBusyAction(null);
-                }
-              }}
+              title="Kontaktweg bearbeiten"
+              onClick={() => setEditingContactPoint(contactPoint)}
             >
-              <Eye size={14} />
+              <Pencil size={14} />
             </button>
             <button
               type="button"
@@ -8542,6 +8717,7 @@ function ContactPointsPanel(props: {
               title="Kontaktweg löschen"
               onClick={async () => {
                 if (busyAction) return;
+                if (!window.confirm(`Kontaktweg "${contactPoint.value}" löschen?`)) return;
                 setBusyAction(`delete:${contactPoint.id}`);
                 setError(null);
                 try {
@@ -8558,51 +8734,409 @@ function ContactPointsPanel(props: {
           </div>
         ))}
       </div>
+      {error ? <p className="inline-error">{error}</p> : null}
+      {editingContactPoint ? (
+        <ContactPointModal
+          contactPoint={editingContactPoint === "new" ? null : editingContactPoint}
+          onCancel={() => setEditingContactPoint(null)}
+          onSave={async (input) => {
+            if (busyAction) return;
+            setBusyAction(editingContactPoint === "new" ? "create" : `update:${editingContactPoint.id}`);
+            setError(null);
+            try {
+              if (editingContactPoint === "new") {
+                await props.onCreate(props.partyId, input);
+              } else {
+                await props.onUpdate(editingContactPoint.id, input);
+              }
+              setEditingContactPoint(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht gespeichert werden.");
+              throw err;
+            } finally {
+              setBusyAction(null);
+            }
+          }}
+        />
+      ) : null}
+    </Panel>
+  );
+}
+
+function ContactPointModal(props: {
+  contactPoint: PartyContactPoint | null;
+  onCancel: () => void;
+  onSave: (input: Omit<CreateContactPointDraft, "partyId">) => Promise<void>;
+}) {
+  const [type, setType] = useState<PartyContactPoint["type"]>(props.contactPoint?.type ?? "email");
+  const [label, setLabel] = useState(props.contactPoint?.label ?? "");
+  const [value, setValue] = useState(props.contactPoint?.value ?? "");
+  const [isPrimary, setIsPrimary] = useState(props.contactPoint?.isPrimary ?? false);
+  const [isPreferred, setIsPreferred] = useState(props.contactPoint?.isPreferred ?? false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const selectedType = contactPointTypeOption(type);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
       <form
-        className="participant-create-form"
+        className="compact-modal party-edit-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Kontaktweg bearbeiten"
+        onMouseDown={(event) => event.stopPropagation()}
         onSubmit={async (event) => {
           event.preventDefault();
-          if (!value.trim() || busyAction) return;
-          setBusyAction("create");
+          if (!value.trim() || busy) return;
+          setBusy(true);
           setError(null);
           try {
-            await props.onCreate(props.partyId, {
+            await props.onSave({
               type,
               label: label.trim() || null,
               value: value.trim(),
+              isPrimary,
               isPreferred,
               ...contactPointCapabilities(type)
             });
-            setType("email");
-            setLabel("");
-            setValue("");
-            setIsPreferred(false);
           } catch (err) {
             setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht gespeichert werden.");
           } finally {
-            setBusyAction(null);
+            setBusy(false);
           }
         }}
       >
-        <select value={type} onChange={(event) => setType(event.target.value as PartyContactPoint["type"])}>
-          {contactPointTypeOptions.map((entry) => (
-            <option key={entry.value} value={entry.value}>{entry.label}</option>
-          ))}
-        </select>
-        <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Label" />
-        <input type={selectedType.inputType} value={value} onChange={(event) => setValue(event.target.value)} placeholder={selectedType.placeholder} />
+        <header className="modal-title-block">
+          <h2>{props.contactPoint ? "Kontaktweg bearbeiten" : "Kontaktweg hinzufügen"}</h2>
+        </header>
+        <label>
+          Typ
+          <select value={type} onChange={(event) => setType(event.target.value as PartyContactPoint["type"])}>
+            {contactPointTypeOptions.map((entry) => (
+              <option key={entry.value} value={entry.value}>{entry.label}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Label
+          <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="z.B. Zentrale, Vertrieb" />
+        </label>
+        <label>
+          Wert
+          <input autoFocus type={selectedType.inputType} value={value} onChange={(event) => setValue(event.target.value)} placeholder={selectedType.placeholder} />
+        </label>
+        <label className="inline-checkbox">
+          <input type="checkbox" checked={isPrimary} onChange={(event) => setIsPrimary(event.target.checked)} />
+          Primär
+        </label>
         <label className="inline-checkbox">
           <input type="checkbox" checked={isPreferred} onChange={(event) => setIsPreferred(event.target.checked)} />
           Bevorzugt
         </label>
-        <button type="submit" className="primary-button" disabled={!value.trim() || busyAction !== null}>
+        {error ? <p className="inline-error">{error}</p> : null}
+        <footer className="modal-actions">
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={busy}>Abbrechen</button>
+          <button type="submit" className="primary-button" disabled={!value.trim() || busy}>Speichern</button>
+        </footer>
+      </form>
+    </div>
+  );
+}
+
+function AddressesPanel(props: {
+  partyId: number;
+  addresses: PartyAddress[];
+  onCreate: (partyId: number, input: Omit<CreateAddressDraft, "partyId">) => Promise<void>;
+  onUpdate: (addressId: number, input: Partial<Omit<CreateAddressDraft, "partyId">>) => Promise<void>;
+  onDelete: (addressId: number) => Promise<void>;
+}) {
+  const [editingAddress, setEditingAddress] = useState<PartyAddress | "new" | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <Panel title="Postanschriften">
+      <div className="panel-heading-actions">
+        <button type="button" className="primary-button compact" onClick={() => setEditingAddress("new")} disabled={busyAction !== null}>
           <Plus size={15} />
-          Kontakt
+          Anschrift
+        </button>
+      </div>
+      <div className="relationship-list">
+        {props.addresses.length === 0 ? <p className="muted-text">Noch keine Postanschriften.</p> : null}
+        {props.addresses.map((address) => (
+          <div className="relationship-row" key={address.id}>
+            <div className="entity-icon"><Building2 size={15} /></div>
+            <div>
+              <strong>{address.line1}</strong>
+              <p>{formatAddressLine(address)}{address.label ? ` · ${address.label}` : ""}{address.isPrimary ? " · primär" : ""}</p>
+            </div>
+            <button
+              type="button"
+              className="icon-button compact"
+              disabled={busyAction !== null}
+              title="Anschrift bearbeiten"
+              onClick={() => setEditingAddress(address)}
+            >
+              <Pencil size={14} />
+            </button>
+            <button
+              type="button"
+              className="icon-button compact"
+              disabled={busyAction !== null}
+              title="Anschrift löschen"
+              onClick={async () => {
+                if (busyAction) return;
+                if (!window.confirm(`Anschrift "${address.line1}" löschen?`)) return;
+                setBusyAction(`delete:${address.id}`);
+                setError(null);
+                try {
+                  await props.onDelete(address.id);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Anschrift konnte nicht gelöscht werden.");
+                } finally {
+                  setBusyAction(null);
+                }
+              }}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+      {error ? <p className="inline-error">{error}</p> : null}
+      {editingAddress ? (
+        <AddressModal
+          address={editingAddress === "new" ? null : editingAddress}
+          onCancel={() => setEditingAddress(null)}
+          onSave={async (input) => {
+            if (busyAction) return;
+            setBusyAction(editingAddress === "new" ? "create" : `update:${editingAddress.id}`);
+            setError(null);
+            try {
+              if (editingAddress === "new") {
+                await props.onCreate(props.partyId, input);
+              } else {
+                await props.onUpdate(editingAddress.id, input);
+              }
+              setEditingAddress(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Anschrift konnte nicht gespeichert werden.");
+              throw err;
+            } finally {
+              setBusyAction(null);
+            }
+          }}
+        />
+      ) : null}
+    </Panel>
+  );
+}
+
+function AddressModal(props: {
+  address: PartyAddress | null;
+  onCancel: () => void;
+  onSave: (input: Omit<CreateAddressDraft, "partyId">) => Promise<void>;
+}) {
+  const [label, setLabel] = useState(props.address?.label ?? "");
+  const [line1, setLine1] = useState(props.address?.line1 ?? "");
+  const [line2, setLine2] = useState(props.address?.line2 ?? "");
+  const [postalCode, setPostalCode] = useState(props.address?.postalCode ?? "");
+  const [city, setCity] = useState(props.address?.city ?? "");
+  const [region, setRegion] = useState(props.address?.region ?? "");
+  const [country, setCountry] = useState(props.address?.country ?? "");
+  const [isPrimary, setIsPrimary] = useState(props.address?.isPrimary ?? false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
+      <form
+        className="compact-modal party-edit-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Postanschrift bearbeiten"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (!line1.trim() || busy) return;
+          setBusy(true);
+          setError(null);
+          try {
+            await props.onSave({
+              label: label.trim() || null,
+              line1: line1.trim(),
+              line2: line2.trim() || null,
+              postalCode: postalCode.trim() || null,
+              city: city.trim() || null,
+              region: region.trim() || null,
+              country: country.trim() || null,
+              isPrimary
+            });
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Anschrift konnte nicht gespeichert werden.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <header className="modal-title-block">
+          <h2>{props.address ? "Postanschrift bearbeiten" : "Postanschrift hinzufügen"}</h2>
+        </header>
+        <label>
+          Label
+          <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="z.B. Büro, Rechnung" />
+        </label>
+        <label>
+          Adresse 1
+          <input autoFocus value={line1} onChange={(event) => setLine1(event.target.value)} />
+        </label>
+        <label>
+          Adresse 2
+          <input value={line2} onChange={(event) => setLine2(event.target.value)} />
+        </label>
+        <div className="modal-two-column">
+          <label>
+            PLZ
+            <input value={postalCode} onChange={(event) => setPostalCode(event.target.value)} />
+          </label>
+          <label>
+            Ort
+            <input value={city} onChange={(event) => setCity(event.target.value)} />
+          </label>
+        </div>
+        <div className="modal-two-column">
+          <label>
+            Region
+            <input value={region} onChange={(event) => setRegion(event.target.value)} />
+          </label>
+          <label>
+            Land
+            <input value={country} onChange={(event) => setCountry(event.target.value)} />
+          </label>
+        </div>
+        <label className="inline-checkbox">
+          <input type="checkbox" checked={isPrimary} onChange={(event) => setIsPrimary(event.target.checked)} />
+          Primär
+        </label>
+        {error ? <p className="inline-error">{error}</p> : null}
+        <footer className="modal-actions">
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={busy}>Abbrechen</button>
+          <button type="submit" className="primary-button" disabled={!line1.trim() || busy}>Speichern</button>
+        </footer>
+      </form>
+    </div>
+  );
+}
+
+function OrganizationMembersPanel(props: {
+  organization: Organization;
+  people: Person[];
+  relationshipTypes: RelationshipType[];
+  relationships: OrganizationDetail["relationships"];
+  onCreateRelationship: (input: {
+    fromPartyId: number;
+    toPartyId: number;
+    relationshipTypeId: number;
+    roleLabel?: string | null;
+    status?: "active" | "inactive";
+  }) => Promise<void>;
+  onOpenPerson: (partyId: number) => void;
+}) {
+  const [personId, setPersonId] = useState("");
+  const [relationshipTypeId, setRelationshipTypeId] = useState("");
+  const [roleLabel, setRoleLabel] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const memberRelationships = props.relationships.filter((relationship) => {
+    const otherParty = relationship.fromPartyId === props.organization.id ? relationship.toParty : relationship.fromParty;
+    return otherParty.type === "person";
+  });
+  const existingPersonIds = new Set(memberRelationships.map((relationship) => (
+    relationship.fromPartyId === props.organization.id ? relationship.toParty.id : relationship.fromParty.id
+  )));
+  const availablePeople = props.people.filter((person) => !existingPersonIds.has(person.id));
+  const defaultRelationshipType =
+    props.relationshipTypes.find((type) => type.key === "member_of")
+    ?? props.relationshipTypes.find((type) => type.key === "works_for")
+    ?? props.relationshipTypes[0];
+  const selectedRelationshipTypeId = relationshipTypeId || (defaultRelationshipType ? String(defaultRelationshipType.id) : "");
+
+  return (
+    <Panel title="Mitglieder dieser Organisation">
+      <div className="relationship-list">
+        {memberRelationships.length === 0 ? <p className="muted-text">Noch keine Mitglieder oder Personenbeziehungen.</p> : null}
+        {memberRelationships.map((relationship) => {
+          const person = relationship.fromPartyId === props.organization.id ? relationship.toParty : relationship.fromParty;
+          const direction =
+            relationship.relationshipType.directionality === "symmetric"
+              ? relationship.relationshipType.label
+              : relationship.fromPartyId === person.id
+                ? relationship.relationshipType.label
+                : relationship.relationshipType.inverseLabel ?? relationship.relationshipType.label;
+          return (
+            <button type="button" className="relationship-row relationship-button" key={relationship.id} onClick={() => props.onOpenPerson(person.id)}>
+              <div className="entity-icon"><Users size={16} /></div>
+              <div>
+                <strong>{person.displayName}</strong>
+                <p>{direction}{relationship.roleLabel ? ` · ${relationship.roleLabel}` : ""}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <form
+        className="member-create-form"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          const nextPersonId = Number(personId);
+          const nextTypeId = Number(selectedRelationshipTypeId);
+          if (!nextPersonId || !nextTypeId || saving) return;
+          setSaving(true);
+          setError(null);
+          try {
+            await props.onCreateRelationship({
+              fromPartyId: nextPersonId,
+              toPartyId: props.organization.id,
+              relationshipTypeId: nextTypeId,
+              roleLabel: roleLabel.trim() || null,
+              status: "active"
+            });
+            setPersonId("");
+            setRoleLabel("");
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Mitglied konnte nicht hinzugefügt werden.");
+          } finally {
+            setSaving(false);
+          }
+        }}
+      >
+        <select value={personId} onChange={(event) => setPersonId(event.target.value)} disabled={saving}>
+          <option value="">Person auswählen</option>
+          {availablePeople.map((person) => (
+            <option key={person.id} value={person.id}>{person.displayName}</option>
+          ))}
+        </select>
+        <select value={selectedRelationshipTypeId} onChange={(event) => setRelationshipTypeId(event.target.value)} disabled={saving || props.relationshipTypes.length === 0}>
+          {props.relationshipTypes.map((type) => (
+            <option key={type.id} value={type.id}>{type.label}</option>
+          ))}
+        </select>
+        <input value={roleLabel} onChange={(event) => setRoleLabel(event.target.value)} placeholder="Rolle / Kontext" disabled={saving} />
+        <button type="submit" className="primary-button" disabled={!personId || !selectedRelationshipTypeId || saving}>
+          <Plus size={15} />
+          Mitglied
         </button>
       </form>
       {error ? <p className="inline-error">{error}</p> : null}
     </Panel>
   );
+}
+
+function formatAddressLine(address: PartyAddress): string {
+  return [address.line2, [address.postalCode, address.city].filter(Boolean).join(" "), address.region, address.country]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function PartyRelationshipsPanel(props: { partyId: number; relationships: PersonDetail["relationships"] }) {

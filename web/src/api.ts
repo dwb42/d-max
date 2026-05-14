@@ -25,6 +25,8 @@ import type {
   Organization,
   OrganizationDetail,
   ParticipantRoleType,
+  PartyRelationship,
+  RelationshipType,
   Person,
   PersonDetail,
   EntityParticipant,
@@ -42,6 +44,8 @@ import type {
   TaskChecklistItem,
   TaskDetail,
   ContactPointType,
+  CreatePartyAddressInput,
+  PartyAddress,
   PartyContactPoint
 } from "./types.js";
 
@@ -123,6 +127,7 @@ export async function updateOrganization(
     displayName?: string;
     legalName?: string | null;
     organizationType?: string | null;
+    markdown?: string | null;
   }
 ): Promise<Organization> {
   const response = await request<{ organization: Organization }>(`/api/organizations/${id}`, {
@@ -137,6 +142,28 @@ export async function fetchParticipantRoleTypes(appliesToEntityType?: "initiativ
   const query = appliesToEntityType ? `?appliesToEntityType=${encodeURIComponent(appliesToEntityType)}` : "";
   const response = await request<{ participantRoleTypes: ParticipantRoleType[] }>(`/api/config/participant-role-types${query}`);
   return response.participantRoleTypes;
+}
+
+export async function fetchRelationshipTypes(): Promise<RelationshipType[]> {
+  const response = await request<{ relationshipTypes: RelationshipType[] }>("/api/config/relationship-types");
+  return response.relationshipTypes;
+}
+
+export async function createPartyRelationship(input: {
+  fromPartyId: number;
+  toPartyId: number;
+  relationshipTypeId: number;
+  roleLabel?: string | null;
+  startedOn?: string | null;
+  endedOn?: string | null;
+  status?: "active" | "inactive";
+}): Promise<PartyRelationship> {
+  const response = await request<{ relationship: PartyRelationship }>("/api/party-relationships", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.relationship;
 }
 
 export async function createEntityParticipant(input: {
@@ -201,6 +228,28 @@ export async function updatePartyContactPoint(
 
 export async function deletePartyContactPoint(id: number): Promise<void> {
   await request(`/api/party-contact-points/${id}`, { method: "DELETE" });
+}
+
+export async function createPartyAddress(input: CreatePartyAddressInput): Promise<PartyAddress> {
+  const response = await request<{ address: PartyAddress }>("/api/party-addresses", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.address;
+}
+
+export async function updatePartyAddress(id: number, input: Partial<Omit<CreatePartyAddressInput, "partyId">>): Promise<PartyAddress> {
+  const response = await request<{ address: PartyAddress }>(`/api/party-addresses/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.address;
+}
+
+export async function deletePartyAddress(id: number): Promise<void> {
+  await request(`/api/party-addresses/${id}`, { method: "DELETE" });
 }
 
 export async function fetchOpenClawStatus(): Promise<OpenClawStatus> {

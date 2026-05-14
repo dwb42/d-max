@@ -32,7 +32,8 @@ const createOrganizationInput = z.object({
   name: z.string().trim().min(1),
   displayName: z.string().trim().min(1).optional(),
   legalName: z.string().trim().min(1).nullable().optional(),
-  organizationType: z.string().trim().min(1).nullable().optional()
+  organizationType: z.string().trim().min(1).nullable().optional(),
+  markdown: z.string().nullable().optional()
 });
 const updateOrganizationInput = createOrganizationInput.partial().extend({ id: z.number().int().positive() });
 

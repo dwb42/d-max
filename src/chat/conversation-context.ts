@@ -10,11 +10,12 @@ import type { MediaAttachment } from "../repositories/media-links.js";
 import {
   EntityParticipantRepository,
   OrganizationRepository,
+  PartyAddressRepository,
   PartyContactPointRepository,
   PartyRelationshipRepository,
   PersonRepository
 } from "../repositories/parties.js";
-import type { EntityParticipantWithParty, PartyContactPoint, PartyRelationshipWithParties } from "../repositories/parties.js";
+import type { EntityParticipantWithParty, PartyAddress, PartyContactPoint, PartyRelationshipWithParties } from "../repositories/parties.js";
 import { TaskChecklistItemRepository } from "../repositories/task-checklist-items.js";
 import type { TaskChecklistItem } from "../repositories/task-checklist-items.js";
 import { TaskRepository } from "../repositories/tasks.js";
@@ -367,6 +368,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   const partyRelationships = new PartyRelationshipRepository(db);
   const entityParticipants = new EntityParticipantRepository(db);
   const partyContactPoints = new PartyContactPointRepository(db);
+  const partyAddresses = new PartyAddressRepository(db);
   const tasks = new TaskRepository(db);
   const taskChecklistItems = new TaskChecklistItemRepository(db);
 
@@ -570,14 +572,18 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     const relationships = partyRelationships.list({ partyId: party.id });
     const participants = entityParticipants.list({ partyId: party.id });
     const contacts = partyContactPoints.list({ partyId: party.id });
+    const addresses = partyAddresses.list({ partyId: party.id });
     const header =
       person !== null
         ? `Person: #${person.id} ${person.displayName}; salutation: ${person.salutation}; first: ${person.firstName ?? "none"}; last: ${person.lastName ?? "none"}; title: ${person.academicTitle ?? "none"}`
         : `Organization: #${organization!.id} ${organization!.displayName}; name: ${organization!.name}; legal name: ${organization!.legalName ?? "none"}; type: ${organization!.organizationType ?? "none"}`;
     const lines = [
       header,
+      ...(organization ? [`Organization description markdown:\n${truncate(organization.markdown || "No organization description yet.", 3000)}`] : []),
       `Contact points (${contacts.length}):`,
       ...contacts.slice(0, 20).map(formatContactPoint),
+      `Postal addresses (${addresses.length}):`,
+      ...addresses.slice(0, 20).map(formatPartyAddress),
       `Relationships (${relationships.length}):`,
       ...relationships.slice(0, 30).map((relationship) => formatPartyRelationship(relationship, party.id)),
       `DMAX participations (${participants.length}):`,
@@ -914,6 +920,11 @@ function formatContactPoint(contactPoint: PartyContactPoint): string {
     .filter(Boolean)
     .join(", ");
   return `- #${contactPoint.id} ${contactPoint.type}: ${contactPoint.value}; label: ${contactPoint.label ?? "none"}${flags ? `; ${flags}` : ""}`;
+}
+
+function formatPartyAddress(address: PartyAddress): string {
+  const parts = [address.line1, address.line2, [address.postalCode, address.city].filter(Boolean).join(" "), address.region, address.country].filter(Boolean);
+  return `- #${address.id} ${parts.join(", ")}; label: ${address.label ?? "none"}; primary: ${address.isPrimary ? "yes" : "no"}`;
 }
 
 function formatContactSummary(contactPoints: PartyContactPoint[]): string {

@@ -28,7 +28,7 @@ const CONTEXT_RELEVANT_TABLES = [
   "calendar_event_visibility"
 ];
 
-const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "78437ca6d80f904c1134a61540269a22304d01ca392b73c9dc8bc5c19d73f154";
+const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "6d325fe76980541020b2091fb63cb7d86748dc946d4c78ce033ba90ab001afd2";
 
 describe("context resolver schema synchronization", () => {
   let db: Database.Database;

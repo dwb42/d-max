@@ -6,7 +6,7 @@ import { InitiativeRelationRepository } from "../../src/repositories/initiative-
 import { InitiativeRepository } from "../../src/repositories/initiatives.js";
 import { MediaAssetRepository } from "../../src/repositories/media-assets.js";
 import { MediaLinkRepository } from "../../src/repositories/media-links.js";
-import { EntityParticipantRepository, PartyContactPointRepository, PersonRepository } from "../../src/repositories/parties.js";
+import { EntityParticipantRepository, OrganizationRepository, PartyAddressRepository, PartyContactPointRepository, PersonRepository } from "../../src/repositories/parties.js";
 import { TaskChecklistItemRepository } from "../../src/repositories/task-checklist-items.js";
 import { TaskRepository } from "../../src/repositories/tasks.js";
 import { createTestDatabase } from "../helpers/test-db.js";
@@ -180,7 +180,9 @@ describe("resolveConversationContext", () => {
     const initiative = new InitiativeRepository(db).create({ categoryId: category.id, name: "Relationship System" });
     const task = new TaskRepository(db).create({ initiativeId: initiative.id, title: "Call Clara" });
     const person = new PersonRepository(db).create({ firstName: "Clara", lastName: "Kontakt", salutation: "mrs" });
+    const organization = new OrganizationRepository(db).create({ name: "Acme GmbH", markdown: "Strategic partner notes." });
     new PartyContactPointRepository(db).create({ partyId: person.id, type: "email", value: "clara@example.com", isPreferred: true });
+    new PartyAddressRepository(db).create({ partyId: organization.id, line1: "Main Street 1", city: "Hamburg" });
     const participants = new EntityParticipantRepository(db);
     participants.create({ partyId: person.id, entityType: "initiative", entityId: initiative.id, roleLabel: "Stakeholder", isPrimary: true });
     participants.create({ partyId: person.id, entityType: "task", entityId: task.id, roleLabel: "Ansprechpartner" });
@@ -188,6 +190,7 @@ describe("resolveConversationContext", () => {
     const projectContext = resolveConversationContext(db, { type: "project", initiativeId: initiative.id });
     const taskContext = resolveConversationContext(db, { type: "task", taskId: task.id });
     const personContext = resolveConversationContext(db, { type: "person", partyId: person.id });
+    const organizationContext = resolveConversationContext(db, { type: "organization", partyId: organization.id });
     const peopleContext = resolveConversationContext(db, { type: "people" });
 
     expect(projectContext.agentContextBlock).toContain("People and organizations (1):");
@@ -197,6 +200,9 @@ describe("resolveConversationContext", () => {
     expect(personContext.agentContextBlock).toContain("Contact points (1):");
     expect(personContext.agentContextBlock).toContain("clara@example.com");
     expect(personContext.agentContextBlock).toContain("DMAX participations (2):");
+    expect(organizationContext.agentContextBlock).toContain("Strategic partner notes.");
+    expect(organizationContext.agentContextBlock).toContain("Postal addresses (1):");
+    expect(organizationContext.agentContextBlock).toContain("Main Street 1");
     expect(peopleContext.contextType).toBe("people");
     expect(peopleContext.agentContextBlock).toContain("preferred contact: email clara@example.com");
   });

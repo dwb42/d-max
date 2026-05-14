@@ -37,7 +37,7 @@ describe("party repositories", () => {
       salutation: "mr",
       academicTitle: "Dr."
     });
-    const organization = organizations.create({ name: "DMAX Labs", organizationType: "company" });
+    const organization = organizations.create({ name: "DMAX Labs", organizationType: "company", markdown: "## Context" });
 
     expect(person).toMatchObject({
       type: "person",
@@ -46,7 +46,7 @@ describe("party repositories", () => {
       firstName: "Dietrich",
       lastName: "Weger"
     });
-    expect(organization).toMatchObject({ type: "organization", displayName: "DMAX Labs", name: "DMAX Labs" });
+    expect(organization).toMatchObject({ type: "organization", displayName: "DMAX Labs", name: "DMAX Labs", markdown: "## Context" });
     expect(people.list().map((entry) => entry.id)).toContain(person.id);
     expect(organizations.list().map((entry) => entry.id)).toContain(organization.id);
   });

@@ -215,6 +215,7 @@ create table if not exists organizations (
   name text not null,
   legal_name text,
   organization_type text,
+  markdown text not null default '',
   created_at text not null,
   updated_at text not null
 );

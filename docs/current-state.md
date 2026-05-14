@@ -44,8 +44,9 @@ The Who dimension is implemented as a party identity layer. `parties` stores
 the shared `person` or `organization` identity and display name; `people`
 stores person fields including `first_name`, `last_name`, `salutation`
 (`mr`, `mrs`, `unknown`), `academic_title`, and `name_suffix`;
-`organizations` stores organization name, legal name, and organization type.
-There is no person or organization Markdown memory yet. `relationship_types`
+`organizations` stores organization name, legal name, organization type, and
+Markdown description/context memory. There is no person Markdown memory yet.
+`relationship_types`
 stores configured directed or symmetric relationship kinds such as `works_for`,
 `founder_of`, `member_of`, `knows`, `partner_of`, and `mentor_of`.
 `party_relationships` connects people and organizations with optional role
@@ -64,11 +65,15 @@ per party. The browser surfaces `/people` and `/organizations` list/create
 screens plus `/people/:id` and `/organizations/:id` detail pages. Detail pages
 can edit core person/organization fields, add/delete/prefer contact points,
 show party relationships, and show DMAX contexts where that party participates.
+The organization detail page edits core fields in a header-triggered modal,
+shows a full-width Markdown description panel, manages contact points and
+postal addresses through modals with delete confirmation, and shows/adds
+organization members via party relationships.
 Initiative and task detail pages include a `Beteiligte` panel to add/remove
 people or organizations with configured participant roles plus optional
-free-text role labels. Relationship-type editing, party-relationship creation,
-postal-address editing, and calendar-entry participant editing are available
-through API/tools or schema but are not first-class browser workflows yet.
+free-text role labels. Relationship-type editing and calendar-entry
+participant editing are available through API/tools or schema but are not
+first-class browser workflows yet.
 
 `initiatives.markdown` is required initiative memory. `initiatives.type` segments
 the current technical Initiative object into `idea`, `project`, and `habit`;

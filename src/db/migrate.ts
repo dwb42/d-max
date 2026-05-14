@@ -598,6 +598,7 @@ function migrateWhoDomain(db: ReturnType<typeof openDatabase>): void {
       name text not null,
       legal_name text,
       organization_type text,
+      markdown text not null default '',
       created_at text not null,
       updated_at text not null
     );
@@ -698,6 +699,7 @@ function migrateWhoDomain(db: ReturnType<typeof openDatabase>): void {
     create index if not exists idx_party_addresses_party on party_addresses(party_id, is_primary desc, id);
   `);
 
+  ensureColumn(db, "organizations", "markdown", "text not null default ''");
   ensureWhoSystemTypes(db);
 }
 
@@ -805,6 +807,20 @@ function ensureSortOrderColumn(db: ReturnType<typeof openDatabase>, table: strin
     rows.forEach((row, index) => update.run((index + 1) * 1000, row.id));
   });
   transaction();
+}
+
+function ensureColumn(db: ReturnType<typeof openDatabase>, table: string, column: string, definition: string): void {
+  const existing = db
+    .prepare("select name from sqlite_master where type = 'table' and name = ?")
+    .get(table) as { name: string } | undefined;
+  if (!existing) {
+    return;
+  }
+
+  const columns = db.prepare(`pragma table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((entry) => entry.name === column)) {
+    db.exec(`alter table ${table} add column ${column} ${definition}`);
+  }
 }
 
 function backfillConversationTitles(db: ReturnType<typeof openDatabase>): void {

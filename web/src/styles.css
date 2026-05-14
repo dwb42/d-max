@@ -1089,6 +1089,63 @@ textarea {
   min-width: 0;
 }
 
+.organization-detail-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.organization-detail-grid,
+.organization-secondary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.organization-detail-grid .panel,
+.organization-secondary-grid .panel {
+  min-width: 0;
+}
+
+.organization-description-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.organization-description-content {
+  max-width: 980px;
+  color: #24322c;
+  line-height: 1.65;
+}
+
+.panel-heading-row,
+.panel-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-heading-actions {
+  justify-content: flex-end;
+}
+
+.member-create-form {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) minmax(140px, 0.8fr) minmax(160px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border-top: 1px solid #edf1eb;
+  padding-top: 10px;
+}
+
+.member-create-form input,
+.member-create-form select {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 9px;
+}
+
 .section-heading {
   display: grid;
   gap: 5px;
@@ -1846,6 +1903,32 @@ button.initiative-markdown-panel:hover {
 .life-area-title-link:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+.page-title-button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #17211c;
+  font: inherit;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1.15;
+  letter-spacing: 0;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.page-title-button:hover {
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+
+.page-title-button:disabled {
+  cursor: default;
+  text-decoration: none;
 }
 
 .life-area-heading > span,
@@ -3059,8 +3142,45 @@ button.initiative-markdown-panel:hover {
   box-shadow: 0 18px 52px rgba(16, 23, 20, 0.18);
 }
 
+.party-edit-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.markdown-modal {
+  width: min(880px, calc(100vw - 32px));
+}
+
+.modal-title-block {
+  display: grid;
+  gap: 4px;
+}
+
+.modal-title-block h2 {
+  font-size: 18px;
+}
+
+.modal-title-block p {
+  color: #66726b;
+  font-size: 13px;
+}
+
+.modal-two-column {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.compact-modal label {
+  display: grid;
+  gap: 5px;
+  color: #66726b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .compact-modal input,
 .compact-modal select,
+.compact-modal textarea,
 .config-field input,
 .config-source-form input {
   min-height: 40px;
@@ -3069,6 +3189,10 @@ button.initiative-markdown-panel:hover {
   padding: 0 10px;
   background: #ffffff;
   color: #17211c;
+}
+
+.compact-modal textarea {
+  padding: 12px;
 }
 
 .modal-actions {
@@ -5159,6 +5283,10 @@ button.task-notes-panel:hover {
   .initiative-relations-grid,
   .contact-point-create-form,
   .participant-create-form,
+  .member-create-form,
+  .organization-detail-grid,
+  .organization-secondary-grid,
+  .modal-two-column,
   .timeline-toolbar,
   .split-view,
   .prompt-inspector-layout,

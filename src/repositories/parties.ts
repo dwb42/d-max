@@ -27,6 +27,7 @@ export type Organization = Party & {
   name: string;
   legalName: string | null;
   organizationType: string | null;
+  markdown: string;
 };
 
 export type RelationshipDirectionality = "directed" | "symmetric";
@@ -146,6 +147,7 @@ type OrganizationRow = PartyRow & {
   name: string;
   legal_name: string | null;
   organization_type: string | null;
+  markdown: string;
 };
 
 type RelationshipTypeRow = {
@@ -276,6 +278,7 @@ export type CreateOrganizationInput = {
   displayName?: string;
   legalName?: string | null;
   organizationType?: string | null;
+  markdown?: string | null;
 };
 
 export type UpdateOrganizationInput = Partial<CreateOrganizationInput> & { id: number };
@@ -381,7 +384,8 @@ function toOrganization(row: OrganizationRow): Organization {
     type: "organization",
     name: row.name,
     legalName: row.legal_name,
-    organizationType: row.organization_type
+    organizationType: row.organization_type,
+    markdown: row.markdown
   };
 }
 
@@ -684,8 +688,8 @@ export class OrganizationRepository {
       .run(displayName, now, now);
     const partyId = Number(result.lastInsertRowid);
     this.db
-      .prepare("insert into organizations (party_id, name, legal_name, organization_type, created_at, updated_at) values (?, ?, ?, ?, ?, ?)")
-      .run(partyId, clean(input.name), clean(input.legalName), clean(input.organizationType), now, now);
+      .prepare("insert into organizations (party_id, name, legal_name, organization_type, markdown, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?)")
+      .run(partyId, clean(input.name), clean(input.legalName), clean(input.organizationType), input.markdown ?? "", now, now);
     return this.findById(partyId)!;
   }
 
@@ -698,11 +702,12 @@ export class OrganizationRepository {
     const displayName = clean(input.displayName) ?? name;
     this.db.prepare("update parties set display_name = ?, updated_at = ? where id = ? and type = 'organization'").run(displayName, now, input.id);
     this.db
-      .prepare("update organizations set name = ?, legal_name = ?, organization_type = ?, updated_at = ? where party_id = ?")
+      .prepare("update organizations set name = ?, legal_name = ?, organization_type = ?, markdown = ?, updated_at = ? where party_id = ?")
       .run(
         name,
         input.legalName === undefined ? existing.legalName : clean(input.legalName),
         input.organizationType === undefined ? existing.organizationType : clean(input.organizationType),
+        input.markdown === undefined ? existing.markdown : input.markdown ?? "",
         now,
         input.id
       );

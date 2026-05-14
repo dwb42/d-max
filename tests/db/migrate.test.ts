@@ -74,6 +74,7 @@ describe("migrate", () => {
       const mediaLinkColumns = db.prepare("pragma table_info(media_links)").all() as Array<{ name: string }>;
       const partyColumns = db.prepare("pragma table_info(parties)").all() as Array<{ name: string }>;
       const peopleColumns = db.prepare("pragma table_info(people)").all() as Array<{ name: string }>;
+      const organizationColumns = db.prepare("pragma table_info(organizations)").all() as Array<{ name: string }>;
       const relationshipTypeCount = db.prepare("select count(*) as count from relationship_types where is_system = 1").get() as { count: number };
       const participantRoleTypeCount = db.prepare("select count(*) as count from participant_role_types where is_system = 1").get() as { count: number };
       const legacyTask = db.prepare("select status, completed_at from tasks where id = 1").get() as {
@@ -101,6 +102,7 @@ describe("migrate", () => {
       expect(mediaLinkColumns.some((column) => column.name === "caption")).toBe(true);
       expect(partyColumns.some((column) => column.name === "display_name")).toBe(true);
       expect(peopleColumns.some((column) => column.name === "salutation")).toBe(true);
+      expect(organizationColumns.some((column) => column.name === "markdown")).toBe(true);
       expect(relationshipTypeCount.count).toBeGreaterThanOrEqual(10);
       expect(participantRoleTypeCount.count).toBeGreaterThanOrEqual(12);
       expect(initiative.type).toBe("project");

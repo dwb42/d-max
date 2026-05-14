@@ -191,6 +191,7 @@ export type Organization = Party & {
   name: string;
   legalName: string | null;
   organizationType: string | null;
+  markdown: string;
 };
 
 export type RelationshipType = {
@@ -278,6 +279,18 @@ export type PartyAddress = {
   isPrimary: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type CreatePartyAddressInput = {
+  partyId: number;
+  label?: string | null;
+  line1: string;
+  line2?: string | null;
+  postalCode?: string | null;
+  city?: string | null;
+  region?: string | null;
+  country?: string | null;
+  isPrimary?: boolean;
 };
 
 export type PersonDetail = {
