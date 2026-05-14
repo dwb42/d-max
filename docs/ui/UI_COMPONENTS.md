@@ -6,6 +6,8 @@ This file defines the canonical component vocabulary for DMAX. Codex should reus
 
 Component names may be adapted to the actual frontend framework, but the concepts should remain stable.
 
+`UI_ENTITY_DETAIL_CANONICAL_PATTERN.md` and `UI_COMPONENT_EXTRACTION_PLAN.md` are the Phase 8 references for extracting entity detail primitives from the validated organization and project/initiative implementations.
+
 ## Component creation rule
 
 Before creating a new route-specific component, check whether one of the canonical components below can be reused or extended.
@@ -54,6 +56,25 @@ Contains:
 
 Must not show a create form by default.
 
+Implementation:
+
+- `web/src/components/ui/EntityListPage.tsx`
+- Introduced in Phase 14 for `/categories`
+- Reused in Phase 15 for `/people`
+- Reused in Phase 16 for `/organizations`
+- Reused in Phase 17 for `/projects`
+- Reused in Phase 18 for `/ideas`
+- Reused in Phase 19 for `/habits`
+- Reused in Phase 20 for `/tasks`
+
+Current implementation status:
+
+- `EntityListPage` wraps the list surface.
+- `EntityList` provides the repeated-item list body.
+- `EntityListItem` provides the first reusable scan row/card shape and is now validated for category rows, sparse person rows, organization rows, project/action rows, idea/exploratory rows, habit/routine rows and task/action rows.
+- `EntityListItem` supports a separate leading row action and trailing actions when a row must remain openable while preserving calm row-level actions, as validated by `/tasks`.
+- `PageHeader` and `SearchFilterRow` remain conceptual until a list route needs them as extracted primitives.
+
 ### `SearchFilterRow`
 
 Compact search and filtering controls for entity list pages.
@@ -80,6 +101,8 @@ Should contain:
 
 Should not contain full descriptions, raw IDs or full metadata.
 
+Implementation note: `EntityListItem` is the current frontend implementation name for the first reusable entity row primitive.
+
 ### `EntityDetailPage`
 
 Canonical wrapper for detail pages.
@@ -90,6 +113,11 @@ Contains:
 - main content sections
 - secondary metadata area
 - empty/loading/error states
+
+Validated by:
+
+- `/organizations/:id`
+- `/projects/:id` / `/initiatives/:id`
 
 ## Entity components
 
@@ -109,6 +137,8 @@ Should support:
 - optional breadcrumb/back navigation
 
 Should not show all fields. Normal entity detail pages should not show a mandatory icon or object-type eyebrow next to/above the title.
+
+Should not rely on a prominent generic `Bearbeiten` button for small high-frequency edits. Prefer direct editing for safe title/name/subtype/status fields.
 
 ### `EntityTitle`
 
@@ -161,6 +191,8 @@ Contains:
 - optional action area
 - section body
 
+Descriptions are optional, not default. Do not pass a description that merely restates a self-explanatory title.
+
 Use for:
 
 - descriptions
@@ -181,6 +213,8 @@ Contains:
 - optional small description
 - optional action with enough affordance for section-level add/link/create actions
 
+The title should usually carry the section meaning. Use the description only for genuine disambiguation.
+
 ### `MetadataGrid`
 
 Displays secondary fields in a consistent layout.
@@ -188,7 +222,6 @@ Displays secondary fields in a consistent layout.
 Use for:
 
 - dates
-- internal IDs
 - owner
 - sync state
 - created/updated timestamps
@@ -199,6 +232,8 @@ Rules:
 - never use it as the primary content block unless metadata is the product value of the page
 - keep labels consistent
 - hide empty fields unless explicitly useful
+- do not show internal IDs in normal user-facing metadata
+- technical/debug attributes belong in `TechnicalMetadataDisclosure` or utility/debug surfaces, not in the normal detail-page `MetadataGrid`
 
 ### `TechnicalMetadataDisclosure`
 
@@ -223,6 +258,7 @@ Default mode:
 - optional heading only when it adds orientation
 - click-to-edit surface when editing is available
 - no mandatory visible edit/add button
+- long content contained by default with expand/collapse or equivalent behavior
 
 Edit mode:
 
@@ -238,6 +274,7 @@ Should support:
 
 - grouping by object type
 - compact relation rows
+- quiet empty behavior: full card, small inline hint, or no rendered empty body depending on context
 - object type label/icon
 - relationship type
 - title/name
@@ -252,11 +289,19 @@ Groups related objects by type or semantic relationship.
 Should contain:
 
 - group label
-- count
-- compact empty state if needed
+- count if useful
+- compact empty state only when the absence itself needs explanation
 - `RelationItem` rows
 
 Should not contain the full relationship edit form.
+
+Do not use heavy empty-state panels for ordinary empty relationship groups. If the group title and add/link action are enough, render no empty body.
+
+Use `emptyMode` or an equivalent light-empty behavior for ordinary empty relation groups:
+
+- `none`: render only the group header/action and no empty body;
+- `inline`: render a tiny muted hint;
+- default/card: reserve for empty states that need explanation.
 
 ### `RelationCard`
 
@@ -308,28 +353,65 @@ Examples:
 
 Displays email addresses, phone numbers, websites and messenger handles.
 
+Implementation:
+
+- `web/src/components/party/ContactPointList.tsx`
+- Used by `/organizations/:id` and `/people/:id`
+
 Each item should support:
 
 - type
 - value
 - label
 - primary flag if available
-- copy/open action
+- preferred flag if available
 - edit action
+- delete action
+
+`Kontaktwege` is a self-explanatory section title. Do not add a subtitle unless it disambiguates the contact-point meaning for that route.
+
+The add action, usually `Kontaktweg hinzufügen`, remains visible even when the list is empty.
 
 ### `ContactPointEditor`
 
 Modal or drawer editor for contact points.
 
+Implementation:
+
+- `web/src/components/party/ContactPointList.tsx`
+
 Should not expose internal database fields.
+
+### `ContactPointItem`
+
+Renders one contact point row inside `ContactPointList`.
+
+Should show contact type, value, optional label and primary/preferred metadata without route-specific party assumptions.
 
 ### `AddressBlock`
 
 Human-readable address display.
 
+Implementation:
+
+- `web/src/components/party/AddressBlock.tsx`
+- Used by `/organizations/:id` and `/people/:id`
+
+`Anschriften` is a self-explanatory section title. Do not add a subtitle unless the route needs to distinguish postal, billing or location meaning.
+
+The add action, usually `Anschrift hinzufügen`, remains visible even when the list is empty.
+
+### `AddressList`
+
+Displays address rows and empty state inside `AddressBlock`.
+
 ### `AddressEditor`
 
 Structured address form.
+
+Implementation:
+
+- `web/src/components/party/AddressBlock.tsx`
 
 Should be opened intentionally, not shown as default raw fields.
 
@@ -553,11 +635,10 @@ A UI change is not complete if it introduces a new component that could reasonab
 
 ## Phase 5 implementation status
 
-The first reference implementation for `/organizations/:id` introduced or reused these frontend components in `web/src/App.tsx`:
+The first reference implementation for `/organizations/:id` introduced or reused these frontend components. Core primitives now live in `web/src/components/ui`, and party contact/address primitives now live in `web/src/components/party`.
 
 - Implemented: `EntityDetailPage`, `EntityHeader`, `SectionBlock`, `SectionHeader`, `DescriptionBlock`, `RelationList`, `RelationGroup`, `RelationItem`, `MetadataGrid`, `EditModal`, `EmptyState`, `ErrorState`.
-- Implemented for the organization route by composition: `ContactPointList`, `AddressBlock`.
-- Reused existing editors: `ContactPointModal` and `AddressModal` currently serve as the contact point and address editor equivalents.
+- Implemented for person and organization routes by composition: `ContactPointList`, `ContactPointItem`, `ContactPointEditor`, `AddressBlock`, `AddressList`, `AddressEditor`.
 - Partially implemented by contained modal: relationship creation for organization-person links. A full `RelationshipManager` remains conceptual.
 - Reused existing shell/drawer: the contextual DMAX drawer remains the existing `AgentDrawer`/`DmaxAgentButton` implementation. Phase 5 fixed the missing organization/person `contextEntityId` client query parameter and added user-facing containment for context-load errors.
 

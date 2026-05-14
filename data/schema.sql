@@ -308,6 +308,11 @@ create table if not exists app_chat_messages (
   role text not null check (role in ('user', 'assistant')),
   content text not null,
   source text not null default 'app_text' check (source in ('app_text', 'app_voice_message', 'system')),
+  audio_generation_status text not null default 'none' check (audio_generation_status in ('none', 'pending', 'ready', 'failed')),
+  audio_provider text,
+  audio_error text,
+  audio_generated_from_message_id integer references app_chat_messages(id),
+  audio_generated_at text,
   created_at text not null
 );
 

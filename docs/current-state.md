@@ -278,6 +278,14 @@ tables.
 entities, omitted entities, block-level truncation, deduplication decisions, and
 applied budgets. The payload is diagnostic metadata and intentionally does not
 mirror full raw Markdown bodies.
+`app_chat_messages` stores contextual browser chat messages. Voice-input user
+messages are stored as transcribed text with `source = app_voice_message`.
+Assistant messages can now carry optional generated-audio status metadata:
+`audio_generation_status`, `audio_provider`, `audio_error`,
+`audio_generated_from_message_id`, and `audio_generated_at`. Generated assistant
+audio files are stored as normal `media_assets` and linked back to the assistant
+message through `media_links.entity_type = app_chat_message` with role
+`assistant_audio`; the message stores status, not a raw filesystem path.
 
 ## Runtime And Provider State
 
@@ -380,7 +388,13 @@ Implemented behavior:
   separate backend restart endpoint.
 - There is no standalone global chat page; d-max chat UI is the contextual
   drawer used from overview/category/initiative/task contexts.
-- Chat voice message UX: record full message, show sound bar, then send.
+- Chat voice message UX: record full message, show sound bar, transcribe, then
+  send the transcript as `app_voice_message`.
+- Chat audio replies MVP: when a turn starts from a Chat Drawer voice message,
+  the assistant text reply is still shown first, then the browser requests TTS
+  for the final persisted assistant message. The audio reply is stored as a
+  media asset linked to that chat message and displayed as a manual Play/Pause
+  player. Autoplay is intentionally not enabled in the MVP.
 - App chat rejects concurrent turns in the same conversation before persisting
   a duplicate user message.
 - App refreshes data after mutations and via polling; normal navigation should
@@ -589,6 +603,7 @@ GET  /api/chat/messages
 GET  /api/chat/activity
 POST /api/chat/message
 POST /api/chat/message/stream
+POST /api/chat/messages/:id/audio
 POST /api/chat/voice/transcribe
 GET  /api/debug/prompts
 GET  /api/debug/prompt-templates

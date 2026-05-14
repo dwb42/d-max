@@ -94,7 +94,7 @@ in `/calendar`. The config UI supports multiple Google accounts: connect each
 account via OAuth, then enable the calendars DMAX should read/write from that
 account. Those enabled selections are stored as DMAX calendar sources.
 
-Media uploads default to local files under `data/media` with metadata in SQLite.
+Media uploads and generated chat audio replies default to local files under `data/media` with metadata in SQLite.
 Override with `DMAX_MEDIA_STORAGE_DIR` and `DMAX_MEDIA_MAX_UPLOAD_BYTES` when
 needed. Uploaded media is analyzed immediately when possible:
 text/Markdown locally, audio/video through `OPENAI_TRANSCRIBE_MODEL`, and
@@ -102,6 +102,8 @@ images/PDFs through `OPENAI_MEDIA_ANALYSIS_MODEL` when `OPENAI_API_KEY` is set.
 Stored analysis text can be edited in the media modal, and media analysis can
 be regenerated with an optional user focus prompt. OpenClaw/app chat receives
 media metadata and derived text, not raw file bytes.
+Chat Drawer voice-input replies can additionally generate stored TTS audio via
+`OPENAI_TTS_MODEL` and `OPENAI_TTS_VOICE`.
 
 ## OpenClaw Checks
 

@@ -1353,11 +1353,33 @@ async function runOpenClawGatewaySessionTurn(
     runId,
     found: Boolean(reply)
   });
+  const activities = readOpenClawSessionActivities(sessionFile, initialSessionFileSize);
   if (!reply) {
-    throw new Error("OpenClaw completed the run but no assistant reply was written to the session transcript.");
+    const fallbackText = fallbackReplyFromActivities(activities);
+    if (!fallbackText) {
+      throw new Error("OpenClaw completed the run but no assistant reply was written to the session transcript.");
+    }
+    traceOpenClaw(options.diagnostics, "openclaw_sessions_turn_completed_without_reply", {
+      sessionKey: input.sessionKey,
+      sessionId: prepared.sessionId,
+      runId,
+      activities: activities.length
+    });
+    return {
+      text: fallbackText,
+      raw: {
+        prepared: prepared.raw,
+        send: sendResult,
+        wait: waitResult,
+        assistantMessageId: null,
+        fallback: "activity_summary"
+      },
+      activities,
+      sessionId: prepared.sessionId,
+      sessionKey: prepared.key
+    };
   }
 
-  const activities = readOpenClawSessionActivities(sessionFile, initialSessionFileSize);
   traceOpenClaw(options.diagnostics, "openclaw_sessions_turn_completed", {
     sessionKey: input.sessionKey,
     sessionId: prepared.sessionId,
@@ -1377,6 +1399,26 @@ async function runOpenClawGatewaySessionTurn(
     sessionId: prepared.sessionId,
     sessionKey: prepared.key
   };
+}
+
+function fallbackReplyFromActivities(activities: OpenClawActivity[]): string | null {
+  const meaningful = activities.filter((activity) => activity.kind === "tool_result" || activity.kind === "tool_call");
+  if (meaningful.length === 0) {
+    return null;
+  }
+
+  const failed = [...meaningful].reverse().find((activity) => activity.status === "failed");
+  if (failed) {
+    return `Ich habe die Aktion versucht, aber sie wurde nicht sauber abgeschlossen: ${failed.title}.`;
+  }
+
+  const completed = meaningful.filter((activity) => activity.status === "completed");
+  if (completed.length === 0) {
+    return null;
+  }
+
+  const lastCompleted = completed.at(-1)!;
+  return `Erledigt: ${lastCompleted.title.replace(/\s+abgeschlossen$/i, "")}.`;
 }
 
 function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined, message: string): Promise<T> {

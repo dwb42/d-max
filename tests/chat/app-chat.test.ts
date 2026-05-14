@@ -30,6 +30,10 @@ describe("AppChatService", () => {
     expect(messages).toHaveLength(2);
     expect(messages[0]).toMatchObject({ role: "user", source: "app_voice_message" });
     expect(messages[1]).toMatchObject({ role: "assistant", source: "system" });
+    expect(messages[1]).toMatchObject({
+      audioGenerationStatus: "pending",
+      audioGeneratedFromMessageId: messages[0].id
+    });
     expect(messages[0].conversationId).toBeTypeOf("number");
     expect(messages[1].conversationId).toBe(messages[0].conversationId);
   });

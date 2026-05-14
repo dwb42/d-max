@@ -4,6 +4,8 @@ This file defines canonical UI patterns for DMAX. Codex should use these pattern
 
 `UI_DESIGN_DECISIONS.md` is the Phase 4 binding decision record. The patterns below are governed by the specific decision IDs in that file.
 
+For entity detail pages, `UI_ENTITY_DETAIL_CANONICAL_PATTERN.md` is the Phase 8 canonical pattern consolidated from the organization and project/initiative reference implementations.
+
 ## 1. Canonical entity detail page
 
 Use this pattern for:
@@ -54,6 +56,8 @@ Do not overload the header with all attributes.
 
 Do not show a title icon or object-type eyebrow by default on normal entity detail pages. Use entity type labels in ambiguous contexts such as mixed lists, relation rows, search results and debug/inspector views.
 
+Do not use a prominent generic `Bearbeiten` button as the default edit path for small high-frequency fields. Prefer direct/inline editing for title/name, subtype, status, priority and compact date controls when safe. Grouped edit modals may remain available as secondary actions.
+
 ### Main content rules
 
 The first visible content block should be the most useful block for the current object type.
@@ -66,6 +70,19 @@ Examples:
 - Category: purpose/scope, linked projects/habits/tasks, satisfaction/current state if used
 - Task: action definition, status, owner, due date, linked project/context
 
+### Section copy rules
+
+Section subtitles are optional, not default.
+
+Prefer clear, specific section titles over title plus explanatory subtitle combinations. Use subtitles only when they add real disambiguating value.
+
+Examples:
+
+- `Kontaktwege` does not need `Direkte Wege zur Organisation`.
+- `Anschriften` does not need `Postalische Orte und Rechnungsadressen`.
+- `Beziehungen` does not need a subtitle when the relation groups already show `Personen`, `Organisationen` or other object groups.
+- Relation groups such as `Personen` and `Organisationen` do not need explanatory subtitles when the title is self-explanatory.
+
 ### Secondary content rules
 
 Secondary fields should go into consistent metadata areas.
@@ -77,6 +94,14 @@ Default entity detail pages are read-first. Grouped master-data editing belongs 
 ## 2. Canonical entity list page
 
 Use this pattern for object collections.
+
+Phase 14 validates the first implementation on `/categories`.
+Phase 15 validates the same structure for `/people`.
+Phase 16 validates the same structure for `/organizations`.
+Phase 17 validates the same structure for `/projects` as the first action/planning list page.
+Phase 18 validates the same structure for `/ideas` as the first exploratory/action list page.
+Phase 19 validates the same structure for `/habits` as the first routine/action list page.
+Phase 20 validates the same structure for `/tasks` as the small operational action list page.
 
 ### Structure
 
@@ -117,6 +142,69 @@ Each row/card should show:
 Do not show every field in list rows.
 
 Create forms must not be visible by default. Creation starts from the page's primary create action and opens a compact inline create row, modal or drawer depending on workflow size.
+
+For `/categories`, the canonical reference uses:
+
+- a simple page title and page-level create action;
+- compact rows via `EntityListPage`, `EntityList` and `EntityListItem`;
+- category name as primary row content;
+- emoji/color as subtle data-backed identity markers;
+- description preview and counts as secondary row content;
+- `EditModal` for creation.
+
+For `/people`, the canonical reference adds:
+
+- person name as primary row content;
+- subtle data-derived initials as row identity markers;
+- salutation/title/name context as compact secondary content;
+- simple search as a lightweight list toolbar;
+- `EditModal` for creation rather than an always-visible form.
+
+For `/organizations`, the canonical reference adds:
+
+- organization name as primary row content;
+- subtle data-derived initials as row identity markers;
+- organization type and legal name as compact secondary content;
+- simple search as a lightweight list toolbar;
+- `EditModal` for creation rather than an always-visible form.
+
+For `/projects`, the canonical reference adds:
+
+- project name as primary row content;
+- subtle data-derived initials plus category color as row identity markers;
+- status, phase, category and date range as compact secondary content;
+- open/done/total task counts as action-planning row stats;
+- simple search as a lightweight list toolbar;
+- `EditModal` for creation rather than an always-visible form.
+
+For `/ideas`, the canonical reference adds:
+
+- idea name as primary row content;
+- subtle data-derived initials plus category color as row identity markers;
+- status and category as compact secondary content;
+- optional task count only when an idea already has measures attached;
+- simple search as a lightweight list toolbar;
+- `EditModal` for creation rather than an always-visible form.
+
+For `/habits`, the canonical reference adds:
+
+- habit name as primary row content;
+- subtle data-derived initials plus category color as row identity markers;
+- status and category as compact secondary content;
+- optional task count only when a habit already has measures attached;
+- no invented frequency, streak or recurrence placeholders before those semantics are stable in the product model;
+- simple search as a lightweight list toolbar;
+- `EditModal` for creation rather than an always-visible form.
+
+For `/tasks`, the canonical reference adds:
+
+- task title as primary row content;
+- status, priority and due date as compact secondary content, matching the `/tasks/:id` header hierarchy;
+- parent initiative/category context as compact orientation;
+- row-level status completion and delete actions as calm row actions, not a board or planner;
+- no checklist/progress indicators unless the list data already provides them;
+- simple search as a lightweight list toolbar;
+- `EditModal` for creation rather than an always-visible form.
 
 ## 3. Editing pattern
 
@@ -172,7 +260,8 @@ Default mode:
 - summary-first display for long content
 - expand/collapse for long content
 - subtle empty state if empty
-- edit action in the section header
+- click-to-edit content surface where safe
+- no mandatory visible heading, edit button or add-description button when the block is self-explanatory
 
 Edit mode:
 
@@ -210,6 +299,19 @@ SectionBlock: Linked objects
 
 Show relationships grouped by type when there are many.
 
+Use group subtitles only when they disambiguate the relationship. If a group title such as `Personen` or `Organisationen` already explains the content, omit the subtitle.
+
+Empty relation groups should be visually light. Prefer no empty body, or a tiny inline hint, over a full empty-state block for ordinary "nothing linked yet" cases. Keep section-level add/link actions visible enough even when the relation list is empty.
+
+Use heavy `EmptyState` blocks for meaningful empty pages, empty primary work areas or not-yet-configured major features. Do not use heavy empty-state cards for every empty relation group inside an already meaningful entity page.
+
+Expected calm relation actions by object type:
+
+- `Person verknüpfen`
+- `Organisation verknüpfen`
+- `Initiative verknüpfen`
+- `Maßnahme verknüpfen`
+
 Examples:
 
 - linked projects
@@ -225,6 +327,8 @@ Do not mix unrelated relationship types without grouping.
 
 Reading relationships and editing relationships are separate tasks. Complex add/remove/edit flows open a `RelationshipManager` in a modal or drawer with `RelationPicker`; inline relationship forms are not the default.
 
+For party-to-DMAX-object links, use the section label `Verknüpfte Initiativen und Maßnahmen` unless a later terminology decision replaces it. This section can contain initiatives, projects and habits represented as initiatives, plus tasks / Maßnahmen.
+
 ## 6. Metadata pattern
 
 Use `MetadataGrid` for secondary attributes.
@@ -233,10 +337,8 @@ Examples:
 
 - created at
 - updated at
-- internal ID
 - owner
 - source
-- external IDs
 - sync state
 - technical flags
 
@@ -244,7 +346,7 @@ Metadata should be visually less dominant than main content.
 
 Do not place metadata above the primary working section unless it is directly decision-relevant.
 
-Technical/debug metadata belongs in `TechnicalMetadataDisclosure` or a dedicated debug/inspector surface, not in normal entity detail content.
+Internal IDs, external provider IDs and technical/debug metadata belong in `TechnicalMetadataDisclosure` or a dedicated debug/inspector surface, not in normal entity detail content.
 
 ## 7. Contact point pattern
 
@@ -258,6 +360,8 @@ Use for:
 - other communication endpoints
 
 ### Display rules
+
+`Kontaktwege` is self-explanatory as a section title and generally does not need a subtitle.
 
 Each contact point should show:
 
@@ -275,9 +379,13 @@ Actions:
 
 Avoid showing raw contact point internals.
 
+Contact empty states should be compact. The add action, for example `Kontaktweg hinzufügen`, remains visible enough to be recognized as an action.
+
 ## 8. Address pattern
 
 Addresses should be displayed as human-readable blocks, not as raw field grids by default.
+
+`Anschriften` is self-explanatory as a section title and generally does not need a subtitle.
 
 Display:
 
@@ -288,6 +396,8 @@ Country
 ```
 
 Editing can use a modal or drawer with structured fields.
+
+Address empty states should be compact. The add action, for example `Anschrift hinzufügen`, remains visible enough to be recognized as an action.
 
 ## 9. Calendar/time pattern
 
@@ -316,6 +426,13 @@ Action: Add person
 ```
 
 Avoid generic empty states such as "No data".
+
+Use full `EmptyState` only when the empty condition is itself important enough to read. Ordinary empty relation groups should instead use a light pattern:
+
+- show only the group title and available action;
+- show no body content;
+- show a tiny muted inline hint only if necessary;
+- collapse the empty body with `emptyMode` or an equivalent light-empty behavior.
 
 ## 11. Loading and error states
 

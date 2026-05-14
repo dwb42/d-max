@@ -115,11 +115,15 @@ Good labels, short descriptions and clear hierarchy matter more than decorative 
 
 Do not add icons, colors, shadows or extra cards merely to make the screen look designed.
 
+Section titles should do more work than explanatory subtitles. If a title and the contained items already make the section clear, omit the subtitle.
+
 ### 10. Compact, not cramped
 
 DMAX should support dense information, but it must remain visually calm.
 
 Density is achieved through hierarchy, grouping and consistent spacing, not through squeezing everything into the viewport.
+
+Absence should be quiet. Ordinary empty relationship groups should not create heavy "nothing here" blocks or a wall of empty boxes.
 
 ## Visual attitude
 

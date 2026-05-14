@@ -718,5 +718,11 @@ export type PersistedChatMessage = {
   role: "user" | "assistant";
   content: string;
   source: "app_text" | "app_voice_message" | "system";
+  audioGenerationStatus: "none" | "pending" | "ready" | "failed";
+  audioProvider: string | null;
+  audioError: string | null;
+  audioGeneratedFromMessageId: number | null;
+  audioGeneratedAt: string | null;
+  audioAttachment: MediaAttachment | null;
   createdAt: string;
 };

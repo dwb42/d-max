@@ -523,3 +523,26 @@ Implemented changes:
 Readiness note:
 
 The organization reference is now ready for human visual review of the Phase 7A.6 refinements. If accepted, the next implementation phase should be Phase 7B component extraction before any `/people/:id` or project/initiative migration.
+
+## 27. Phase 11B relationship section simplification review
+
+Phase 11B applied additional human product feedback to the organization detail relationship and contact sections after the canonical primitives had been extracted.
+
+Screenshots are saved under `docs/ui/screenshots/relationship-section-simplification/`.
+
+Implemented changes:
+
+- Removed redundant subtitles from organization contact points, addresses, the `Beziehungen` section, the `Personen` relation group and the `Organisationen` relation group.
+- Renamed the organization DMAX context section to `Verknüpfte Initiativen und Maßnahmen`.
+- Removed the DMAX context subtitle and heavy empty-state copy.
+- Added lightweight empty rendering support to `RelationList` / `RelationGroup` so ordinary empty relation groups can render only their title and action.
+- Applied lightweight empty relationship rendering to organization person relationships, organization relationships and linked initiative/task participations.
+- Added a contained `Organisation verknüpfen` action for creating organization-to-organization party relationships through the existing `createPartyRelationship` API.
+- Added contained `Initiative verknüpfen` and `Maßnahme verknüpfen` actions for creating organization participations through the existing `createEntityParticipant` API.
+
+Notes and limitations:
+
+- No schema, API contract or dependency changes were needed.
+- The local fixture only contains one organization, so the organization-to-organization picker action is present but disabled until another organization exists.
+- Initiative/task linking uses the existing entity participant model and keeps role/context as a simple optional free-text field. A full relationship manager remains deferred.
+- The simplified empty-state rule should become canonical: do not render heavy "nothing here" panels for ordinary empty relation groups when the group title and link action are enough.

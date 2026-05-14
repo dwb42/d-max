@@ -998,6 +998,13 @@ export async function fetchChatMessages(conversationId?: number | null): Promise
   return response.messages;
 }
 
+export async function generateChatMessageAudio(messageId: number): Promise<PersistedChatMessage> {
+  const response = await request<{ message: PersistedChatMessage }>(`/api/chat/messages/${messageId}/audio`, {
+    method: "POST"
+  });
+  return response.message;
+}
+
 export async function fetchChatConversations(context: ConversationContext): Promise<AppConversation[]> {
   const params = conversationContextSearchParams(context);
   const response = await request<{ conversations: AppConversation[] }>(`/api/chat/conversations?${params.toString()}`);

@@ -1,9 +1,8 @@
-import { Children, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   DragEvent,
   FormEvent,
-  KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   MutableRefObject,
   PointerEvent as ReactPointerEvent,
@@ -113,6 +112,7 @@ import {
   fetchPersonDetail,
   fetchRelationshipTypes,
   fetchTaskDetail,
+  generateChatMessageAudio,
   prewarmOpenClaw,
   reanalyzeMediaAsset,
   reorderCategories,
@@ -142,6 +142,30 @@ import {
   unlinkCalendarBinding,
   uploadMediaAttachment
 } from "./api.js";
+import {
+  ConfirmModal,
+  DescriptionBlock,
+  EditModal,
+  EmptyState,
+  EntityDetailPage,
+  EntityHeader,
+  EntityList,
+  EntityListItem,
+  EntityListPage,
+  ErrorState,
+  InlineEditableText,
+  MetadataGrid,
+  RelationGroup,
+  RelationItem,
+  RelationList,
+  RichText,
+  SectionBlock,
+  handleModalEscape,
+  renderInlineMarkup,
+  useModalEscape
+} from "./components/ui/index.js";
+import { AddressBlock, ContactPointList } from "./components/party/index.js";
+import type { AddressInput, ContactPointInput } from "./components/party/index.js";
 import type {
   AppOverview,
   AppConversation,
@@ -166,8 +190,7 @@ import type {
   Organization,
   OrganizationDetail,
   ParticipantRoleType,
-  PartyAddress,
-  PartyContactPoint,
+  PartyRelationshipWithParties,
   Person,
   PersonDetail,
   RelationshipType,
@@ -226,6 +249,12 @@ type ChatMessage = {
   role: "user" | "assistant";
   text: string;
   source?: "text" | "voice";
+  audioGenerationStatus?: PersistedChatMessage["audioGenerationStatus"];
+  audioProvider?: string | null;
+  audioError?: string | null;
+  audioUrl?: string | null;
+  audioMimeType?: string | null;
+  audioDurationMs?: number | null;
   activities?: ChatActivity[];
 };
 type ContextualAgentState = {
@@ -599,7 +628,13 @@ function chatMessageFromPersisted(message: PersistedChatMessage): ChatMessage {
     id: String(message.id),
     role: message.role,
     text: message.content,
-    source: message.source === "app_voice_message" ? "voice" : message.source === "app_text" ? "text" : undefined
+    source: message.source === "app_voice_message" ? "voice" : message.source === "app_text" ? "text" : undefined,
+    audioGenerationStatus: message.audioGenerationStatus,
+    audioProvider: message.audioProvider,
+    audioError: message.audioError,
+    audioUrl: message.audioAttachment?.asset.fileUrl ?? null,
+    audioMimeType: message.audioAttachment?.asset.mimeType ?? null,
+    audioDurationMs: message.audioAttachment?.asset.durationMs ?? null
   };
 }
 
@@ -654,13 +689,23 @@ export default function App() {
   const [peopleList, setPeopleList] = useState<Person[] | null>(null);
   const [organizationList, setOrganizationList] = useState<Organization[] | null>(null);
   const [personDetail, setPersonDetail] = useState<PersonDetail | null>(null);
+  const [personLoadError, setPersonLoadError] = useState<string | null>(null);
   const [organizationDetail, setOrganizationDetail] = useState<OrganizationDetail | null>(null);
   const [organizationLoadError, setOrganizationLoadError] = useState<string | null>(null);
   const [participantRoleTypes, setParticipantRoleTypes] = useState<ParticipantRoleType[]>([]);
   const [relationshipTypes, setRelationshipTypes] = useState<RelationshipType[]>([]);
+  const [personCoreModalOpen, setPersonCoreModalOpen] = useState(false);
   const [organizationCoreModalOpen, setOrganizationCoreModalOpen] = useState(false);
+  const [categoryCreateModalOpen, setCategoryCreateModalOpen] = useState(false);
+  const [ideaCreateModalOpen, setIdeaCreateModalOpen] = useState(false);
+  const [projectCreateModalOpen, setProjectCreateModalOpen] = useState(false);
+  const [habitCreateModalOpen, setHabitCreateModalOpen] = useState(false);
+  const [taskCreateModalOpen, setTaskCreateModalOpen] = useState(false);
+  const [personCreateModalOpen, setPersonCreateModalOpen] = useState(false);
+  const [organizationCreateModalOpen, setOrganizationCreateModalOpen] = useState(false);
   const [initiativeDetail, setInitiativeDetail] = useState<InitiativeDetail | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
+  const [taskLoadError, setTaskLoadError] = useState<string | null>(null);
   const [calendarControls, setCalendarControls] = useState<CalendarControlsState>(() => calendarControlsFromPath(`${window.location.pathname}${window.location.search}`));
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplateDefinition[]>([]);
   const [promptLogs, setPromptLogs] = useState<AppPromptLog[]>([]);
@@ -871,6 +916,9 @@ export default function App() {
         setAgentDrawer((current) => ({ ...current, conversationId: result.conversationId, conversations }));
         setChatMessages(messagesWithActivities);
       }
+      if (source === "voice") {
+        void generateAudioForAssistantReply(result.conversationId, messagesWithActivities);
+      }
       await refresh();
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
@@ -904,6 +952,37 @@ export default function App() {
         text: "Turn abgebrochen."
       }
     ]);
+  }
+
+  async function generateAudioForAssistantReply(conversationId: number | null, messages: ChatMessage[]) {
+    const assistant = [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant" && message.audioGenerationStatus === "pending");
+    const messageId = assistant ? Number(assistant.id) : NaN;
+    if (!assistant || !Number.isFinite(messageId)) {
+      return;
+    }
+
+    try {
+      const updated = chatMessageFromPersisted(await generateChatMessageAudio(messageId));
+      setChatMessages((current) => current.map((message) => (message.id === updated.id ? { ...updated, activities: message.activities } : message)));
+    } catch {
+      if (!conversationId) {
+        setChatMessages((current) =>
+          current.map((message) =>
+            message.id === assistant.id
+              ? { ...message, audioGenerationStatus: "failed", audioError: "Sprachantwort konnte nicht erzeugt werden." }
+              : message
+          )
+        );
+        return;
+      }
+
+      const nextMessages = await loadPersistedChatMessages(conversationId).catch(() => null);
+      if (nextMessages) {
+        setChatMessages((current) => attachActivitiesToLastAssistant(nextMessages, current.find((message) => message.activities?.length)?.activities ?? []));
+      }
+    }
   }
 
   async function openContextualAgent(context: ConversationContext, label: string) {
@@ -1046,7 +1125,8 @@ export default function App() {
       stopChatMediaStream();
       const transcript = (await transcribeVoiceMessage(audio)).trim();
       if (transcript) {
-        setChatDraft(transcript);
+        setChatVoicePhase("idle");
+        await submitChatMessage(transcript, "voice");
       } else {
         setChatMessages((current) => [
           ...current,
@@ -1149,8 +1229,14 @@ export default function App() {
 
     if (route.view === "task" && route.taskId) {
       await fetchTaskDetail(route.taskId)
-        .then(setTaskDetail)
-        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load task."));
+        .then((detail) => {
+          setTaskDetail(detail);
+          setTaskLoadError(null);
+        })
+        .catch(() => {
+          setTaskDetail(null);
+          setTaskLoadError("Maßnahme nicht gefunden");
+        });
       await Promise.all([
         fetchPeople().then(setPeopleList).catch(() => undefined),
         fetchOrganizations().then(setOrganizationList).catch(() => undefined)
@@ -1169,8 +1255,14 @@ export default function App() {
 
     if (route.view === "person" && route.partyId) {
       await fetchPersonDetail(route.partyId)
-        .then(setPersonDetail)
-        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load person."));
+        .then((detail) => {
+          setPersonDetail(detail);
+          setPersonLoadError(null);
+        })
+        .catch(() => {
+          setPersonDetail(null);
+          setPersonLoadError("Person nicht gefunden");
+        });
     }
 
     if (route.view === "organization" && route.partyId) {
@@ -1293,12 +1385,19 @@ export default function App() {
   useEffect(() => {
     if (route.view !== "task" || !route.taskId) {
       setTaskDetail(null);
+      setTaskLoadError(null);
       return;
     }
 
     fetchTaskDetail(route.taskId)
-      .then(setTaskDetail)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load task."));
+      .then((detail) => {
+        setTaskDetail(detail);
+        setTaskLoadError(null);
+      })
+      .catch(() => {
+        setTaskDetail(null);
+        setTaskLoadError("Maßnahme nicht gefunden");
+      });
     void Promise.all([
       fetchPeople().then(setPeopleList).catch(() => undefined),
       fetchOrganizations().then(setOrganizationList).catch(() => undefined)
@@ -1330,12 +1429,20 @@ export default function App() {
   useEffect(() => {
     if (route.view !== "person" || !route.partyId) {
       setPersonDetail(null);
+      setPersonLoadError(null);
+      setPersonCoreModalOpen(false);
       return;
     }
 
+    setPersonCoreModalOpen(false);
+    setPersonDetail(null);
+    setPersonLoadError(null);
     fetchPersonDetail(route.partyId)
       .then(setPersonDetail)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load person."));
+      .catch(() => {
+        setPersonDetail(null);
+        setPersonLoadError("Person nicht gefunden");
+      });
   }, [route]);
 
   useEffect(() => {
@@ -1414,30 +1521,178 @@ export default function App() {
   }, [view]);
 
   function renderContentHeader() {
+    if (view === "organizations") {
+      return (
+        <header className="topbar">
+          <div>
+            <h1>Organisationen</h1>
+          </div>
+          <div className="topbar-actions">
+            <button type="button" className="section-primary-action" onClick={() => setOrganizationCreateModalOpen(true)}>
+              <Plus size={15} />
+              Organisation hinzufügen
+            </button>
+          </div>
+        </header>
+      );
+    }
+
+    if (view === "people") {
+      return (
+        <header className="topbar">
+          <div>
+            <h1>Personen</h1>
+          </div>
+          <div className="topbar-actions">
+            <button type="button" className="section-primary-action" onClick={() => setPersonCreateModalOpen(true)}>
+              <Plus size={15} />
+              Person hinzufügen
+            </button>
+          </div>
+        </header>
+      );
+    }
+
+    if (view === "lifeAreas") {
+      return (
+        <header className="topbar">
+          <div>
+            <h1>Lebensbereiche</h1>
+          </div>
+          <div className="topbar-actions">
+            <button type="button" className="section-primary-action" onClick={() => setCategoryCreateModalOpen(true)}>
+              <Plus size={15} />
+              Lebensbereich hinzufügen
+            </button>
+          </div>
+        </header>
+      );
+    }
+
+    if (view === "ideas") {
+      return (
+        <header className="topbar">
+          <div>
+            {route.categoryName ? (
+              <>
+                <button className="topbar-title-link" onClick={() => navigate("/ideas")}>
+                  Ideen
+                </button>
+                <p>{route.categoryName}</p>
+              </>
+            ) : (
+              <h1>Ideen</h1>
+            )}
+          </div>
+          <div className="topbar-actions">
+            <button type="button" className="section-primary-action" onClick={() => setIdeaCreateModalOpen(true)}>
+              <Plus size={15} />
+              Idee hinzufügen
+            </button>
+          </div>
+        </header>
+      );
+    }
+
+    if (view === "projects") {
+      return (
+        <header className="topbar">
+          <div>
+            {route.categoryName ? (
+              <>
+                <button className="topbar-title-link" onClick={() => navigate("/projects")}>
+                  Projekte
+                </button>
+                <p>{route.categoryName}</p>
+              </>
+            ) : (
+              <h1>Projekte</h1>
+            )}
+          </div>
+          <div className="topbar-actions">
+            <button type="button" className="section-primary-action" onClick={() => setProjectCreateModalOpen(true)}>
+              <Plus size={15} />
+              Projekt hinzufügen
+            </button>
+          </div>
+        </header>
+      );
+    }
+
+    if (view === "habits") {
+      return (
+        <header className="topbar">
+          <div>
+            {route.categoryName ? (
+              <>
+                <button className="topbar-title-link" onClick={() => navigate("/habits")}>
+                  Gewohnheiten
+                </button>
+                <p>{route.categoryName}</p>
+              </>
+            ) : (
+              <h1>Gewohnheiten</h1>
+            )}
+          </div>
+          <div className="topbar-actions">
+            <button type="button" className="section-primary-action" onClick={() => setHabitCreateModalOpen(true)}>
+              <Plus size={15} />
+              Gewohnheit hinzufügen
+            </button>
+          </div>
+        </header>
+      );
+    }
+
+    if (view === "tasks") {
+      return (
+        <header className="topbar">
+          <div>
+            <h1>Maßnahmen</h1>
+          </div>
+          <div className="topbar-actions">
+            <button type="button" className="section-primary-action" onClick={() => setTaskCreateModalOpen(true)}>
+              <Plus size={15} />
+              Maßnahme hinzufügen
+            </button>
+          </div>
+        </header>
+      );
+    }
+
     if (view === "lifeArea") {
       const category = overview?.categories.find((candidate) => candidate.name.toLowerCase() === route.categoryName?.toLowerCase()) ?? null;
       const initiatives = category ? (lifeAreaInitiatives ?? overview?.initiatives ?? []).filter((initiative) => initiative.categoryId === category.id) : [];
+      const tasks = category ? (overview?.tasks ?? []).filter((task) => initiatives.some((initiative) => initiative.id === task.initiativeId)) : [];
       return (
         <div className="content-header-title">
           <div className="back-actions">
             <div className="back-action-group">
               <button className="small-button back-button" onClick={() => navigate("/categories")}>
-                Zurueck zu Lebensbereiche
+                Zurück zu Lebensbereichen
               </button>
             </div>
           </div>
-          <div className="section-heading">
-            <div className="initiative-title-line">
-              {category ? <span className="life-area-emoji large" aria-hidden="true">{category.emoji}</span> : null}
-              <h1>{category?.name ?? "Lebensbereich"}</h1>
-              {category?.isSystem ? <span className="system-badge">System</span> : null}
-            </div>
-            <p>
-              {category?.description
-                ? firstMarkdownLine(category.description)
-                : `${initiatives.length} ${propsCountLabel(initiatives.length, "Initiative", "Initiatives")}`}
-            </p>
-          </div>
+          <EntityHeader
+            titleContent={category ? (
+              <InlineEditableText
+                value={category.name}
+                label="Name des Lebensbereichs"
+                required
+                className="entity-title-edit"
+                onSave={async (value) => {
+                  const nextName = value.trim();
+                  if (!nextName || nextName === category.name) return;
+                  await updateCategory(category.id, { name: nextName });
+                  await refresh();
+                  navigate(pathForLifeArea(nextName));
+                }}
+              />
+            ) : undefined}
+            title={category ? undefined : overview ? "Lebensbereich nicht gefunden" : "Lebensbereich"}
+            subtitle={category ? null : overview ? null : "Wird geladen"}
+            facts={category ? categoryHeaderFacts(category, initiatives, tasks) : []}
+          />
         </div>
       );
     }
@@ -1483,6 +1738,31 @@ export default function App() {
     if (view === "task") {
       const task = taskDetail?.task ?? null;
       const initiative = taskDetail?.initiative ?? null;
+      const taskHeader = taskLoadError ? (
+        <EntityHeader
+          title="Maßnahme nicht gefunden"
+          subtitle="Die Maßnahme existiert nicht oder konnte nicht geladen werden."
+        />
+      ) : (
+        <EntityHeader
+          titleContent={(
+            <TaskHeaderTitle
+              task={task}
+              onUpdateTask={async (taskId, input) => {
+                await updateTask(taskId, input);
+                await refresh();
+                setTaskDetail(await fetchTaskDetail(taskId));
+              }}
+            />
+          )}
+          subtitle={task ? null : "Wird geladen"}
+          facts={task ? taskHeaderFacts(task, async (taskId, input) => {
+            await updateTask(taskId, input);
+            await refresh();
+            setTaskDetail(await fetchTaskDetail(taskId));
+          }) : []}
+        />
+      );
       return (
         <div className="content-header-title">
           <div className="back-actions">
@@ -1497,19 +1777,49 @@ export default function App() {
               ) : null}
             </div>
           </div>
-          <TaskDetailHeader
-            task={task}
-            onUpdateTask={async (taskId, input) => {
-              await updateTask(taskId, input);
-              await refresh();
-              setTaskDetail(await fetchTaskDetail(taskId));
-            }}
-          />
+          {taskHeader}
         </div>
       );
     }
 
     if (view === "person") {
+      const person = personDetail?.person ?? null;
+      const personHeader = personLoadError ? (
+        <EntityHeader
+          title="Person nicht gefunden"
+          subtitle="Der Eintrag konnte nicht geladen werden."
+        />
+      ) : (
+        <EntityHeader
+          titleContent={(
+            <InlineEditableText
+              value={person?.displayName ?? "Person"}
+              label="Personenname"
+              required
+              disabled={!person}
+              className="entity-title-edit"
+              onSave={async (value) => {
+                if (!person) return;
+                await updatePerson(person.id, { displayName: value });
+                setPersonDetail(await fetchPersonDetail(person.id));
+                setPeopleList(await fetchPeople());
+              }}
+            />
+          )}
+          subtitle={person ? personHeaderContext(person) : "Wird geladen"}
+          secondaryActions={personDetail ? (
+            <button
+              type="button"
+              className="small-button header-secondary-action"
+              onClick={() => setPersonCoreModalOpen(true)}
+              title="Stammdaten bearbeiten"
+            >
+              <Pencil size={15} />
+              Stammdaten
+            </button>
+          ) : null}
+        />
+      );
       return (
         <div className="content-header-title">
           <div className="back-actions">
@@ -1519,13 +1829,7 @@ export default function App() {
               </button>
             </div>
           </div>
-          <div className="section-heading">
-            <div className="initiative-title-line">
-              <Users size={24} />
-              <h1>{personDetail?.person.displayName ?? "Person"}</h1>
-            </div>
-            <p>{personDetail ? salutationLabel(personDetail.person.salutation) : "Wird geladen"}</p>
-          </div>
+          {personHeader}
         </div>
       );
     }
@@ -1616,7 +1920,7 @@ export default function App() {
 
   return (
     <div
-      className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${agentDrawer.open ? "with-agent-drawer" : ""} ${view === "organization" ? "organization-route" : ""} ${view === "initiative" ? "initiative-route" : ""}`}
+      className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${agentDrawer.open ? "with-agent-drawer" : ""} ${view === "ideas" ? "ideas-route" : ""} ${view === "projects" ? "projects-route" : ""} ${view === "habits" ? "habits-route" : ""} ${view === "tasks" ? "tasks-route" : ""} ${view === "organizations" ? "organizations-route" : ""} ${view === "people" ? "people-route" : ""} ${view === "person" ? "person-route" : ""} ${view === "organization" ? "organization-route" : ""} ${view === "initiative" ? "initiative-route" : ""} ${view === "lifeArea" ? "life-area-route" : ""} ${view === "lifeAreas" ? "life-areas-route" : ""}`}
       ref={appShellRef}
       style={{ "--agent-drawer-width": `${agentDrawerWidth}px` } as CSSProperties}
     >
@@ -1737,24 +2041,8 @@ export default function App() {
             <LifeAreasView
               categories={overview.categories}
               initiatives={lifeAreaInitiatives ?? overview.initiatives}
+              tasks={overview.tasks}
               onOpenLifeArea={(categoryName) => navigate(pathForLifeArea(categoryName))}
-              onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
-              onReorderInitiatives={async (categoryId, initiativeIds) => {
-                await reorderInitiatives(categoryId, initiativeIds);
-                await refresh();
-                setLifeAreaInitiatives(await fetchInitiatives());
-              }}
-              onCreateInitiative={async (input) => {
-                try {
-                  setError(null);
-                  await createInitiative(input);
-                  await refresh();
-                  setLifeAreaInitiatives(await fetchInitiatives());
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Eintrag konnte nicht angelegt werden.");
-                  throw err;
-                }
-              }}
             />
             ) : <EmptyState title="Lebensbereiche werden geladen" />
           )}
@@ -1762,8 +2050,10 @@ export default function App() {
           <LifeAreaDetailView
             category={overview?.categories.find((category) => category.name.toLowerCase() === route.categoryName?.toLowerCase()) ?? null}
             initiatives={lifeAreaInitiatives ?? overview?.initiatives ?? []}
+            tasks={overview?.tasks ?? []}
             onBack={() => navigate("/categories")}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+            onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
             onCreateInitiative={async (input) => {
               try {
                 setError(null);
@@ -1809,7 +2099,37 @@ export default function App() {
             />
           </Suspense>
           )}
-          {!isEmptyState && isCollectionView(view) && (
+          {!isEmptyState && view === "ideas" && (
+          <IdeasView
+            categories={overview?.categories ?? []}
+            initiatives={overview?.initiatives ?? []}
+            tasks={overview?.tasks ?? []}
+            categoryFilterName={route.categoryName}
+            onOpenIdea={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+            onCreateClick={() => setIdeaCreateModalOpen(true)}
+          />
+          )}
+          {!isEmptyState && view === "projects" && (
+          <ProjectsView
+            categories={overview?.categories ?? []}
+            initiatives={overview?.initiatives ?? []}
+            tasks={overview?.tasks ?? []}
+            categoryFilterName={route.categoryName}
+            onOpenProject={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+            onCreateClick={() => setProjectCreateModalOpen(true)}
+          />
+          )}
+          {!isEmptyState && view === "habits" && (
+          <HabitsView
+            categories={overview?.categories ?? []}
+            initiatives={overview?.initiatives ?? []}
+            tasks={overview?.tasks ?? []}
+            categoryFilterName={route.categoryName}
+            onOpenHabit={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+            onCreateClick={() => setHabitCreateModalOpen(true)}
+          />
+          )}
+          {!isEmptyState && isCollectionView(view) && view !== "ideas" && view !== "projects" && view !== "habits" && (
           <InitiativesView
             categories={overview?.categories ?? []}
             initiatives={overview?.initiatives ?? []}
@@ -1936,11 +2256,12 @@ export default function App() {
           {!isEmptyState && view === "task" && (
           <TaskDetailView
             detail={taskDetail}
+            loadError={taskLoadError}
             people={peopleList ?? []}
             organizations={organizationList ?? []}
             participantRoleTypes={participantRoleTypes}
-            onBack={() => navigate("/tasks")}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+            onOpenCategory={(categoryName, initiativeType) => navigate(pathForCollectionCategory(collectionViewForInitiativeType(initiativeType), categoryName))}
             onCreateParticipant={async (input) => {
               await createEntityParticipant(input);
               if (route.taskId) setTaskDetail(await fetchTaskDetail(route.taskId));
@@ -1997,9 +2318,10 @@ export default function App() {
           />
           )}
           {!isEmptyState && view === "tasks" && (
-          <TasksView
+          <TasksListView
             tasks={overview?.tasks ?? []}
             initiatives={overview?.initiatives ?? []}
+            categories={overview?.categories ?? []}
             onToggleTaskStatus={async (task) => {
               await updateTaskStatus(task.id, task.status === "done" ? "open" : "done");
               await refresh();
@@ -2009,35 +2331,31 @@ export default function App() {
               await refresh();
             }}
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
+            onCreateClick={() => setTaskCreateModalOpen(true)}
           />
           )}
           {view === "people" && (
           <PeopleView
             people={peopleList ?? []}
             onOpenPerson={(partyId) => navigate(`/people/${partyId}`)}
-            onCreatePerson={async (input) => {
-              await createPerson(input);
-              setPeopleList(await fetchPeople());
-              await refresh();
-            }}
+            onCreateClick={() => setPersonCreateModalOpen(true)}
           />
           )}
           {view === "organizations" && (
           <OrganizationsView
             organizations={organizationList ?? []}
             onOpenOrganization={(partyId) => navigate(`/organizations/${partyId}`)}
-            onCreateOrganization={async (input) => {
-              await createOrganization(input);
-              setOrganizationList(await fetchOrganizations());
-              await refresh();
-            }}
+            onCreateClick={() => setOrganizationCreateModalOpen(true)}
           />
           )}
           {view === "person" && (
           <PersonDetailView
             detail={personDetail}
+            loadError={personLoadError}
             initiatives={overview?.initiatives ?? []}
             tasks={overview?.tasks ?? []}
+            coreModalOpen={personCoreModalOpen}
+            onCloseCoreModal={() => setPersonCoreModalOpen(false)}
             onUpdatePerson={async (partyId, input) => {
               await updatePerson(partyId, input);
               setPersonDetail(await fetchPersonDetail(partyId));
@@ -2055,8 +2373,22 @@ export default function App() {
               await deletePartyContactPoint(contactPointId);
               if (route.partyId) setPersonDetail(await fetchPersonDetail(route.partyId));
             }}
+            onCreateAddress={async (partyId, input) => {
+              await createPartyAddress({ partyId, ...input });
+              setPersonDetail(await fetchPersonDetail(partyId));
+            }}
+            onUpdateAddress={async (addressId, input) => {
+              await updatePartyAddress(addressId, input);
+              if (route.partyId) setPersonDetail(await fetchPersonDetail(route.partyId));
+            }}
+            onDeleteAddress={async (addressId) => {
+              await deletePartyAddress(addressId);
+              if (route.partyId) setPersonDetail(await fetchPersonDetail(route.partyId));
+            }}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
+            onOpenPerson={(partyId) => navigate(`/people/${partyId}`)}
+            onOpenOrganization={(partyId) => navigate(`/organizations/${partyId}`)}
           />
           )}
           {view === "organization" && (
@@ -2066,6 +2398,7 @@ export default function App() {
             initiatives={overview?.initiatives ?? []}
             tasks={overview?.tasks ?? []}
             people={peopleList ?? []}
+            organizations={organizationList ?? []}
             relationshipTypes={relationshipTypes}
             coreModalOpen={organizationCoreModalOpen}
             onCloseCoreModal={() => setOrganizationCoreModalOpen(false)}
@@ -2102,9 +2435,14 @@ export default function App() {
               await createPartyRelationship(input);
               if (route.partyId) setOrganizationDetail(await fetchOrganizationDetail(route.partyId));
             }}
+            onCreateParticipant={async (input) => {
+              await createEntityParticipant(input);
+              if (route.partyId) setOrganizationDetail(await fetchOrganizationDetail(route.partyId));
+            }}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
             onOpenPerson={(partyId) => navigate(`/people/${partyId}`)}
+            onOpenOrganization={(partyId) => navigate(`/organizations/${partyId}`)}
           />
           )}
           {view === "promptTemplates" && (
@@ -2126,6 +2464,92 @@ export default function App() {
           )}
         </div>
       </main>
+      {categoryCreateModalOpen ? (
+        <CategoryCreateModal
+          onCancel={() => setCategoryCreateModalOpen(false)}
+          onCreate={async (input) => {
+            const category = await createCategory(input);
+            await refresh();
+            setCategoryCreateModalOpen(false);
+            navigate(pathForLifeArea(category.name));
+          }}
+        />
+      ) : null}
+      {ideaCreateModalOpen ? (
+        <IdeaCreateModal
+          categories={overview?.categories ?? []}
+          categoryFilterName={route.view === "ideas" ? route.categoryName : null}
+          onCancel={() => setIdeaCreateModalOpen(false)}
+          onCreate={async (input) => {
+            const initiative = await createInitiative(input);
+            await refresh();
+            setIdeaCreateModalOpen(false);
+            navigate(`/initiatives/${initiative.id}`);
+          }}
+        />
+      ) : null}
+      {projectCreateModalOpen ? (
+        <ProjectCreateModal
+          categories={overview?.categories ?? []}
+          categoryFilterName={route.view === "projects" ? route.categoryName : null}
+          onCancel={() => setProjectCreateModalOpen(false)}
+          onCreate={async (input) => {
+            const initiative = await createInitiative(input);
+            await refresh();
+            setProjectCreateModalOpen(false);
+            navigate(`/initiatives/${initiative.id}`);
+          }}
+        />
+      ) : null}
+      {habitCreateModalOpen ? (
+        <HabitCreateModal
+          categories={overview?.categories ?? []}
+          categoryFilterName={route.view === "habits" ? route.categoryName : null}
+          onCancel={() => setHabitCreateModalOpen(false)}
+          onCreate={async (input) => {
+            const initiative = await createInitiative(input);
+            await refresh();
+            setHabitCreateModalOpen(false);
+            navigate(`/initiatives/${initiative.id}`);
+          }}
+        />
+      ) : null}
+      {taskCreateModalOpen ? (
+        <TaskCreateModal
+          initiatives={overview?.initiatives ?? []}
+          onCancel={() => setTaskCreateModalOpen(false)}
+          onCreate={async (input) => {
+            const task = await createTask(input);
+            await refresh();
+            setTaskCreateModalOpen(false);
+            navigate(`/tasks/${task.id}`);
+          }}
+        />
+      ) : null}
+      {personCreateModalOpen ? (
+        <PersonCreateModal
+          onCancel={() => setPersonCreateModalOpen(false)}
+          onCreate={async (input) => {
+            const person = await createPerson(input);
+            setPeopleList(await fetchPeople());
+            await refresh();
+            setPersonCreateModalOpen(false);
+            navigate(`/people/${person.id}`);
+          }}
+        />
+      ) : null}
+      {organizationCreateModalOpen ? (
+        <OrganizationCreateModal
+          onCancel={() => setOrganizationCreateModalOpen(false)}
+          onCreate={async (input) => {
+            const organization = await createOrganization(input);
+            setOrganizationList(await fetchOrganizations());
+            await refresh();
+            setOrganizationCreateModalOpen(false);
+            navigate(`/organizations/${organization.id}`);
+          }}
+        />
+      ) : null}
       {agentDrawer.open ? (
         <ResizeHandle
           appShellRef={appShellRef}
@@ -2346,6 +2770,7 @@ function ChatView(props: {
         {visibleMessages.map((message) => (
           <article key={message.id} className={`chat-message ${message.role}`}>
             <RichText text={message.text} />
+            {message.role === "assistant" && hasChatAudioState(message) ? <ChatAudioPlayer message={message} /> : null}
             {message.activities?.length ? <ActivityTrail activities={message.activities} /> : null}
             {message.source ? <span>{message.source === "voice" ? "voice message" : "text"}</span> : null}
           </article>
@@ -2422,6 +2847,87 @@ function ChatView(props: {
       </form>
     </section>
   );
+}
+
+function hasChatAudioState(message: ChatMessage): boolean {
+  return Boolean(message.audioUrl || message.audioGenerationStatus === "pending" || message.audioGenerationStatus === "failed");
+}
+
+function ChatAudioPlayer(props: { message: ChatMessage }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState((props.message.audioDurationMs ?? 0) / 1000);
+  const status = props.message.audioGenerationStatus ?? "none";
+  const canPlay = Boolean(props.message.audioUrl && status === "ready");
+  const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
+
+  async function togglePlayback() {
+    const audio = audioRef.current;
+    if (!audio || !canPlay) {
+      return;
+    }
+
+    if (playing) {
+      audio.pause();
+      setPlaying(false);
+      return;
+    }
+
+    try {
+      await audio.play();
+      setPlaying(true);
+    } catch {
+      setPlaying(false);
+    }
+  }
+
+  if (status === "pending") {
+    return (
+      <div className="chat-audio-player pending">
+        <VoiceProcessingIndicator />
+        <span>Audio wird erzeugt</span>
+      </div>
+    );
+  }
+
+  if (status === "failed" && !props.message.audioUrl) {
+    return <div className="chat-audio-player failed">Audio nicht verfügbar</div>;
+  }
+
+  if (!props.message.audioUrl) {
+    return null;
+  }
+
+  return (
+    <div className="chat-audio-player">
+      <button type="button" className="icon-button" onClick={() => void togglePlayback()} disabled={!canPlay} title={playing ? "Pause" : "Abspielen"}>
+        {playing ? <Pause size={16} /> : <Play size={16} />}
+      </button>
+      <div className="chat-audio-progress" aria-hidden="true">
+        <span style={{ width: `${progress * 100}%` }} />
+      </div>
+      <time>{formatAudioTime(currentTime)}{duration > 0 ? ` / ${formatAudioTime(duration)}` : ""}</time>
+      <audio
+        ref={audioRef}
+        preload="metadata"
+        src={props.message.audioUrl}
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || duration)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => {
+          setPlaying(false);
+          setCurrentTime(0);
+        }}
+      />
+    </div>
+  );
+}
+
+function formatAudioTime(seconds: number): string {
+  const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  const minutes = Math.floor(safeSeconds / 60);
+  return `${minutes}:${String(safeSeconds % 60).padStart(2, "0")}`;
 }
 
 function AgentDrawer(props: {
@@ -2708,6 +3214,14 @@ const taskPriorityOptions: Array<{ value: Task["priority"]; label: string }> = [
   { value: "urgent", label: "Dringend" }
 ];
 
+function taskPriorityLabel(priority: Task["priority"]): string {
+  return taskPriorityOptions.find((option) => option.value === priority)?.label ?? priority;
+}
+
+function taskStatusLabel(status: Task["status"]): string {
+  return status === "done" ? "Erledigt" : "Offen";
+}
+
 function initiativeTypeLabel(type: InitiativeType): string {
   return initiativeTypeOptions.find((option) => option.value === type)?.label ?? "Eintrag";
 }
@@ -2838,135 +3352,1061 @@ function propsCountLabel(count: number, singularLabel: string, pluralLabel: stri
   return count === 1 ? singularLabel : pluralLabel;
 }
 
+function categoryHeaderFacts(category: Category, initiatives: Initiative[], tasks: Task[]): Array<{ label: string; value: ReactNode }> {
+  const items: Array<{ label: string; value: ReactNode }> = [
+    { label: "Symbol", value: <span className="category-symbol-fact">{category.emoji}</span> },
+    { label: "Farbe", value: <span className="category-color-fact"><span style={{ background: category.color }} />{category.color}</span> },
+    { label: "Arbeit", value: `${initiatives.length} ${propsCountLabel(initiatives.length, "Eintrag", "Einträge")} · ${tasks.length} ${propsCountLabel(tasks.length, "Maßnahme", "Maßnahmen")}` }
+  ];
+  if (category.isSystem) {
+    items.push({ label: "Status", value: "Systembereich" });
+  }
+  return items;
+}
+
+function categoryMetadataItems(category: Category, initiatives: Initiative[], tasks: Task[]): Array<{ label: string; value: ReactNode | null | undefined }> {
+  const projects = initiatives.filter((initiative) => initiative.type === "project");
+  const ideas = initiatives.filter((initiative) => initiative.type === "idea");
+  const habits = initiatives.filter((initiative) => initiative.type === "habit");
+  return [
+    { label: "Symbol", value: category.emoji },
+    { label: "Farbe", value: <span className="category-color-fact"><span style={{ background: category.color }} />{category.color}</span> },
+    { label: "Projekte", value: projects.length },
+    { label: "Ideen", value: ideas.length },
+    { label: "Gewohnheiten", value: habits.length },
+    { label: "Maßnahmen", value: tasks.length },
+    { label: "Systembereich", value: category.isSystem ? "Ja" : null },
+    { label: "Erstellt", value: category.createdAt ? formatDateTimeForUi(category.createdAt) : null },
+    { label: "Aktualisiert", value: category.updatedAt ? formatDateTimeForUi(category.updatedAt) : null }
+  ];
+}
+
 function LifeAreasView(props: {
   categories: AppOverview["categories"];
   initiatives: Initiative[];
+  tasks: Task[];
   onOpenLifeArea: (categoryName: string) => void;
-  onOpenInitiative: (initiativeId: number) => void;
-  onReorderInitiatives: (categoryId: number, initiativeIds: number[]) => Promise<void>;
-  onCreateInitiative: (input: CreateInitiativeInput) => Promise<void>;
 }) {
-  const groups = props.categories.map((category) => {
-    const initiatives = props.initiatives.filter((project) => project.categoryId === category.id);
-    return {
-      category,
-      initiatives,
-      byType: initiativeTypeOptions.map((option) => ({
-        ...option,
-        categoryId: category.id,
-        initiatives: initiatives.filter((initiative) => initiative.type === option.value)
-      }))
-    };
+  const items = props.categories.map((category) => categoryListItemData(category, props.initiatives, props.tasks));
+
+  return (
+    <EntityListPage className="category-list-page">
+      {items.length === 0 ? (
+        <EmptyState
+          title="Noch keine Lebensbereiche"
+          description="Lege den ersten Lebensbereich an, um Projekte, Ideen, Gewohnheiten und Maßnahmen einzuordnen."
+        />
+      ) : (
+        <EntityList>
+          {items.map((item) => (
+            <EntityListItem
+              key={item.category.id}
+              marker={(
+                <span className="category-list-marker">
+                  <span aria-hidden="true">{item.category.emoji}</span>
+                  <span className="category-list-swatch" style={{ background: item.category.color }} />
+                </span>
+              )}
+              title={item.category.name}
+              meta={item.category.isSystem ? "Systembereich" : `${item.totalInitiatives} ${propsCountLabel(item.totalInitiatives, "Eintrag", "Einträge")}`}
+              description={item.description}
+              stats={[
+                { label: "Projekte", value: item.projectCount },
+                { label: "Ideen", value: item.ideaCount },
+                { label: "Gewohnheiten", value: item.habitCount },
+                { label: "Maßnahmen", value: item.taskCount }
+              ]}
+              onOpen={() => props.onOpenLifeArea(item.category.name)}
+            />
+          ))}
+        </EntityList>
+      )}
+    </EntityListPage>
+  );
+}
+
+function categoryListItemData(category: Category, initiatives: Initiative[], tasks: Task[]) {
+  const categoryInitiatives = initiatives.filter((initiative) => initiative.categoryId === category.id);
+  const initiativeIds = new Set(categoryInitiatives.map((initiative) => initiative.id));
+  return {
+    category,
+    description: category.description ? firstMarkdownLine(category.description) : null,
+    totalInitiatives: categoryInitiatives.length,
+    projectCount: categoryInitiatives.filter((initiative) => initiative.type === "project").length,
+    ideaCount: categoryInitiatives.filter((initiative) => initiative.type === "idea").length,
+    habitCount: categoryInitiatives.filter((initiative) => initiative.type === "habit").length,
+    taskCount: tasks.filter((task) => initiativeIds.has(task.initiativeId)).length
+  };
+}
+
+function CategoryCreateModal(props: {
+  onCancel: () => void;
+  onCreate: (input: { name: string; description?: string | null; color?: string | null }) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canCreate = Boolean(name.trim());
+
+  return (
+    <EditModal
+      title="Lebensbereich hinzufügen"
+      label="Lebensbereich hinzufügen"
+      onCancel={props.onCancel}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!canCreate || creating) return;
+        setCreating(true);
+        setError(null);
+        try {
+          await props.onCreate({
+            name: name.trim(),
+            description: description.trim() || null
+          });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Lebensbereich konnte nicht angelegt werden.");
+        } finally {
+          setCreating(false);
+        }
+      }}
+      footer={(
+        <>
+          <button type="submit" className="primary-button" disabled={!canCreate || creating}>
+            Anlegen
+          </button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={creating}>
+            Abbrechen
+          </button>
+        </>
+      )}
+    >
+      <label>
+        Name
+        <input value={name} onChange={(event) => setName(event.target.value)} autoFocus />
+      </label>
+      <label>
+        Beschreibung
+        <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={5} />
+      </label>
+      {error ? <ErrorState title="Anlegen fehlgeschlagen" description={error} /> : null}
+    </EditModal>
+  );
+}
+
+function IdeasView(props: {
+  categories: AppOverview["categories"];
+  initiatives: Initiative[];
+  tasks: Task[];
+  categoryFilterName: string | null;
+  onOpenIdea: (initiativeId: number) => void;
+  onCreateClick: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const categoryById = new Map(props.categories.map((category) => [category.id, category]));
+  const categoryFilter = props.categoryFilterName
+    ? props.categories.find((category) => category.name.toLowerCase() === props.categoryFilterName?.toLowerCase()) ?? null
+    : null;
+  const ideas = sortInitiativesForDisplay(
+    props.initiatives.filter((initiative) => initiative.type === "idea" && (!props.categoryFilterName || initiative.categoryId === categoryFilter?.id))
+  );
+  const trimmedSearch = search.trim().toLowerCase();
+  const filteredIdeas = ideas.filter((idea) => {
+    if (!trimmedSearch) return true;
+    const category = categoryById.get(idea.categoryId);
+    return [
+      displayInitiativeName(idea),
+      idea.summary,
+      idea.markdown,
+      initiativeStatusLabel(idea.status),
+      category?.name
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(trimmedSearch);
   });
 
   return (
-    <section className="life-area-view">
-      {groups.map((group) => (
-        <section className="life-area-section" key={group.category.id}>
-          <div className="life-area-heading">
-            <div>
-              <span className="life-area-emoji" aria-hidden="true">{group.category.emoji}</span>
-              <button className="life-area-title-link" onClick={() => props.onOpenLifeArea(group.category.name)}>
-                {group.category.name}
-              </button>
-              {group.category.isSystem ? <span className="system-badge">System</span> : null}
-            </div>
-            <span>{group.initiatives.length} {propsCountLabel(group.initiatives.length, "Initiative", "Initiatives")}</span>
-          </div>
-          {group.category.description ? <p className="life-area-description">{firstMarkdownLine(group.category.description)}</p> : null}
+    <EntityListPage className="idea-list-page">
+      <div className="entity-list-toolbar">
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Idee suchen" aria-label="Idee suchen" />
+      </div>
 
-          <LifeAreaInitiativeGroups
-            groups={group.byType}
-            onOpenInitiative={props.onOpenInitiative}
-            onReorderInitiatives={props.onReorderInitiatives}
-            onCreateInitiative={props.onCreateInitiative}
-          />
-        </section>
-      ))}
-      {groups.length === 0 ? <EmptyState title="Noch keine Lebensbereiche" /> : null}
-    </section>
+      {props.categoryFilterName && !categoryFilter ? (
+        <ErrorState
+          title="Lebensbereich nicht gefunden"
+          description="Der gefilterte Ideenbereich existiert nicht oder konnte nicht geladen werden."
+        />
+      ) : null}
+      {!props.categoryFilterName && props.initiatives.filter((initiative) => initiative.type === "idea").length === 0 ? (
+        <EmptyState
+          title="Noch keine Ideen"
+          description="Lege die erste Idee an, um mögliche Vorhaben und offene Gedanken festzuhalten."
+          action={(
+            <button type="button" className="section-primary-action" onClick={props.onCreateClick}>
+              <Plus size={15} />
+              Idee hinzufügen
+            </button>
+          )}
+        />
+      ) : null}
+      {ideas.length > 0 && filteredIdeas.length === 0 ? (
+        <EmptyState
+          title="Keine Ideen gefunden"
+          description="Passe die Suche an, um die Ideenliste wieder zu erweitern."
+        />
+      ) : null}
+      {props.categoryFilterName && categoryFilter && ideas.length === 0 ? (
+        <EmptyState
+          title="Keine Ideen in diesem Lebensbereich"
+          description="Dieser Lebensbereich enthält noch keine Ideen."
+          action={(
+            <button type="button" className="section-primary-action" onClick={props.onCreateClick}>
+              <Plus size={15} />
+              Idee hinzufügen
+            </button>
+          )}
+        />
+      ) : null}
+      {filteredIdeas.length > 0 ? (
+        <EntityList>
+          {filteredIdeas.map((idea) => {
+            const category = categoryById.get(idea.categoryId) ?? null;
+            const taskCount = props.tasks.filter((task) => task.initiativeId === idea.id).length;
+            return (
+              <EntityListItem
+                key={idea.id}
+                marker={(
+                  <span className="idea-list-avatar">
+                    <span>{ideaInitials(idea)}</span>
+                    {category ? <span className="idea-list-swatch" style={{ background: category.color }} /> : null}
+                  </span>
+                )}
+                title={displayInitiativeName(idea)}
+                meta={ideaListMeta(idea, category)}
+                description={ideaDescriptionPreview(idea)}
+                stats={taskCount > 0 ? [{ label: "Maßnahmen", value: taskCount }] : undefined}
+                onOpen={() => props.onOpenIdea(idea.id)}
+              />
+            );
+          })}
+        </EntityList>
+      ) : null}
+    </EntityListPage>
   );
+}
+
+function IdeaCreateModal(props: {
+  categories: AppOverview["categories"];
+  categoryFilterName: string | null;
+  onCancel: () => void;
+  onCreate: (input: CreateInitiativeInput) => Promise<void>;
+}) {
+  const preferred = preferredCategoryId(props.categories, props.categoryFilterName);
+  const [categoryId, setCategoryId] = useState<number>(preferred);
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const selectedCategoryId = props.categories.some((category) => category.id === categoryId) ? categoryId : preferred;
+  const canCreate = Boolean(name.trim() && selectedCategoryId);
+
+  return (
+    <EditModal
+      title="Idee hinzufügen"
+      label="Idee hinzufügen"
+      className="compact-modal"
+      onCancel={props.onCancel}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const trimmedName = name.trim();
+        if (!trimmedName || !selectedCategoryId || creating) return;
+        setCreating(true);
+        setError(null);
+        try {
+          await props.onCreate({
+            categoryId: selectedCategoryId,
+            type: "idea",
+            name: trimmedName,
+            markdown: defaultInitiativeMarkdown("idea", trimmedName)
+          });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Idee konnte nicht angelegt werden.");
+        } finally {
+          setCreating(false);
+        }
+      }}
+      footer={(
+        <>
+          <button type="submit" className="primary-button" disabled={!canCreate || creating}>Anlegen</button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={creating}>Abbrechen</button>
+        </>
+      )}
+    >
+      {props.categories.length === 0 ? (
+        <ErrorState title="Kein Lebensbereich vorhanden" description="Lege zuerst einen Lebensbereich an, bevor du eine Idee erstellst." />
+      ) : (
+        <>
+          <label>
+            Lebensbereich
+            <select value={selectedCategoryId || ""} onChange={(event) => setCategoryId(Number(event.target.value))} disabled={creating}>
+              {props.categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Name
+            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Idee benennen" autoFocus disabled={creating} />
+          </label>
+        </>
+      )}
+      {error ? <ErrorState title="Idee konnte nicht angelegt werden" description={error} /> : null}
+    </EditModal>
+  );
+}
+
+function ideaListMeta(idea: Initiative, category: Category | null): string {
+  return [
+    initiativeStatusLabel(idea.status),
+    category?.name ?? null
+  ].filter(Boolean).join(" · ");
+}
+
+function ideaDescriptionPreview(idea: Initiative): string | null {
+  const summary = idea.summary?.trim();
+  if (summary) return summary;
+
+  const ignoredLines = new Set(["gedanke", "offene fragen", "noch offen.", "-", ""]);
+  const line = idea.markdown
+    .split("\n")
+    .map((entry) => entry.replace(/^#+\s*/, "").trim())
+    .find((entry) => entry && !ignoredLines.has(entry.toLowerCase()));
+  return line ?? null;
+}
+
+function ideaInitials(idea: Initiative): string {
+  const initials = displayInitiativeName(idea)
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+  return initials || "I";
+}
+
+function ProjectsView(props: {
+  categories: AppOverview["categories"];
+  initiatives: Initiative[];
+  tasks: Task[];
+  categoryFilterName: string | null;
+  onOpenProject: (initiativeId: number) => void;
+  onCreateClick: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const categoryById = new Map(props.categories.map((category) => [category.id, category]));
+  const categoryFilter = props.categoryFilterName
+    ? props.categories.find((category) => category.name.toLowerCase() === props.categoryFilterName?.toLowerCase()) ?? null
+    : null;
+  const projects = sortInitiativesForDisplay(
+    props.initiatives.filter((initiative) => initiative.type === "project" && (!props.categoryFilterName || initiative.categoryId === categoryFilter?.id))
+  );
+  const trimmedSearch = search.trim().toLowerCase();
+  const filteredProjects = projects.filter((project) => {
+    if (!trimmedSearch) return true;
+    const category = categoryById.get(project.categoryId);
+    return [
+      displayInitiativeName(project),
+      project.summary,
+      project.markdown,
+      initiativeStatusLabel(project.status),
+      projectPhaseLabel(project.projectPhase),
+      category?.name
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(trimmedSearch);
+  });
+
+  return (
+    <EntityListPage className="project-list-page">
+      <div className="entity-list-toolbar">
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Projekt suchen" aria-label="Projekt suchen" />
+      </div>
+
+      {props.categoryFilterName && !categoryFilter ? (
+        <ErrorState
+          title="Lebensbereich nicht gefunden"
+          description="Der gefilterte Projektbereich existiert nicht oder konnte nicht geladen werden."
+        />
+      ) : null}
+      {!props.categoryFilterName && props.initiatives.filter((initiative) => initiative.type === "project").length === 0 ? (
+        <EmptyState
+          title="Noch keine Projekte"
+          description="Lege das erste Projekt an, um konkrete Planung und Maßnahmen zu bündeln."
+          action={(
+            <button type="button" className="section-primary-action" onClick={props.onCreateClick}>
+              <Plus size={15} />
+              Projekt hinzufügen
+            </button>
+          )}
+        />
+      ) : null}
+      {projects.length > 0 && filteredProjects.length === 0 ? (
+        <EmptyState
+          title="Keine Projekte gefunden"
+          description="Passe die Suche an, um die Projektliste wieder zu erweitern."
+        />
+      ) : null}
+      {props.categoryFilterName && categoryFilter && projects.length === 0 ? (
+        <EmptyState
+          title="Keine Projekte in diesem Lebensbereich"
+          description="Dieser Lebensbereich enthält noch keine Projekte."
+          action={(
+            <button type="button" className="section-primary-action" onClick={props.onCreateClick}>
+              <Plus size={15} />
+              Projekt hinzufügen
+            </button>
+          )}
+        />
+      ) : null}
+      {filteredProjects.length > 0 ? (
+        <EntityList>
+          {filteredProjects.map((project) => {
+            const category = categoryById.get(project.categoryId) ?? null;
+            const counts = projectTaskCounts(project, props.tasks);
+            return (
+              <EntityListItem
+                key={project.id}
+                marker={(
+                  <span className="project-list-avatar">
+                    <span>{projectInitials(project)}</span>
+                    {category ? <span className="project-list-swatch" style={{ background: category.color }} /> : null}
+                  </span>
+                )}
+                title={displayInitiativeName(project)}
+                meta={projectListMeta(project, category)}
+                description={projectDescriptionPreview(project)}
+                stats={[
+                  { label: "Offen", value: counts.open },
+                  { label: "Erledigt", value: counts.done },
+                  { label: "Maßnahmen", value: counts.total }
+                ]}
+                onOpen={() => props.onOpenProject(project.id)}
+              />
+            );
+          })}
+        </EntityList>
+      ) : null}
+    </EntityListPage>
+  );
+}
+
+function ProjectCreateModal(props: {
+  categories: AppOverview["categories"];
+  categoryFilterName: string | null;
+  onCancel: () => void;
+  onCreate: (input: CreateInitiativeInput) => Promise<void>;
+}) {
+  const preferred = preferredCategoryId(props.categories, props.categoryFilterName);
+  const [categoryId, setCategoryId] = useState<number>(preferred);
+  const [name, setName] = useState("");
+  const [projectPhase, setProjectPhase] = useState<ProjectPhase>("planning");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const selectedCategoryId = props.categories.some((category) => category.id === categoryId) ? categoryId : preferred;
+  const dateRangeInvalid = initiativeDateRangeInvalid(startDate, endDate);
+  const canCreate = Boolean(name.trim() && selectedCategoryId && !dateRangeInvalid);
+
+  return (
+    <EditModal
+      title="Projekt hinzufügen"
+      label="Projekt hinzufügen"
+      className="compact-modal"
+      onCancel={props.onCancel}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const trimmedName = name.trim();
+        if (!trimmedName || !selectedCategoryId || creating || dateRangeInvalid) return;
+        setCreating(true);
+        setError(null);
+        try {
+          await props.onCreate({
+            categoryId: selectedCategoryId,
+            type: "project",
+            projectPhase,
+            name: trimmedName,
+            markdown: defaultInitiativeMarkdown("project", trimmedName),
+            startDate: startDate || null,
+            endDate: endDate || null
+          });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Projekt konnte nicht angelegt werden.");
+        } finally {
+          setCreating(false);
+        }
+      }}
+      footer={(
+        <>
+          <button type="submit" className="primary-button" disabled={!canCreate || creating}>Anlegen</button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={creating}>Abbrechen</button>
+        </>
+      )}
+    >
+      {props.categories.length === 0 ? (
+        <ErrorState title="Kein Lebensbereich vorhanden" description="Lege zuerst einen Lebensbereich an, bevor du ein Projekt erstellst." />
+      ) : (
+        <>
+          <label>
+            Lebensbereich
+            <select value={selectedCategoryId || ""} onChange={(event) => setCategoryId(Number(event.target.value))} disabled={creating}>
+              {props.categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Name
+            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Projekt benennen" autoFocus disabled={creating} />
+          </label>
+          <label>
+            Phase
+            <select value={projectPhase} onChange={(event) => setProjectPhase(event.target.value as ProjectPhase)} disabled={creating}>
+              {projectPhaseOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="modal-two-column">
+            <label>
+              Start
+              <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} disabled={creating} />
+            </label>
+            <label>
+              Ende
+              <input
+                type="date"
+                value={endDate}
+                min={startDate || undefined}
+                onPointerDown={(event) => primeEmptyDatePickerMonth(event, startDate, endDate)}
+                onFocus={(event) => primeEmptyDatePickerMonth(event, startDate, endDate)}
+                onBlur={(event) => restorePrimedEmptyDateInput(event, endDate)}
+                onChange={(event) => setEndDate(event.target.value)}
+                disabled={creating}
+              />
+            </label>
+          </div>
+          {dateRangeInvalid ? <p className="field-error">Das Enddatum darf nicht vor dem Startdatum liegen.</p> : null}
+        </>
+      )}
+      {error ? <ErrorState title="Projekt konnte nicht angelegt werden" description={error} /> : null}
+    </EditModal>
+  );
+}
+
+function projectTaskCounts(project: Initiative, tasks: Task[]): { total: number; open: number; done: number } {
+  const projectTasks = tasks.filter((task) => task.initiativeId === project.id);
+  return {
+    total: projectTasks.length,
+    open: projectTasks.filter((task) => task.status !== "done").length,
+    done: projectTasks.filter((task) => task.status === "done").length
+  };
+}
+
+function projectListMeta(project: Initiative, category: Category | null): string {
+  return [
+    initiativeStatusLabel(project.status),
+    projectPhaseLabel(project.projectPhase),
+    category?.name ?? null,
+    formatInitiativeDateRangeForUi(project)
+  ].filter(Boolean).join(" · ");
+}
+
+function projectDescriptionPreview(project: Initiative): string | null {
+  const summary = project.summary?.trim();
+  if (summary) return summary;
+
+  const ignoredLines = new Set(["ziel", "kontext", "naechste massnahmen", "nächste maßnahmen", "noch offen.", "-", ""]);
+  const line = project.markdown
+    .split("\n")
+    .map((entry) => entry.replace(/^#+\s*/, "").trim())
+    .find((entry) => entry && !ignoredLines.has(entry.toLowerCase()));
+  return line ?? null;
+}
+
+function projectInitials(project: Initiative): string {
+  const initials = displayInitiativeName(project)
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+  return initials || "P";
+}
+
+function HabitsView(props: {
+  categories: AppOverview["categories"];
+  initiatives: Initiative[];
+  tasks: Task[];
+  categoryFilterName: string | null;
+  onOpenHabit: (initiativeId: number) => void;
+  onCreateClick: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const categoryById = new Map(props.categories.map((category) => [category.id, category]));
+  const categoryFilter = props.categoryFilterName
+    ? props.categories.find((category) => category.name.toLowerCase() === props.categoryFilterName?.toLowerCase()) ?? null
+    : null;
+  const habits = sortInitiativesForDisplay(
+    props.initiatives.filter((initiative) => initiative.type === "habit" && (!props.categoryFilterName || initiative.categoryId === categoryFilter?.id))
+  );
+  const trimmedSearch = search.trim().toLowerCase();
+  const filteredHabits = habits.filter((habit) => {
+    if (!trimmedSearch) return true;
+    const category = categoryById.get(habit.categoryId);
+    return [
+      displayInitiativeName(habit),
+      habit.summary,
+      habit.markdown,
+      initiativeStatusLabel(habit.status),
+      category?.name
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(trimmedSearch);
+  });
+
+  return (
+    <EntityListPage className="habit-list-page">
+      <div className="entity-list-toolbar">
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Gewohnheit suchen" aria-label="Gewohnheit suchen" />
+      </div>
+
+      {props.categoryFilterName && !categoryFilter ? (
+        <ErrorState
+          title="Lebensbereich nicht gefunden"
+          description="Der gefilterte Gewohnheitsbereich existiert nicht oder konnte nicht geladen werden."
+        />
+      ) : null}
+      {!props.categoryFilterName && props.initiatives.filter((initiative) => initiative.type === "habit").length === 0 ? (
+        <EmptyState
+          title="Noch keine Gewohnheiten"
+          description="Lege die erste Gewohnheit an, um wiederkehrende Praxis im System sichtbar zu machen."
+          action={(
+            <button type="button" className="section-primary-action" onClick={props.onCreateClick}>
+              <Plus size={15} />
+              Gewohnheit hinzufügen
+            </button>
+          )}
+        />
+      ) : null}
+      {habits.length > 0 && filteredHabits.length === 0 ? (
+        <EmptyState
+          title="Keine Gewohnheiten gefunden"
+          description="Passe die Suche an, um die Gewohnheitenliste wieder zu erweitern."
+        />
+      ) : null}
+      {props.categoryFilterName && categoryFilter && habits.length === 0 ? (
+        <EmptyState
+          title="Keine Gewohnheiten in diesem Lebensbereich"
+          description="Dieser Lebensbereich enthält noch keine Gewohnheiten."
+          action={(
+            <button type="button" className="section-primary-action" onClick={props.onCreateClick}>
+              <Plus size={15} />
+              Gewohnheit hinzufügen
+            </button>
+          )}
+        />
+      ) : null}
+      {filteredHabits.length > 0 ? (
+        <EntityList>
+          {filteredHabits.map((habit) => {
+            const category = categoryById.get(habit.categoryId) ?? null;
+            const taskCount = props.tasks.filter((task) => task.initiativeId === habit.id).length;
+            return (
+              <EntityListItem
+                key={habit.id}
+                marker={(
+                  <span className="habit-list-avatar">
+                    <span>{habitInitials(habit)}</span>
+                    {category ? <span className="habit-list-swatch" style={{ background: category.color }} /> : null}
+                  </span>
+                )}
+                title={displayInitiativeName(habit)}
+                meta={habitListMeta(habit, category)}
+                description={habitDescriptionPreview(habit)}
+                stats={taskCount > 0 ? [{ label: "Maßnahmen", value: taskCount }] : undefined}
+                onOpen={() => props.onOpenHabit(habit.id)}
+              />
+            );
+          })}
+        </EntityList>
+      ) : null}
+    </EntityListPage>
+  );
+}
+
+function HabitCreateModal(props: {
+  categories: AppOverview["categories"];
+  categoryFilterName: string | null;
+  onCancel: () => void;
+  onCreate: (input: CreateInitiativeInput) => Promise<void>;
+}) {
+  const preferred = preferredCategoryId(props.categories, props.categoryFilterName);
+  const [categoryId, setCategoryId] = useState<number>(preferred);
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const selectedCategoryId = props.categories.some((category) => category.id === categoryId) ? categoryId : preferred;
+  const canCreate = Boolean(name.trim() && selectedCategoryId);
+
+  return (
+    <EditModal
+      title="Gewohnheit hinzufügen"
+      label="Gewohnheit hinzufügen"
+      className="compact-modal"
+      onCancel={props.onCancel}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const trimmedName = name.trim();
+        if (!trimmedName || !selectedCategoryId || creating) return;
+        setCreating(true);
+        setError(null);
+        try {
+          await props.onCreate({
+            categoryId: selectedCategoryId,
+            type: "habit",
+            name: trimmedName,
+            markdown: defaultInitiativeMarkdown("habit", trimmedName)
+          });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Gewohnheit konnte nicht angelegt werden.");
+        } finally {
+          setCreating(false);
+        }
+      }}
+      footer={(
+        <>
+          <button type="submit" className="primary-button" disabled={!canCreate || creating}>Anlegen</button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={creating}>Abbrechen</button>
+        </>
+      )}
+    >
+      {props.categories.length === 0 ? (
+        <ErrorState title="Kein Lebensbereich vorhanden" description="Lege zuerst einen Lebensbereich an, bevor du eine Gewohnheit erstellst." />
+      ) : (
+        <>
+          <label>
+            Lebensbereich
+            <select value={selectedCategoryId || ""} onChange={(event) => setCategoryId(Number(event.target.value))} disabled={creating}>
+              {props.categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Name
+            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Gewohnheit benennen" autoFocus disabled={creating} />
+          </label>
+        </>
+      )}
+      {error ? <ErrorState title="Gewohnheit konnte nicht angelegt werden" description={error} /> : null}
+    </EditModal>
+  );
+}
+
+function habitListMeta(habit: Initiative, category: Category | null): string {
+  return [
+    initiativeStatusLabel(habit.status),
+    category?.name ?? null
+  ].filter(Boolean).join(" · ");
+}
+
+function habitDescriptionPreview(habit: Initiative): string | null {
+  const normalize = (value: string) => value.toLowerCase().replace(/ß/g, "ss");
+  const title = normalize(displayInitiativeName(habit));
+  const summary = habit.summary?.trim();
+  if (summary && normalize(summary) !== title) return summary;
+
+  const ignoredLines = new Set(["praxis", "rhythmus", "reflexion", "noch offen.", "noch keine reflexion.", "-", ""]);
+  const line = habit.markdown
+    .split("\n")
+    .map((entry) => entry.replace(/^#+\s*/, "").trim())
+    .find((entry) => {
+      const normalized = entry.toLowerCase();
+      return entry && normalize(entry) !== title && !ignoredLines.has(normalized);
+    });
+  return line ?? null;
+}
+
+function habitInitials(habit: Initiative): string {
+  const initials = displayInitiativeName(habit)
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+  return initials || "G";
 }
 
 function LifeAreaDetailView(props: {
   category: AppOverview["categories"][number] | null;
   initiatives: Initiative[];
+  tasks: Task[];
   onBack: () => void;
   onOpenInitiative: (initiativeId: number) => void;
+  onOpenTask: (taskId: number) => void;
   onCreateInitiative: (input: CreateInitiativeInput) => Promise<void>;
   onUpdateCategory: (categoryId: number, input: { name?: string; description?: string | null; color?: string | null }) => Promise<void>;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [description, setDescription] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [descriptionModalOpen, setDescriptionModalOpen] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [descriptionBusy, setDescriptionBusy] = useState(false);
 
   useEffect(() => {
-    setDescription(props.category?.description ?? "");
-    setEditing(false);
+    setDescriptionDraft(props.category?.description ?? "");
+    setDescriptionModalOpen(false);
   }, [props.category]);
 
   if (!props.category) {
-    return <EmptyState title="Lebensbereich nicht gefunden" />;
+    return (
+      <EntityDetailPage className="category-detail-page">
+        <ErrorState
+          title="Lebensbereich nicht gefunden"
+          description="Der angeforderte Lebensbereich existiert nicht oder konnte nicht geladen werden."
+        />
+      </EntityDetailPage>
+    );
   }
 
   const category = props.category;
-  const initiatives = props.initiatives.filter((project) => project.categoryId === category.id);
-  const groups = initiativeTypeOptions.map((option) => ({
-    ...option,
-    categoryId: category.id,
-    initiatives: initiatives.filter((initiative) => initiative.type === option.value)
-  }));
+  const initiatives = props.initiatives.filter((initiative) => initiative.categoryId === category.id);
+  const initiativeIds = new Set(initiatives.map((initiative) => initiative.id));
+  const tasks = props.tasks.filter((task) => initiativeIds.has(task.initiativeId));
 
   return (
-    <section className="initiative-detail life-area-detail">
-      <section className="panel life-area-description-panel">
-        <div className="panel-heading-row">
-          <h3>Beschreibung</h3>
-          <button className="small-button" onClick={() => setEditing((current) => !current)}>
-            {editing ? "Abbrechen" : "Bearbeiten"}
-          </button>
-        </div>
-        {editing ? (
-          <form
-            className="life-area-description-form"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              if (busy) return;
-              setBusy(true);
-              try {
-                await props.onUpdateCategory(category.id, { description });
-                setEditing(false);
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={16} />
-            <div className="form-actions">
-              <button className="primary-action compact" type="submit" disabled={busy}>
-                Speichern
-              </button>
-            </div>
-          </form>
-        ) : category.description ? (
-          <RichText text={category.description} />
-        ) : (
-          <EmptyState title="Noch keine Beschreibung" />
-        )}
-      </section>
+    <>
+      <EntityDetailPage
+        className="category-detail-page"
+        aside={<MetadataGrid items={categoryMetadataItems(category, initiatives, tasks)} />}
+      >
+        <DescriptionBlock
+          text={category.description}
+          emptyTitle="Noch kein Kontext erfasst."
+          emptyDescription="Klicken, um Zweck, Grenzen oder aktuelle Leitgedanken dieses Lebensbereichs zu ergänzen."
+          onEdit={() => {
+            setDescriptionDraft(category.description ?? "");
+            setDescriptionModalOpen(true);
+          }}
+        />
 
-      <section className="life-area-detail-initiatives">
-        <div className="panel-heading-row">
-          <h3>Initiatives</h3>
-        </div>
-        <LifeAreaInitiativeGroups
-          groups={groups}
+        <CategoryRelatedWorkSection
+          category={category}
+          initiatives={initiatives}
+          tasks={tasks}
           onOpenInitiative={props.onOpenInitiative}
+          onOpenTask={props.onOpenTask}
           onCreateInitiative={props.onCreateInitiative}
         />
-      </section>
-    </section>
+      </EntityDetailPage>
+
+      {descriptionModalOpen ? (
+        <EditModal
+          title="Kontext bearbeiten"
+          label="Lebensbereich-Kontext bearbeiten"
+          className="markdown-modal"
+          onCancel={() => setDescriptionModalOpen(false)}
+          onSubmit={async (event) => {
+            event.preventDefault();
+            if (descriptionBusy) return;
+            setDescriptionBusy(true);
+            try {
+              await props.onUpdateCategory(category.id, { description: descriptionDraft });
+              setDescriptionModalOpen(false);
+            } finally {
+              setDescriptionBusy(false);
+            }
+          }}
+          footer={(
+            <>
+              <button type="submit" className="primary-button" disabled={descriptionBusy}>Speichern</button>
+              <button type="button" className="small-button" onClick={() => setDescriptionModalOpen(false)} disabled={descriptionBusy}>Abbrechen</button>
+            </>
+          )}
+        >
+          <label>
+            Beschreibung
+            <textarea
+              value={descriptionDraft}
+              onChange={(event) => setDescriptionDraft(event.target.value)}
+              rows={14}
+              autoFocus
+            />
+          </label>
+        </EditModal>
+      ) : null}
+    </>
   );
+}
+
+function CategoryRelatedWorkSection(props: {
+  category: Category;
+  initiatives: Initiative[];
+  tasks: Task[];
+  onOpenInitiative: (initiativeId: number) => void;
+  onOpenTask: (taskId: number) => void;
+  onCreateInitiative: (input: CreateInitiativeInput) => Promise<void>;
+}) {
+  const [openCreateType, setOpenCreateType] = useState<InitiativeType | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const [creatingType, setCreatingType] = useState<InitiativeType | null>(null);
+  const initiativesByType = initiativeTypeOptions.map((option) => ({
+    ...option,
+    initiatives: props.initiatives
+      .filter((initiative) => initiative.type === option.value)
+      .sort(compareInitiativeCandidates)
+  }));
+  const initiativeById = new Map(props.initiatives.map((initiative) => [initiative.id, initiative]));
+  const tasks = [...props.tasks].sort(compareCategoryTasks);
+
+  async function createForType(type: InitiativeType) {
+    const name = draftName.trim();
+    if (!name || creatingType) return;
+    setCreatingType(type);
+    try {
+      await props.onCreateInitiative({
+        categoryId: props.category.id,
+        type,
+        name,
+        markdown: defaultInitiativeMarkdown(type, name)
+      });
+      setDraftName("");
+      setOpenCreateType(null);
+    } finally {
+      setCreatingType(null);
+    }
+  }
+
+  return (
+    <SectionBlock title="Verknüpfte Arbeit" className="category-related-work">
+      <div className="relation-section-stack">
+        {initiativesByType.map((group) => {
+          const createOpen = openCreateType === group.value;
+          const creating = creatingType === group.value;
+          return (
+            <RelationGroup
+              key={group.value}
+              title={pluralLabelForInitiativeType(group.value)}
+              actions={(
+                <button
+                  type="button"
+                  className="section-primary-action"
+                  onClick={() => {
+                    setOpenCreateType((current) => current === group.value ? null : group.value);
+                    setDraftName("");
+                  }}
+                >
+                  <Plus size={15} />
+                  {group.label} hinzufügen
+                </button>
+              )}
+              emptyMode="none"
+            >
+              {createOpen ? (
+                <form
+                  className="category-create-inline-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void createForType(group.value);
+                  }}
+                >
+                  <input
+                    value={draftName}
+                    onChange={(event) => setDraftName(event.target.value)}
+                    placeholder={`${group.label} benennen`}
+                    aria-label={`${group.label} benennen`}
+                    autoFocus
+                  />
+                  <button type="submit" className="primary-button" disabled={!draftName.trim() || creating}>
+                    Anlegen
+                  </button>
+                  <button type="button" className="small-button" onClick={() => setOpenCreateType(null)} disabled={creating}>
+                    Abbrechen
+                  </button>
+                </form>
+              ) : null}
+              {group.initiatives.map((initiative) => (
+                <RelationItem
+                  key={initiative.id}
+                  icon={<span>{categoryInitiativeIconLabel(initiative.type)}</span>}
+                  title={displayInitiativeName(initiative)}
+                  meta={categoryInitiativeMeta(initiative)}
+                  detail={initiative.summary}
+                  onOpen={() => props.onOpenInitiative(initiative.id)}
+                />
+              ))}
+            </RelationGroup>
+          );
+        })}
+
+        <RelationGroup title="Maßnahmen" emptyMode="none">
+          {tasks.map((task) => {
+            const initiative = initiativeById.get(task.initiativeId) ?? null;
+            return (
+              <RelationItem
+                key={task.id}
+                icon={<span>M</span>}
+                title={task.title}
+                meta={categoryTaskMeta(task)}
+                detail={initiative ? displayInitiativeName(initiative) : null}
+                onOpen={() => props.onOpenTask(task.id)}
+              />
+            );
+          })}
+        </RelationGroup>
+      </div>
+    </SectionBlock>
+  );
+}
+
+function categoryInitiativeIconLabel(type: InitiativeType): string {
+  if (type === "idea") return "I";
+  if (type === "habit") return "G";
+  return "P";
+}
+
+function categoryInitiativeMeta(initiative: Initiative): string {
+  const parts = [initiativeTypeLabel(initiative.type), initiativeStatusLabel(initiative.status)];
+  const dateRange = initiative.type === "project" ? formatInitiativeDateRangeForUi(initiative) : "";
+  if (dateRange) parts.push(dateRange);
+  return parts.join(" · ");
+}
+
+function categoryTaskMeta(task: Task): string {
+  const parts = [taskStatusLabel(task.status), taskPriorityLabel(task.priority)];
+  if (task.dueAt) parts.push(formatTaskDueDate(task.dueAt));
+  return parts.join(" · ");
+}
+
+function compareCategoryTasks(left: Task, right: Task): number {
+  const statusRank = { open: 0, done: 1 };
+  return statusRank[left.status] - statusRank[right.status]
+    || (left.dueAt ?? "9999-12-31").localeCompare(right.dueAt ?? "9999-12-31")
+    || left.sortOrder - right.sortOrder
+    || left.title.localeCompare(right.title)
+    || left.id - right.id;
 }
 
 function LifeAreaInitiativeGroups(props: {
@@ -6556,108 +7996,101 @@ function InitiativeDetailHeader(props: {
   );
 }
 
-function TaskDetailHeader(props: {
+function TaskHeaderTitle(props: {
   task: Task | null;
   onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void>;
 }) {
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [title, setTitle] = useState("");
-  const [busy, setBusy] = useState(false);
+  if (!props.task) return <>Maßnahme</>;
+  return (
+    <InlineEditableText
+      value={props.task.title}
+      label="Maßnahmentitel"
+      required
+      className="entity-title-edit"
+      onSave={(value) => props.onUpdateTask(props.task!.id, { title: value })}
+    />
+  );
+}
 
-  useEffect(() => {
-    setTitle(props.task?.title ?? "");
-    setEditingTitle(false);
-    setBusy(false);
-  }, [props.task?.id, props.task?.title]);
-
-  if (!props.task) {
-    return (
-      <div className="section-heading task-detail-heading">
-        <div className="initiative-title-line">
-          <h1>Maßnahme</h1>
-        </div>
-      </div>
-    );
-  }
-
-  const task = props.task;
-  const saveTitle = async () => {
-    const trimmedTitle = title.trim();
-    if (!trimmedTitle || busy) return;
-    if (trimmedTitle === task.title) {
-      setEditingTitle(false);
-      return;
+function taskHeaderFacts(
+  task: Task,
+  onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void>
+): Array<{ label: string; value: ReactNode }> {
+  return [
+    {
+      label: "Status",
+      value: <TaskStatusToggle task={task} onUpdateTask={onUpdateTask} />
+    },
+    {
+      label: "Priorität",
+      value: <TaskPrioritySelect task={task} onUpdateTask={onUpdateTask} />
+    },
+    {
+      label: "Fällig",
+      value: <TaskDueDateEditor task={task} onUpdateTask={onUpdateTask} />
     }
+  ];
+}
+
+function TaskStatusToggle(props: {
+  task: Task;
+  onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  async function toggleStatus() {
+    if (busy) return;
     setBusy(true);
     try {
-      await props.onUpdateTask(task.id, { title: trimmedTitle });
-      setEditingTitle(false);
+      await props.onUpdateTask(props.task.id, { status: props.task.status === "done" ? "open" : "done" });
     } finally {
       setBusy(false);
     }
-  };
+  }
 
   return (
-    <div className="section-heading task-detail-heading">
-      <div className="initiative-title-line">
-        {editingTitle ? (
-          <form
-            className="initiative-title-form task-title-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void saveTitle();
-            }}
-          >
-            <input
-              autoFocus
-              value={title}
-              disabled={busy}
-              onChange={(event) => setTitle(event.target.value)}
-              onBlur={() => void saveTitle()}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setTitle(task.title);
-                  setEditingTitle(false);
-                }
-              }}
-            />
-          </form>
-        ) : (
-          <button type="button" className="initiative-title-edit" onClick={() => setEditingTitle(true)} title="Titel bearbeiten">
-            <h1>{task.title}</h1>
-          </button>
-        )}
-        {!editingTitle ? (
-          <>
-            <button
-              type="button"
-              className={`task-status-toggle ${task.status}`}
-              disabled={busy}
-              onClick={() => void props.onUpdateTask(task.id, { status: task.status === "done" ? "open" : "done" })}
-              title={task.status === "done" ? "Wieder öffnen" : "Als erledigt markieren"}
-            >
-              {task.status === "done" ? <CheckCircle2 size={16} /> : <Circle size={16} />}
-              {task.status === "done" ? "Erledigt" : "Open"}
-            </button>
-            <label className={`detail-pill-select priority ${task.priority}`} title="Priorität ändern">
-              <select
-                value={task.priority}
-                disabled={busy}
-                aria-label="Task-Priorität"
-                onChange={(event) => void props.onUpdateTask(task.id, { priority: event.target.value as Task["priority"] })}
-              >
-                {taskPriorityOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        ) : null}
-      </div>
-    </div>
+    <button
+      type="button"
+      className={`task-status-toggle task-header-control ${props.task.status}`}
+      disabled={busy}
+      onClick={() => void toggleStatus()}
+      title={props.task.status === "done" ? "Wieder öffnen" : "Als erledigt markieren"}
+    >
+      {props.task.status === "done" ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+      {taskStatusLabel(props.task.status)}
+    </button>
+  );
+}
+
+function TaskPrioritySelect(props: {
+  task: Task;
+  onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  async function updatePriority(priority: Task["priority"]) {
+    if (busy || priority === props.task.priority) return;
+    setBusy(true);
+    try {
+      await props.onUpdateTask(props.task.id, { priority });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <label className={`detail-pill-select task-header-control priority ${props.task.priority}`} title="Priorität ändern">
+      <select
+        value={props.task.priority}
+        disabled={busy}
+        aria-label="Priorität"
+        onChange={(event) => void updatePriority(event.target.value as Task["priority"])}
+      >
+        {taskPriorityOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -6962,11 +8395,12 @@ function InitiativeMarkdownPanel(props: {
 
 function TaskDetailView(props: {
   detail: TaskDetail | null;
+  loadError: string | null;
   people: Person[];
   organizations: Organization[];
   participantRoleTypes: ParticipantRoleType[];
-  onBack: () => void;
   onOpenInitiative: (initiativeId: number) => void;
+  onOpenCategory: (categoryName: string, initiativeType: InitiativeType) => void;
   onCreateParticipant: (input: {
     partyId: number;
     entityType: "initiative" | "task";
@@ -6986,59 +8420,128 @@ function TaskDetailView(props: {
   onDeleteMedia: (linkId: number) => Promise<void>;
   onReorderMedia: (taskId: number, linkIds: number[]) => Promise<void>;
 }) {
-  if (!props.detail) {
-    return <EmptyState title="Loading task..." />;
+  if (props.loadError) {
+    return (
+      <EntityDetailPage>
+        <ErrorState
+          title="Maßnahme nicht gefunden"
+          description="Diese Maßnahme existiert nicht mehr oder konnte nicht geladen werden."
+        />
+      </EntityDetailPage>
+    );
   }
 
-  const { task } = props.detail;
-  return (
-    <section className="task-detail">
-      <section className="panel task-detail-panel">
-        <dl className="detail-list">
-          <div>
-            <dt>Due Date</dt>
-            <dd>
-              <TaskDueDateEditor task={task} onUpdateTask={props.onUpdateTask} />
-            </dd>
-          </div>
-          {task.status === "done" && task.completedAt ? (
-          <div>
-            <dt>Completed</dt>
-            <dd>{task.completedAt}</dd>
-          </div>
-          ) : null}
-        </dl>
-      </section>
+  if (!props.detail) {
+    return (
+      <EntityDetailPage>
+        <EmptyState title="Maßnahme wird geladen" />
+      </EntityDetailPage>
+    );
+  }
 
+  const { task, initiative, category } = props.detail;
+  const checklistItems = props.detail.checklistItems ?? [];
+  const participants = props.detail.participants ?? [];
+  const mediaAttachments = props.detail.mediaAttachments ?? [];
+  const checklistDone = checklistItems.filter((item) => item.status === "done").length;
+  const aside = (
+    <MetadataGrid
+      items={[
+        { label: "Status", value: taskStatusLabel(task.status) },
+        { label: "Priorität", value: taskPriorityLabel(task.priority) },
+        { label: "Fällig", value: task.dueAt ? formatTaskDueDate(task.dueAt) : "Ohne Fälligkeitsdatum" },
+        { label: "Projekt", value: initiative ? displayInitiativeName(initiative) : null },
+        { label: "Lebensbereich", value: category?.name ?? null },
+        { label: "Checkliste", value: checklistItems.length > 0 ? `${checklistDone}/${checklistItems.length}` : null },
+        { label: "Beteiligte", value: participants.length > 0 ? String(participants.length) : null },
+        { label: "Medien", value: mediaAttachments.length > 0 ? String(mediaAttachments.length) : null },
+        { label: "Erstellt", value: task.createdAt ? formatDateTimeForUi(task.createdAt) : null },
+        { label: "Aktualisiert", value: task.updatedAt ? formatDateTimeForUi(task.updatedAt) : null },
+        { label: "Erledigt", value: task.completedAt ? formatDateTimeForUi(task.completedAt) : null }
+      ]}
+    />
+  );
+
+  return (
+    <EntityDetailPage className="task-detail" aside={aside}>
       <TaskNotesPanel task={task} onUpdateTask={props.onUpdateTask} />
-      <MediaAttachmentsPanel
-        entityType="task"
-        entityId={task.id}
-        attachments={props.detail.mediaAttachments ?? []}
-        onUpload={props.onUploadMedia}
-        onUpdate={props.onUpdateMedia}
-        onDelete={props.onDeleteMedia}
-        onReorder={props.onReorderMedia}
-      />
-      <ParticipantsPanel
-        entityType="task"
-        entityId={task.id}
-        participants={props.detail.participants ?? []}
-        people={props.people}
-        organizations={props.organizations}
-        roleTypes={props.participantRoleTypes}
-        onCreateParticipant={props.onCreateParticipant}
-        onDeleteParticipant={props.onDeleteParticipant}
-      />
       <TaskChecklistPanel
         task={task}
-        items={props.detail.checklistItems ?? []}
+        items={checklistItems}
         onCreateItem={props.onCreateChecklistItem}
         onUpdateItem={props.onUpdateChecklistItem}
         onDeleteItem={props.onDeleteChecklistItem}
         onReorderItems={props.onReorderChecklistItems}
       />
-    </section>
+      <TaskContextSection
+        initiative={initiative ?? null}
+        category={category ?? null}
+        onOpenInitiative={props.onOpenInitiative}
+        onOpenCategory={props.onOpenCategory}
+      />
+      <ParticipantsPanel
+        entityType="task"
+        entityId={task.id}
+        participants={participants}
+        people={props.people}
+        organizations={props.organizations}
+        roleTypes={props.participantRoleTypes}
+        surface="section"
+        createMode="modal"
+        onCreateParticipant={props.onCreateParticipant}
+        onDeleteParticipant={props.onDeleteParticipant}
+      />
+      <MediaAttachmentsPanel
+        entityType="task"
+        entityId={task.id}
+        attachments={mediaAttachments}
+        surface="section"
+        onUpload={props.onUploadMedia}
+        onUpdate={props.onUpdateMedia}
+        onDelete={props.onDeleteMedia}
+        onReorder={props.onReorderMedia}
+      />
+    </EntityDetailPage>
+  );
+}
+
+function TaskContextSection(props: {
+  initiative: Initiative | null;
+  category: Category | null;
+  onOpenInitiative: (initiativeId: number) => void;
+  onOpenCategory: (categoryName: string, initiativeType: InitiativeType) => void;
+}) {
+  if (!props.initiative && !props.category) {
+    return (
+      <SectionBlock title="Kontext">
+        <RelationList emptyMode="inline" emptyTitle="Noch kein Projekt- oder Lebensbereichskontext.">
+          {null}
+        </RelationList>
+      </SectionBlock>
+    );
+  }
+
+  return (
+    <SectionBlock title="Kontext">
+      <RelationList emptyMode="none">
+        {props.initiative ? (
+          <RelationItem
+            icon={<ListTree size={16} />}
+            title={displayInitiativeName(props.initiative)}
+            meta={initiativeTypeLabel(props.initiative.type)}
+            onOpen={() => props.onOpenInitiative(props.initiative!.id)}
+          />
+        ) : null}
+        {props.category ? (
+          <RelationItem
+            icon={<LayoutGrid size={16} />}
+            title={props.category.name}
+            meta="Lebensbereich"
+            onOpen={() => props.category ? props.onOpenCategory(props.category.name, props.initiative?.type ?? "project") : undefined}
+          />
+        ) : null}
+      </RelationList>
+    </SectionBlock>
   );
 }
 
@@ -7050,6 +8553,7 @@ function ParticipantsPanel(props: {
   organizations: Organization[];
   roleTypes: ParticipantRoleType[];
   surface?: "panel" | "section";
+  createMode?: "inline" | "modal";
   onCreateParticipant: (input: {
     partyId: number;
     entityType: "initiative" | "task";
@@ -7071,8 +8575,60 @@ function ParticipantsPanel(props: {
   const [isPrimary, setIsPrimary] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const createMode = props.createMode ?? "inline";
+  const resetCreateDraft = () => {
+    setPartyId("");
+    setRoleTypeId("");
+    setRoleLabel("");
+    setIsPrimary(false);
+  };
+  const submitParticipant = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const parsedPartyId = Number(partyId);
+    if (!parsedPartyId || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await props.onCreateParticipant({
+        partyId: parsedPartyId,
+        entityType: props.entityType,
+        entityId: props.entityId,
+        roleTypeId: roleTypeId ? Number(roleTypeId) : null,
+        roleLabel: roleLabel.trim() || null,
+        isPrimary
+      });
+      resetCreateDraft();
+      setIsCreateModalOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Beteiligung konnte nicht gespeichert werden.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const participantFields = (
+    <>
+      <select value={partyId} onChange={(event) => setPartyId(event.target.value)} aria-label="Person oder Organisation">
+        <option value="">Person oder Organisation</option>
+        {parties.map((party) => (
+          <option key={party.id} value={party.id}>{party.displayName}</option>
+        ))}
+      </select>
+      <select value={roleTypeId} onChange={(event) => setRoleTypeId(event.target.value)} aria-label="Rolle">
+        <option value="">Rolle</option>
+        {roleTypes.map((roleType) => (
+          <option key={roleType.id} value={roleType.id}>{roleType.label}</option>
+        ))}
+      </select>
+      <input value={roleLabel} onChange={(event) => setRoleLabel(event.target.value)} placeholder="Freie Rolle" aria-label="Freie Rolle" />
+      <label className="inline-checkbox">
+        <input type="checkbox" checked={isPrimary} onChange={(event) => setIsPrimary(event.target.checked)} />
+        Primär
+      </label>
+    </>
+  );
   const relationList = props.surface === "section" ? (
-    <RelationList emptyTitle="Noch keine Beteiligten" emptyDescription="Verknüpfe Personen oder Organisationen, die für diese Initiative relevant sind.">
+    <RelationList emptyMode={createMode === "modal" ? "none" : "inline"} emptyTitle="Noch keine Beteiligten.">
       {props.participants.map((participant) => (
         <RelationItem
           key={participant.id}
@@ -7141,63 +8697,66 @@ function ParticipantsPanel(props: {
   const content = (
     <>
       {relationList}
-      <form
-        className="contact-point-create-form participant-create-form"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          const parsedPartyId = Number(partyId);
-          if (!parsedPartyId || busy) return;
-          setBusy(true);
-          setError(null);
-          try {
-            await props.onCreateParticipant({
-              partyId: parsedPartyId,
-              entityType: props.entityType,
-              entityId: props.entityId,
-              roleTypeId: roleTypeId ? Number(roleTypeId) : null,
-              roleLabel: roleLabel.trim() || null,
-              isPrimary
-            });
-            setPartyId("");
-            setRoleTypeId("");
-            setRoleLabel("");
-            setIsPrimary(false);
-          } catch (err) {
-            setError(err instanceof Error ? err.message : "Beteiligung konnte nicht gespeichert werden.");
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        <select value={partyId} onChange={(event) => setPartyId(event.target.value)} aria-label="Person oder Organisation">
-          <option value="">Person oder Organisation</option>
-          {parties.map((party) => (
-            <option key={party.id} value={party.id}>{party.displayName}</option>
-          ))}
-        </select>
-        <select value={roleTypeId} onChange={(event) => setRoleTypeId(event.target.value)} aria-label="Rolle">
-          <option value="">Rolle</option>
-          {roleTypes.map((roleType) => (
-            <option key={roleType.id} value={roleType.id}>{roleType.label}</option>
-          ))}
-        </select>
-        <input value={roleLabel} onChange={(event) => setRoleLabel(event.target.value)} placeholder="Freie Rolle" aria-label="Freie Rolle" />
-        <label className="inline-checkbox">
-          <input type="checkbox" checked={isPrimary} onChange={(event) => setIsPrimary(event.target.checked)} />
-          Primär
-        </label>
-        <button type="submit" className={props.surface === "section" ? "section-primary-action" : "primary-button"} disabled={!partyId || busy}>
-          <Plus size={15} />
-          Verknüpfen
-        </button>
-      </form>
+      {createMode === "inline" ? (
+        <form className="contact-point-create-form participant-create-form" onSubmit={submitParticipant}>
+          {participantFields}
+          <button type="submit" className={props.surface === "section" ? "section-primary-action" : "primary-button"} disabled={!partyId || busy}>
+            <Plus size={15} />
+            Verknüpfen
+          </button>
+        </form>
+      ) : null}
       {error ? <p className="inline-error">{error}</p> : null}
+      {isCreateModalOpen ? (
+        <EditModal
+          title="Beteiligte hinzufügen"
+          label="Beteiligte hinzufügen"
+          onCancel={() => {
+            resetCreateDraft();
+            setError(null);
+            setIsCreateModalOpen(false);
+          }}
+          onSubmit={submitParticipant}
+          footer={(
+            <>
+              <button className="primary-action compact" type="submit" disabled={!partyId || busy}>
+                Verknüpfen
+              </button>
+              <button
+                type="button"
+                className="small-button"
+                disabled={busy}
+                onClick={() => {
+                  resetCreateDraft();
+                  setError(null);
+                  setIsCreateModalOpen(false);
+                }}
+              >
+                Abbrechen
+              </button>
+            </>
+          )}
+        >
+          <div className="participant-modal-fields">
+            {participantFields}
+          </div>
+          {error ? <p className="inline-error">{error}</p> : null}
+        </EditModal>
+      ) : null}
     </>
   );
 
   if (props.surface === "section") {
     return (
-      <SectionBlock title="Beteiligte" description="Personen und Organisationen, die mit dieser Initiative verbunden sind.">
+      <SectionBlock
+        title="Beteiligte"
+        actions={createMode === "modal" ? (
+          <button type="button" className="section-primary-action" onClick={() => setIsCreateModalOpen(true)}>
+            <Plus size={15} />
+            Beteiligte hinzufügen
+          </button>
+        ) : null}
+      >
         {content}
       </SectionBlock>
     );
@@ -7932,12 +9491,14 @@ function TaskChecklistPanel(props: {
     }
   };
 
+  const completedCount = props.items.filter((item) => item.status === "done").length;
+
   return (
-    <section className="panel task-checklist-panel">
-      <div className="task-checklist-header">
-        <h2>Checkliste</h2>
-        <span>{props.items.filter((item) => item.status === "done").length}/{props.items.length}</span>
-      </div>
+    <SectionBlock
+      title="Checkliste"
+      className="task-checklist-panel"
+      actions={<span className="task-checklist-progress">{completedCount}/{props.items.length}</span>}
+    >
 
       <div className="task-checklist-items">
         {props.items.map((item) => (
@@ -8042,18 +9603,16 @@ function TaskChecklistPanel(props: {
           <Plus size={17} />
         </button>
       </form>
-    </section>
+    </SectionBlock>
   );
 }
 
 function TaskDueDateEditor(props: { task: Task; onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void> }) {
-  const [editing, setEditing] = useState(false);
-  const [dueAt, setDueAt] = useState(props.task.dueAt ?? "");
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
+  const inputValue = props.task.dueAt ? datePart(props.task.dueAt) : "";
 
   useEffect(() => {
-    setDueAt(props.task.dueAt ?? "");
-    setEditing(false);
     setBusy(false);
   }, [props.task.id, props.task.dueAt]);
 
@@ -8062,35 +9621,62 @@ function TaskDueDateEditor(props: { task: Task; onUpdateTask: (taskId: number, i
     setBusy(true);
     try {
       await props.onUpdateTask(props.task.id, { dueAt: nextDueAt });
-      setEditing(false);
     } finally {
       setBusy(false);
     }
   };
 
-  if (!editing) {
-    return (
-      <button type="button" className="task-date-button" onClick={() => setEditing(true)} title="Due Date bearbeiten">
-        {props.task.dueAt ?? "No Due Date"}
-      </button>
-    );
-  }
+  const openDatePicker = () => {
+    const input = inputRef.current;
+    if (!input || busy) return;
+    input.focus();
+    const pickerInput = input as HTMLInputElement & { showPicker?: () => void };
+    try {
+      if (typeof pickerInput.showPicker === "function") {
+        pickerInput.showPicker();
+      } else {
+        input.click();
+      }
+    } catch {
+      input.click();
+    }
+  };
 
   return (
     <div className="task-date-editor">
-      <input
-        autoFocus
-        type="date"
-        value={dueAt}
-        disabled={busy}
-        onChange={(event) => {
-          const value = event.target.value;
-          setDueAt(value);
-          void saveDueDate(value || null);
+      <label
+        className="task-date-picker-control task-header-control"
+        title="Fälligkeitsdatum bearbeiten"
+        role="button"
+        aria-label="Fälligkeitsdatum bearbeiten"
+        tabIndex={0}
+        onClick={(event) => {
+          event.preventDefault();
+          openDatePicker();
         }}
-      />
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          openDatePicker();
+        }}
+      >
+        <CalendarDays size={14} aria-hidden="true" />
+        <span>{props.task.dueAt ? formatTaskDueDate(props.task.dueAt) : "Ohne Datum"}</span>
+        <input
+          ref={inputRef}
+          type="date"
+          value={inputValue}
+          disabled={busy}
+          aria-label="Fälligkeitsdatum"
+          tabIndex={-1}
+          onChange={(event) => {
+            const value = event.target.value;
+            void saveDueDate(value || null);
+          }}
+        />
+      </label>
       {props.task.dueAt ? (
-        <button type="button" className="icon-button danger" disabled={busy} onClick={() => void saveDueDate(null)} title="Due Date entfernen">
+        <button type="button" className="icon-button danger" disabled={busy} onClick={() => void saveDueDate(null)} title="Fälligkeitsdatum entfernen">
           <X size={16} />
         </button>
       ) : null}
@@ -8127,12 +9713,35 @@ function TaskNotesPanel(props: { task: Task; onUpdateTask: (taskId: number, inpu
 
   if (editing) {
     return (
-      <form
-        className="panel task-notes-panel editing"
+      <EditModal
+        title="Notizen bearbeiten"
+        label="Aufgaben-Notizen bearbeiten"
+        onCancel={() => {
+          setNotes(props.task.notes ?? "");
+          setEditing(false);
+        }}
         onSubmit={(event) => {
           event.preventDefault();
           void saveNotes();
         }}
+        footer={(
+          <>
+            <button className="primary-action compact" type="submit" disabled={busy}>
+              Speichern
+            </button>
+            <button
+              type="button"
+              className="small-button"
+              onClick={() => {
+                setNotes(props.task.notes ?? "");
+                setEditing(false);
+              }}
+              disabled={busy}
+            >
+              Abbrechen
+            </button>
+          </>
+        )}
       >
         <textarea
           autoFocus
@@ -8153,31 +9762,267 @@ function TaskNotesPanel(props: { task: Task; onUpdateTask: (taskId: number, inpu
             }
           }}
         />
-        <div className="form-actions">
-          <button
-            type="button"
-            className="small-button"
-            onClick={() => {
-              setNotes(props.task.notes ?? "");
-              setEditing(false);
-            }}
-            disabled={busy}
-          >
-            Abbrechen
-          </button>
-          <button className="primary-action compact" type="submit" disabled={busy}>
-            Speichern
-          </button>
-        </div>
-      </form>
+      </EditModal>
     );
   }
 
   return (
-    <button type="button" className="panel task-notes-panel" onClick={() => setEditing(true)} title="Notizen bearbeiten">
-      {props.task.notes ? <RichText text={props.task.notes} /> : null}
-    </button>
+    <DescriptionBlock
+      text={props.task.notes}
+      emptyTitle="Noch keine Notizen vorhanden."
+      emptyDescription="Klicke in diese Fläche, um Kontext zu ergänzen."
+      onEdit={() => setEditing(true)}
+    />
   );
+}
+
+function TasksListView(props: {
+  tasks: Task[];
+  initiatives: Initiative[];
+  categories: AppOverview["categories"];
+  onToggleTaskStatus: (task: Task) => Promise<void>;
+  onDeleteTask: (task: Task) => Promise<void>;
+  onOpenTask: (taskId: number) => void;
+  onCreateClick: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
+  const initiativeById = new Map(props.initiatives.map((initiative) => [initiative.id, initiative]));
+  const categoryById = new Map(props.categories.map((category) => [category.id, category]));
+  const sortedTasks = sortTasksForList(props.tasks, initiativeById);
+  const trimmedSearch = search.trim().toLowerCase();
+  const filteredTasks = sortedTasks.filter((task) => {
+    if (!trimmedSearch) return true;
+    const initiative = initiativeById.get(task.initiativeId) ?? null;
+    const category = initiative ? categoryById.get(initiative.categoryId) ?? null : null;
+    return [
+      task.title,
+      task.notes,
+      taskStatusLabel(task.status),
+      taskPriorityLabel(task.priority),
+      task.dueAt ? formatTaskDueDate(task.dueAt) : null,
+      initiative ? displayInitiativeName(initiative) : null,
+      initiative ? initiativeTypeLabel(initiative.type) : null,
+      category?.name ?? null
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(trimmedSearch);
+  });
+
+  return (
+    <EntityListPage className="task-list-page">
+      <div className="entity-list-toolbar">
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Maßnahme suchen" aria-label="Maßnahme suchen" />
+      </div>
+
+      {props.tasks.length === 0 ? (
+        <EmptyState
+          title="Keine offenen Maßnahmen"
+          description="Lege eine Maßnahme an oder öffne ein Projekt, um die nächste konkrete Aktion festzuhalten."
+          action={(
+            <button type="button" className="section-primary-action" onClick={props.onCreateClick}>
+              <Plus size={15} />
+              Maßnahme hinzufügen
+            </button>
+          )}
+        />
+      ) : null}
+      {props.tasks.length > 0 && filteredTasks.length === 0 ? (
+        <EmptyState
+          title="Keine Maßnahmen gefunden"
+          description="Passe die Suche an, um die Maßnahmenliste wieder zu erweitern."
+        />
+      ) : null}
+      {filteredTasks.length > 0 ? (
+        <EntityList>
+          {filteredTasks.map((task) => {
+            const initiative = initiativeById.get(task.initiativeId) ?? null;
+            const category = initiative ? categoryById.get(initiative.categoryId) ?? null : null;
+            return (
+              <EntityListItem
+                key={task.id}
+                title={task.title}
+                meta={taskListMeta(task)}
+                description={taskListContext(initiative, category)}
+                onOpen={() => props.onOpenTask(task.id)}
+                openLabel={`Maßnahme ${task.title} öffnen`}
+                leadingAction={(
+                    <button
+                      type="button"
+                      className="icon-button"
+                      onClick={() => void props.onToggleTaskStatus(task)}
+                      title={task.status === "done" ? "Wieder öffnen" : "Als erledigt markieren"}
+                      aria-label={task.status === "done" ? "Wieder öffnen" : "Als erledigt markieren"}
+                    >
+                      {task.status === "done" ? <CheckCircle2 size={17} /> : <Circle size={17} />}
+                    </button>
+                )}
+                actions={(
+                  <span className="task-list-actions">
+                    <button
+                      type="button"
+                      className="icon-button subtle-danger"
+                      onClick={() => setTaskToDelete(task)}
+                      title="Maßnahme löschen"
+                      aria-label="Maßnahme löschen"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </span>
+                )}
+              />
+            );
+          })}
+        </EntityList>
+      ) : null}
+      {taskToDelete ? (
+        <ConfirmModal
+          title="Maßnahme löschen?"
+          description={(
+            <>
+              <p>Die Maßnahme „{taskToDelete.title}“ wird gelöscht.</p>
+              <p>Beim Löschen werden ebenfalls entfernt:</p>
+              <ul>
+                <li>Beschreibung</li>
+                <li>Checkliste, falls vorhanden</li>
+                <li>Angehängte Medien</li>
+              </ul>
+            </>
+          )}
+          confirmLabel="Maßnahme löschen"
+          onCancel={() => setTaskToDelete(null)}
+          onConfirm={async () => {
+            await props.onDeleteTask(taskToDelete);
+            setTaskToDelete(null);
+          }}
+        />
+      ) : null}
+    </EntityListPage>
+  );
+}
+
+function TaskCreateModal(props: {
+  initiatives: Initiative[];
+  onCancel: () => void;
+  onCreate: (input: { initiativeId: number; title: string; priority?: Task["priority"]; dueAt?: string | null }) => Promise<void>;
+}) {
+  const sortedInitiatives = sortInitiativesForDisplay(props.initiatives);
+  const [initiativeId, setInitiativeId] = useState<number>(sortedInitiatives[0]?.id ?? 0);
+  const [title, setTitle] = useState("");
+  const [priority, setPriority] = useState<Task["priority"]>("normal");
+  const [dueAt, setDueAt] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const selectedInitiativeId = sortedInitiatives.some((initiative) => initiative.id === initiativeId) ? initiativeId : sortedInitiatives[0]?.id ?? 0;
+  const canCreate = Boolean(title.trim() && selectedInitiativeId);
+
+  return (
+    <EditModal
+      title="Maßnahme hinzufügen"
+      label="Maßnahme hinzufügen"
+      className="compact-modal"
+      onCancel={props.onCancel}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const trimmedTitle = title.trim();
+        if (!trimmedTitle || !selectedInitiativeId || creating) return;
+        setCreating(true);
+        setError(null);
+        try {
+          await props.onCreate({
+            initiativeId: selectedInitiativeId,
+            title: trimmedTitle,
+            priority,
+            dueAt: dueAt || null
+          });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Maßnahme konnte nicht angelegt werden.");
+        } finally {
+          setCreating(false);
+        }
+      }}
+      footer={(
+        <>
+          <button type="submit" className="primary-button" disabled={!canCreate || creating}>Anlegen</button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={creating}>Abbrechen</button>
+        </>
+      )}
+    >
+      {sortedInitiatives.length === 0 ? (
+        <ErrorState title="Kein Kontext vorhanden" description="Lege zuerst ein Projekt, eine Idee oder eine Gewohnheit an, bevor du eine Maßnahme erstellst." />
+      ) : (
+        <>
+          <label>
+            Kontext
+            <select value={selectedInitiativeId || ""} onChange={(event) => setInitiativeId(Number(event.target.value))} disabled={creating}>
+              {sortedInitiatives.map((initiative) => (
+                <option key={initiative.id} value={initiative.id}>
+                  {displayInitiativeName(initiative)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Titel
+            <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Maßnahme benennen" autoFocus disabled={creating} />
+          </label>
+          <div className="modal-two-column">
+            <label>
+              Priorität
+              <select value={priority} onChange={(event) => setPriority(event.target.value as Task["priority"])} disabled={creating}>
+                {taskPriorityOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Fällig
+              <input type="date" value={dueAt} onChange={(event) => setDueAt(event.target.value)} disabled={creating} />
+            </label>
+          </div>
+        </>
+      )}
+      {error ? <ErrorState title="Maßnahme konnte nicht angelegt werden" description={error} /> : null}
+    </EditModal>
+  );
+}
+
+function taskListMeta(task: Task): string {
+  return [
+    taskStatusLabel(task.status),
+    taskPriorityLabel(task.priority),
+    task.dueAt ? `Fällig ${formatTaskDueDate(task.dueAt)}` : null
+  ].filter(Boolean).join(" · ");
+}
+
+function taskListContext(initiative: Initiative | null, category: Category | null): string | null {
+  if (!initiative) return null;
+  return [
+    displayInitiativeName(initiative),
+    category?.name ?? null
+  ].filter(Boolean).join(" · ");
+}
+
+function sortTasksForList(tasks: Task[], initiativeById: Map<number, Initiative>): Task[] {
+  const priorityRank: Record<Task["priority"], number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+  return [...tasks].sort((left, right) => {
+    const statusCompare = taskCompletionRank(left.status) - taskCompletionRank(right.status);
+    if (statusCompare) return statusCompare;
+    const dueCompare = (left.dueAt ?? "9999-12-31").localeCompare(right.dueAt ?? "9999-12-31");
+    if (dueCompare) return dueCompare;
+    const priorityCompare = priorityRank[left.priority] - priorityRank[right.priority];
+    if (priorityCompare) return priorityCompare;
+    const leftInitiative = initiativeById.get(left.initiativeId);
+    const rightInitiative = initiativeById.get(right.initiativeId);
+    return (leftInitiative?.sortOrder ?? 0) - (rightInitiative?.sortOrder ?? 0)
+      || left.sortOrder - right.sortOrder
+      || left.title.localeCompare(right.title)
+      || left.id - right.id;
+  });
 }
 
 function TasksView(props: {
@@ -8298,25 +10143,12 @@ function TasksView(props: {
 function PeopleView(props: {
   people: Person[];
   onOpenPerson: (partyId: number) => void;
-  onCreatePerson: (input: {
-    displayName?: string;
-    firstName?: string | null;
-    lastName?: string | null;
-    salutation?: Person["salutation"];
-    academicTitle?: string | null;
-    nameSuffix?: string | null;
-  }) => Promise<void>;
+  onCreateClick: () => void;
 }) {
   const [search, setSearch] = useState("");
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [salutation, setSalutation] = useState<Person["salutation"]>("unknown");
-  const [academicTitle, setAcademicTitle] = useState("");
-  const [nameSuffix, setNameSuffix] = useState("");
-  const [creating, setCreating] = useState(false);
-  const canCreate = Boolean(firstName.trim() || lastName.trim());
+  const trimmedSearch = search.trim().toLowerCase();
   const filteredPeople = props.people.filter((person) => {
-    const needle = search.trim().toLowerCase();
+    const needle = trimmedSearch;
     if (!needle) return true;
     return [person.displayName, person.firstName, person.lastName, person.academicTitle, salutationLabel(person.salutation)]
       .filter(Boolean)
@@ -8326,103 +10158,159 @@ function PeopleView(props: {
   });
 
   return (
-    <section className="stacked-layout">
-      <form
-        className="panel compact-form"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          if (!canCreate || creating) return;
-          setCreating(true);
-          try {
-            await props.onCreatePerson({
-              firstName: firstName.trim() || null,
-              lastName: lastName.trim() || null,
-              salutation,
-              academicTitle: academicTitle.trim() || null,
-              nameSuffix: nameSuffix.trim() || null
-            });
-            setFirstName("");
-            setLastName("");
-            setSalutation("unknown");
-            setAcademicTitle("");
-            setNameSuffix("");
-          } finally {
-            setCreating(false);
-          }
-        }}
-      >
-        <div className="form-grid">
-          <label>
-            Anrede
-            <select value={salutation} onChange={(event) => setSalutation(event.target.value as Person["salutation"])}>
-              <option value="unknown">Unbekannt</option>
-              <option value="mr">Herr</option>
-              <option value="mrs">Frau</option>
-            </select>
-          </label>
-          <label>
-            Titel
-            <input value={academicTitle} onChange={(event) => setAcademicTitle(event.target.value)} placeholder="Dr., Prof. Dr." />
-          </label>
-          <label>
-            Vorname
-            <input value={firstName} onChange={(event) => setFirstName(event.target.value)} placeholder="Vorname" />
-          </label>
-          <label>
-            Nachname
-            <input value={lastName} onChange={(event) => setLastName(event.target.value)} placeholder="Nachname" />
-          </label>
-          <label>
-            Zusatz
-            <input value={nameSuffix} onChange={(event) => setNameSuffix(event.target.value)} placeholder="Suffix" />
-          </label>
-        </div>
-        <button type="submit" className="primary-button" disabled={!canCreate || creating}>
-          <Plus size={16} />
-          Person
-        </button>
-      </form>
-
-      <section className="panel compact-form">
+    <EntityListPage className="person-list-page">
+      <div className="entity-list-toolbar">
         <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Person suchen" aria-label="Person suchen" />
-      </section>
+      </div>
 
-      <section className="task-list">
-        {props.people.length === 0 ? <EmptyState title="Noch keine Personen" /> : null}
-        {props.people.length > 0 && filteredPeople.length === 0 ? <EmptyState title="Keine Personen gefunden" /> : null}
-        {filteredPeople.map((person) => (
-          <article className="task-row clickable" key={person.id} onClick={() => props.onOpenPerson(person.id)}>
-            <div className="entity-icon">
-              <Users size={18} />
-            </div>
-            <div>
-              <h2>{person.displayName}</h2>
-              <p className="task-row-meta">
-                <span>{salutationLabel(person.salutation)}</span>
-                {person.academicTitle ? <span>{person.academicTitle}</span> : null}
-                {person.firstName || person.lastName ? <span>{[person.firstName, person.lastName].filter(Boolean).join(" ")}</span> : null}
-                {person.nameSuffix ? <span>{person.nameSuffix}</span> : null}
-              </p>
-            </div>
-          </article>
-        ))}
-      </section>
-    </section>
+      {props.people.length === 0 ? (
+        <EmptyState
+          title="Noch keine Personen"
+          description="Lege die erste Person an, um Kontakte, Beziehungen und Beteiligungen sichtbar zu machen."
+          action={(
+            <button type="button" className="section-primary-action" onClick={props.onCreateClick}>
+              <Plus size={15} />
+              Person hinzufügen
+            </button>
+          )}
+        />
+      ) : null}
+      {props.people.length > 0 && filteredPeople.length === 0 ? (
+        <EmptyState
+          title="Keine Personen gefunden"
+          description="Passe die Suche an, um die Personenliste wieder zu erweitern."
+        />
+      ) : null}
+      {filteredPeople.length > 0 ? (
+        <EntityList>
+          {filteredPeople.map((person) => (
+            <EntityListItem
+              key={person.id}
+              marker={<span className="person-list-avatar">{personInitials(person)}</span>}
+              title={person.displayName}
+              meta={personListMeta(person)}
+              onOpen={() => props.onOpenPerson(person.id)}
+            />
+          ))}
+        </EntityList>
+      ) : null}
+    </EntityListPage>
   );
+}
+
+function PersonCreateModal(props: {
+  onCancel: () => void;
+  onCreate: (input: {
+    displayName?: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    salutation?: Person["salutation"];
+    academicTitle?: string | null;
+    nameSuffix?: string | null;
+  }) => Promise<void>;
+}) {
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [salutation, setSalutation] = useState<Person["salutation"]>("unknown");
+  const [academicTitle, setAcademicTitle] = useState("");
+  const [nameSuffix, setNameSuffix] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canCreate = Boolean(firstName.trim() || lastName.trim());
+
+  return (
+    <EditModal
+      title="Person hinzufügen"
+      label="Person hinzufügen"
+      className="compact-modal"
+      onCancel={props.onCancel}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!canCreate || creating) return;
+        setCreating(true);
+        setError(null);
+        try {
+          await props.onCreate({
+            firstName: firstName.trim() || null,
+            lastName: lastName.trim() || null,
+            salutation,
+            academicTitle: academicTitle.trim() || null,
+            nameSuffix: nameSuffix.trim() || null
+          });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Person konnte nicht angelegt werden.");
+        } finally {
+          setCreating(false);
+        }
+      }}
+      footer={(
+        <>
+          <button type="submit" className="primary-button" disabled={!canCreate || creating}>Speichern</button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={creating}>Abbrechen</button>
+        </>
+      )}
+    >
+      <div className="person-create-fields">
+        <label>
+          Anrede
+          <select value={salutation} onChange={(event) => setSalutation(event.target.value as Person["salutation"])} disabled={creating}>
+            <option value="unknown">Unbekannt</option>
+            <option value="mr">Herr</option>
+            <option value="mrs">Frau</option>
+          </select>
+        </label>
+        <label>
+          Titel
+          <input value={academicTitle} onChange={(event) => setAcademicTitle(event.target.value)} placeholder="Dr., Prof. Dr." disabled={creating} />
+        </label>
+        <label>
+          Vorname
+          <input value={firstName} onChange={(event) => setFirstName(event.target.value)} placeholder="Vorname" disabled={creating} />
+        </label>
+        <label>
+          Nachname
+          <input value={lastName} onChange={(event) => setLastName(event.target.value)} placeholder="Nachname" disabled={creating} />
+        </label>
+        <label>
+          Zusatz
+          <input value={nameSuffix} onChange={(event) => setNameSuffix(event.target.value)} placeholder="Suffix" disabled={creating} />
+        </label>
+      </div>
+      {error ? <ErrorState title="Person konnte nicht angelegt werden" description={error} /> : null}
+    </EditModal>
+  );
+}
+
+function personListMeta(person: Person): string | null {
+  const nameParts = [person.firstName, person.lastName].filter(Boolean).join(" ");
+  const parts = [
+    person.salutation !== "unknown" ? salutationLabel(person.salutation) : null,
+    person.academicTitle,
+    nameParts && nameParts !== person.displayName ? nameParts : null,
+    person.nameSuffix
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function personInitials(person: Person): string {
+  const sourceParts = [person.firstName, person.lastName].filter((part): part is string => Boolean(part));
+  const fallbackParts = person.displayName.split(/\s+/).filter(Boolean);
+  const initials = (sourceParts.length > 0 ? sourceParts : fallbackParts)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+  return initials || "P";
 }
 
 function OrganizationsView(props: {
   organizations: Organization[];
   onOpenOrganization: (partyId: number) => void;
-  onCreateOrganization: (input: { name: string; legalName?: string | null; organizationType?: string | null }) => Promise<void>;
+  onCreateClick: () => void;
 }) {
   const [search, setSearch] = useState("");
-  const [name, setName] = useState("");
-  const [legalName, setLegalName] = useState("");
-  const [organizationType, setOrganizationType] = useState("");
-  const [creating, setCreating] = useState(false);
+  const trimmedSearch = search.trim().toLowerCase();
   const filteredOrganizations = props.organizations.filter((organization) => {
-    const needle = search.trim().toLowerCase();
+    const needle = trimmedSearch;
     if (!needle) return true;
     return [organization.displayName, organization.name, organization.legalName, organization.organizationType]
       .filter(Boolean)
@@ -8432,78 +10320,131 @@ function OrganizationsView(props: {
   });
 
   return (
-    <section className="stacked-layout">
-      <form
-        className="panel compact-form"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          const trimmedName = name.trim();
-          if (!trimmedName || creating) return;
-          setCreating(true);
-          try {
-            await props.onCreateOrganization({
-              name: trimmedName,
-              legalName: legalName.trim() || null,
-              organizationType: organizationType.trim() || null
-            });
-            setName("");
-            setLegalName("");
-            setOrganizationType("");
-          } finally {
-            setCreating(false);
-          }
-        }}
-      >
-        <div className="form-grid">
-          <label>
-            Name
-            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Organisation" />
-          </label>
-          <label>
-            Rechtlicher Name
-            <input value={legalName} onChange={(event) => setLegalName(event.target.value)} placeholder="Legal Name" />
-          </label>
-          <label>
-            Typ
-            <input value={organizationType} onChange={(event) => setOrganizationType(event.target.value)} placeholder="Firma, Verein, Club" />
-          </label>
-        </div>
-        <button type="submit" className="primary-button" disabled={!name.trim() || creating}>
-          <Plus size={16} />
-          Organisation
-        </button>
-      </form>
-
-      <section className="panel compact-form">
+    <EntityListPage className="organization-list-page">
+      <div className="entity-list-toolbar">
         <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Organisation suchen" aria-label="Organisation suchen" />
-      </section>
+      </div>
 
-      <section className="task-list">
-        {props.organizations.length === 0 ? <EmptyState title="Noch keine Organisationen" /> : null}
-        {props.organizations.length > 0 && filteredOrganizations.length === 0 ? <EmptyState title="Keine Organisationen gefunden" /> : null}
-        {filteredOrganizations.map((organization) => (
-          <article className="task-row clickable" key={organization.id} onClick={() => props.onOpenOrganization(organization.id)}>
-            <div className="entity-icon">
-              <Building2 size={18} />
-            </div>
-            <div>
-              <h2>{organization.displayName}</h2>
-              <p className="task-row-meta">
-                {organization.organizationType ? <span>{organization.organizationType}</span> : null}
-                {organization.legalName ? <span>{organization.legalName}</span> : null}
-              </p>
-            </div>
-          </article>
-        ))}
-      </section>
-    </section>
+      {props.organizations.length === 0 ? (
+        <EmptyState
+          title="Noch keine Organisationen"
+          description="Lege die erste Organisation an, um Kontakte, Beziehungen und DMAX-Kontexte sichtbar zu machen."
+          action={(
+            <button type="button" className="section-primary-action" onClick={props.onCreateClick}>
+              <Plus size={15} />
+              Organisation hinzufügen
+            </button>
+          )}
+        />
+      ) : null}
+      {props.organizations.length > 0 && filteredOrganizations.length === 0 ? (
+        <EmptyState
+          title="Keine Organisationen gefunden"
+          description="Passe die Suche an, um die Organisationsliste wieder zu erweitern."
+        />
+      ) : null}
+      {filteredOrganizations.length > 0 ? (
+        <EntityList>
+          {filteredOrganizations.map((organization) => (
+            <EntityListItem
+              key={organization.id}
+              marker={<span className="organization-list-avatar">{organizationInitials(organization)}</span>}
+              title={organization.displayName}
+              meta={organizationListMeta(organization)}
+              onOpen={() => props.onOpenOrganization(organization.id)}
+            />
+          ))}
+        </EntityList>
+      ) : null}
+    </EntityListPage>
   );
+}
+
+function OrganizationCreateModal(props: {
+  onCancel: () => void;
+  onCreate: (input: { name: string; legalName?: string | null; organizationType?: string | null }) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [legalName, setLegalName] = useState("");
+  const [organizationType, setOrganizationType] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canCreate = Boolean(name.trim());
+
+  return (
+    <EditModal
+      title="Organisation hinzufügen"
+      label="Organisation hinzufügen"
+      className="compact-modal"
+      onCancel={props.onCancel}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const trimmedName = name.trim();
+        if (!trimmedName || creating) return;
+        setCreating(true);
+        setError(null);
+        try {
+          await props.onCreate({
+            name: trimmedName,
+            legalName: legalName.trim() || null,
+            organizationType: organizationType.trim() || null
+          });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Organisation konnte nicht angelegt werden.");
+        } finally {
+          setCreating(false);
+        }
+      }}
+      footer={(
+        <>
+          <button type="submit" className="primary-button" disabled={!canCreate || creating}>Speichern</button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={creating}>Abbrechen</button>
+        </>
+      )}
+    >
+      <div className="organization-create-fields">
+        <label>
+          Name
+          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Organisation" disabled={creating} />
+        </label>
+        <label>
+          Rechtlicher Name
+          <input value={legalName} onChange={(event) => setLegalName(event.target.value)} placeholder="Legal Name" disabled={creating} />
+        </label>
+        <label>
+          Typ
+          <input value={organizationType} onChange={(event) => setOrganizationType(event.target.value)} placeholder="Firma, Verein, Club" disabled={creating} />
+        </label>
+      </div>
+      {error ? <ErrorState title="Organisation konnte nicht angelegt werden" description={error} /> : null}
+    </EditModal>
+  );
+}
+
+function organizationListMeta(organization: Organization): string | null {
+  const parts = [
+    organization.organizationType,
+    organization.legalName && organization.legalName !== organization.displayName ? organization.legalName : null
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function organizationInitials(organization: Organization): string {
+  const parts = organization.displayName.split(/\s+/).filter(Boolean);
+  const initials = parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+  return initials || "O";
 }
 
 function PersonDetailView(props: {
   detail: PersonDetail | null;
+  loadError: string | null;
   initiatives: Initiative[];
   tasks: Task[];
+  coreModalOpen: boolean;
+  onCloseCoreModal: () => void;
   onUpdatePerson: (partyId: number, input: {
     displayName?: string;
     firstName?: string | null;
@@ -8512,506 +10453,286 @@ function PersonDetailView(props: {
     academicTitle?: string | null;
     nameSuffix?: string | null;
   }) => Promise<void>;
-  onCreateContactPoint: (partyId: number, input: Omit<CreateContactPointDraft, "partyId">) => Promise<void>;
-  onUpdateContactPoint: (contactPointId: number, input: Partial<Omit<CreateContactPointDraft, "partyId">>) => Promise<void>;
+  onCreateContactPoint: (partyId: number, input: ContactPointInput) => Promise<void>;
+  onUpdateContactPoint: (contactPointId: number, input: Partial<ContactPointInput>) => Promise<void>;
   onDeleteContactPoint: (contactPointId: number) => Promise<void>;
+  onCreateAddress: (partyId: number, input: AddressInput) => Promise<void>;
+  onUpdateAddress: (addressId: number, input: Partial<AddressInput>) => Promise<void>;
+  onDeleteAddress: (addressId: number) => Promise<void>;
   onOpenInitiative: (initiativeId: number) => void;
   onOpenTask: (taskId: number) => void;
+  onOpenPerson: (partyId: number) => void;
+  onOpenOrganization: (partyId: number) => void;
 }) {
   const person = props.detail?.person;
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [salutation, setSalutation] = useState<Person["salutation"]>("unknown");
-  const [academicTitle, setAcademicTitle] = useState("");
-  const [nameSuffix, setNameSuffix] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const canSave = Boolean(firstName.trim() || lastName.trim());
 
-  useEffect(() => {
-    setFirstName(person?.firstName ?? "");
-    setLastName(person?.lastName ?? "");
-    setSalutation(person?.salutation ?? "unknown");
-    setAcademicTitle(person?.academicTitle ?? "");
-    setNameSuffix(person?.nameSuffix ?? "");
-    setSaving(false);
-    setError(null);
-  }, [person?.id, person?.firstName, person?.lastName, person?.salutation, person?.academicTitle, person?.nameSuffix]);
+  if (props.loadError) {
+    return (
+      <ErrorState
+        title="Person nicht gefunden"
+        description="Diese Person existiert nicht oder konnte nicht geladen werden. Gehe zurück zur Personenliste und wähle einen vorhandenen Eintrag."
+      />
+    );
+  }
 
-  if (!props.detail || !person) return <EmptyState title="Person wird geladen" />;
+  if (!props.detail || !person) return <EmptyState title="Person wird geladen" description="Die Detaildaten werden aus DMAX geladen." />;
 
   return (
-    <section className="split-view party-detail-layout">
-      <div className="detail-pane">
-        <Panel title="Stammdaten">
-          <form
-            className="detail-edit-form"
-            onSubmit={async (event) => {
-              event.preventDefault();
-              if (!canSave || saving) return;
-              setSaving(true);
-              setError(null);
-              try {
-                await props.onUpdatePerson(person.id, {
-                  firstName: firstName.trim() || null,
-                  lastName: lastName.trim() || null,
-                  salutation,
-                  academicTitle: academicTitle.trim() || null,
-                  nameSuffix: nameSuffix.trim() || null
-                });
-              } catch (err) {
-                setError(err instanceof Error ? err.message : "Person konnte nicht gespeichert werden.");
-              } finally {
-                setSaving(false);
-              }
-            }}
-          >
-            <label>
-              Anrede
-              <select value={salutation} onChange={(event) => setSalutation(event.target.value as Person["salutation"])}>
-                <option value="unknown">Unbekannt</option>
-                <option value="mr">Herr</option>
-                <option value="mrs">Frau</option>
-              </select>
-            </label>
-            <label>
-              Titel
-              <input value={academicTitle} onChange={(event) => setAcademicTitle(event.target.value)} />
-            </label>
-            <label>
-              Vorname
-              <input value={firstName} onChange={(event) => setFirstName(event.target.value)} />
-            </label>
-            <label>
-              Nachname
-              <input value={lastName} onChange={(event) => setLastName(event.target.value)} />
-            </label>
-            <label>
-              Zusatz
-              <input value={nameSuffix} onChange={(event) => setNameSuffix(event.target.value)} />
-            </label>
-            <button type="submit" className="primary-button" disabled={!canSave || saving}>Speichern</button>
-            {error ? <p className="inline-error">{error}</p> : null}
-          </form>
-        </Panel>
-        <ContactPointsPanel
+    <EntityDetailPage
+      className="person-reference-detail"
+      aside={(
+        <MetadataGrid
+          items={[
+            { label: "Anrede", value: salutationLabel(person.salutation) },
+            { label: "Titel", value: person.academicTitle },
+            { label: "Vorname", value: person.firstName },
+            { label: "Nachname", value: person.lastName },
+            { label: "Namenszusatz", value: person.nameSuffix },
+            { label: "Kontaktwege", value: props.detail.contactPoints.length },
+            { label: "Anschriften", value: props.detail.addresses.length },
+            { label: "Beziehungen", value: props.detail.relationships.length },
+            { label: "DMAX-Kontexte", value: props.detail.participants.length },
+            { label: "Erstellt", value: formatDateTimeForUi(person.createdAt) },
+            { label: "Aktualisiert", value: formatDateTimeForUi(person.updatedAt) }
+          ]}
+        />
+      )}
+    >
+      {props.coreModalOpen ? (
+        <PersonCoreModal
+          person={person}
+          onCancel={props.onCloseCoreModal}
+          onSave={async (input) => {
+            await props.onUpdatePerson(person.id, input);
+            props.onCloseCoreModal();
+          }}
+        />
+      ) : null}
+      <div className="entity-detail-two-column">
+        <ContactPointList
           partyId={person.id}
           contactPoints={props.detail.contactPoints}
+          description="Direkte Wege zu dieser Person."
+          emptyDescription="E-Mail, Telefon oder Messenger können ergänzt werden."
+          deleteDescription={(contactPoint) => <p>„{contactPoint.value}“ wird aus dieser Person entfernt.</p>}
           onCreate={props.onCreateContactPoint}
           onUpdate={props.onUpdateContactPoint}
           onDelete={props.onDeleteContactPoint}
         />
-      </div>
-      <div className="detail-pane">
-        <PartyRelationshipsPanel partyId={person.id} relationships={props.detail.relationships} />
-        <PartyParticipationsPanel
-          participants={props.detail.participants}
-          initiatives={props.initiatives}
-          tasks={props.tasks}
-          onOpenInitiative={props.onOpenInitiative}
-          onOpenTask={props.onOpenTask}
+        <AddressBlock
+          partyId={person.id}
+          addresses={props.detail.addresses}
+          description="Postalische Orte und weitere Adressen."
+          emptyDescription="Post- oder Besuchsadressen können ergänzt werden."
+          deleteDescription={(address) => <p>„{address.line1}“ wird aus dieser Person entfernt.</p>}
+          onCreate={props.onCreateAddress}
+          onUpdate={props.onUpdateAddress}
+          onDelete={props.onDeleteAddress}
         />
       </div>
-    </section>
+      <PersonRelationsSection
+        person={person}
+        relationships={props.detail.relationships}
+        onOpenPerson={props.onOpenPerson}
+        onOpenOrganization={props.onOpenOrganization}
+      />
+      <PersonParticipationsSection
+        participants={props.detail.participants}
+        initiatives={props.initiatives}
+        tasks={props.tasks}
+        onOpenInitiative={props.onOpenInitiative}
+        onOpenTask={props.onOpenTask}
+      />
+    </EntityDetailPage>
   );
 }
 
-function EntityHeader(props: {
-  icon?: ReactNode;
-  entityType?: string;
-  title?: string;
-  titleContent?: ReactNode;
-  subtitle?: string | null;
-  subtitleContent?: ReactNode;
-  facts?: Array<{ label: string; value: ReactNode }>;
-  primaryAction?: ReactNode;
-  secondaryActions?: ReactNode;
+function PersonCoreModal(props: {
+  person: Person;
+  onCancel: () => void;
+  onSave: (input: {
+    displayName?: string;
+    firstName: string | null;
+    lastName: string | null;
+    salutation: Person["salutation"];
+    academicTitle: string | null;
+    nameSuffix: string | null;
+  }) => Promise<void>;
 }) {
-  return (
-    <div className="entity-header">
-      <div className="entity-header-main">
-        {props.icon ? <div className="entity-header-icon">{props.icon}</div> : null}
-        <div className="entity-header-title-block">
-          {props.entityType ? <span className="entity-header-eyebrow">{props.entityType}</span> : null}
-          <h1>{props.titleContent ?? props.title}</h1>
-          {props.subtitleContent || props.subtitle ? <p>{props.subtitleContent ?? props.subtitle}</p> : null}
-          {props.facts && props.facts.length > 0 ? (
-            <div className="entity-header-facts">
-              {props.facts.map((fact) => (
-                <span key={fact.label}>
-                  {fact.label}: {fact.value}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </div>
-      {props.primaryAction || props.secondaryActions ? (
-        <div className="entity-header-actions">
-          {props.secondaryActions}
-          {props.primaryAction}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function InlineEditableText(props: {
-  value: string;
-  label: string;
-  required?: boolean;
-  disabled?: boolean;
-  className?: string;
-  onSave: (value: string) => Promise<void>;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(props.value);
+  const [displayName, setDisplayName] = useState(props.person.displayName);
+  const [firstName, setFirstName] = useState(props.person.firstName ?? "");
+  const [lastName, setLastName] = useState(props.person.lastName ?? "");
+  const [salutation, setSalutation] = useState<Person["salutation"]>(props.person.salutation);
+  const [academicTitle, setAcademicTitle] = useState(props.person.academicTitle ?? "");
+  const [nameSuffix, setNameSuffix] = useState(props.person.nameSuffix ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!editing) {
-      setDraft(props.value);
-      setError(null);
-    }
-  }, [editing, props.value]);
-
-  async function commit() {
-    const nextValue = draft.trim();
-    if (props.required && !nextValue) {
-      setError("Dieses Feld darf nicht leer sein.");
-      return;
-    }
-    if (nextValue === props.value.trim()) {
-      setEditing(false);
-      setError(null);
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      await props.onSave(nextValue);
-      setEditing(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Änderung konnte nicht gespeichert werden.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (editing) {
-    return (
-      <span className={`inline-edit-field${props.className ? ` ${props.className}` : ""}`}>
-        <input
-          autoFocus
-          aria-label={props.label}
-          value={draft}
-          disabled={saving}
-          onBlur={() => {
-            void commit();
-          }}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              event.currentTarget.blur();
-            }
-            if (event.key === "Escape") {
-              event.preventDefault();
-              setDraft(props.value);
-              setEditing(false);
-              setError(null);
-            }
-          }}
-        />
-        {error ? <span className="inline-edit-error">{error}</span> : null}
-      </span>
-    );
-  }
+  const canSave = Boolean(displayName.trim() || firstName.trim() || lastName.trim());
 
   return (
-    <button
-      type="button"
-      className={`inline-edit-trigger${props.className ? ` ${props.className}` : ""}`}
-      onClick={() => {
-        if (props.disabled) return;
-        setDraft(props.value);
-        setEditing(true);
-      }}
-      disabled={props.disabled}
-      title={`${props.label} bearbeiten`}
-    >
-      {props.value}
-    </button>
-  );
-}
-
-function EntityDetailPage(props: { children: ReactNode; aside?: ReactNode; className?: string }) {
-  return (
-    <section className={`entity-detail-page${props.className ? ` ${props.className}` : ""}`}>
-      <div className="entity-detail-primary">{props.children}</div>
-      {props.aside ? <aside className="entity-detail-aside">{props.aside}</aside> : null}
-    </section>
-  );
-}
-
-function SectionHeader(props: { title?: string | null; description?: string | null; actions?: ReactNode }) {
-  return (
-    <header className="section-block-header">
-      <div>
-        {props.title ? <h3>{props.title}</h3> : null}
-        {props.description ? <p>{props.description}</p> : null}
-      </div>
-      {props.actions ? <div className="section-block-actions">{props.actions}</div> : null}
-    </header>
-  );
-}
-
-function SectionBlock(props: {
-  title?: string | null;
-  description?: string | null;
-  actions?: ReactNode;
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <section className={`section-block${props.className ? ` ${props.className}` : ""}`}>
-      {props.title || props.description || props.actions ? <SectionHeader title={props.title} description={props.description} actions={props.actions} /> : null}
-      {props.children}
-    </section>
-  );
-}
-
-function EditModal(props: {
-  title: string;
-  description?: string | null;
-  label: string;
-  onCancel: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  children: ReactNode;
-  footer: ReactNode;
-  className?: string;
-}) {
-  useModalEscape(props.onCancel);
-
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
-      <form
-        className={`compact-modal${props.className ? ` ${props.className}` : ""}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={props.label}
-        onMouseDown={(event) => event.stopPropagation()}
-        onKeyDown={(event) => handleModalEscape(event, props.onCancel)}
-        onSubmit={props.onSubmit}
-      >
-        <header className="modal-title-block">
-          <h2>{props.title}</h2>
-          {props.description ? <p>{props.description}</p> : null}
-        </header>
-        {props.children}
-        <footer className="modal-actions">{props.footer}</footer>
-      </form>
-    </div>
-  );
-}
-
-function ConfirmModal(props: {
-  title: string;
-  description?: ReactNode;
-  confirmLabel: string;
-  cancelLabel?: string;
-  extraActions?: ReactNode;
-  busy?: boolean;
-  onCancel: () => void;
-  onConfirm: () => void | Promise<void>;
-}) {
-  useModalEscape(props.onCancel);
-
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
-      <form
-        className="compact-modal confirm-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label={props.title}
-        onMouseDown={(event) => event.stopPropagation()}
-        onKeyDown={(event) => handleModalEscape(event, props.onCancel)}
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (props.busy) return;
-          void props.onConfirm();
-        }}
-      >
-        <header className="modal-title-block">
-          <h2>{props.title}</h2>
-          {props.description ? <div className="confirm-modal-description">{props.description}</div> : null}
-        </header>
-        <footer className="modal-actions">
-          <button type="submit" className="danger-button" disabled={props.busy}>{props.confirmLabel}</button>
-          {props.extraActions}
-          <button type="button" className="small-button" onClick={props.onCancel} disabled={props.busy}>{props.cancelLabel ?? "Abbrechen"}</button>
-        </footer>
-      </form>
-    </div>
-  );
-}
-
-function handleModalEscape(event: ReactKeyboardEvent<HTMLElement>, onCancel: () => void) {
-  if (event.key !== "Escape") return;
-  event.preventDefault();
-  event.stopPropagation();
-  onCancel();
-}
-
-function useModalEscape(onCancel: () => void, enabled = true) {
-  useEffect(() => {
-    if (!enabled) return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      onCancel();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [enabled, onCancel]);
-}
-
-function DescriptionBlock(props: {
-  title?: string | null;
-  text: string | null | undefined;
-  emptyTitle: string;
-  emptyDescription?: string;
-  onEdit?: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const text = props.text?.trim() ?? "";
-  const isLong = text.length > 1100 || text.split("\n").length > 14;
-  const editInteractionProps = props.onEdit
-    ? {
-        role: "button",
-        tabIndex: 0,
-        onClick: props.onEdit,
-        onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            props.onEdit?.();
-          }
+    <EditModal
+      title="Person bearbeiten"
+      label="Person bearbeiten"
+      className="party-edit-modal"
+      onCancel={props.onCancel}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!canSave || saving) return;
+        setSaving(true);
+        setError(null);
+        try {
+          await props.onSave({
+            displayName: displayName.trim() || undefined,
+            firstName: firstName.trim() || null,
+            lastName: lastName.trim() || null,
+            salutation,
+            academicTitle: academicTitle.trim() || null,
+            nameSuffix: nameSuffix.trim() || null
+          });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Person konnte nicht gespeichert werden.");
+        } finally {
+          setSaving(false);
         }
-      }
-    : {};
-
-  useEffect(() => {
-    setExpanded(false);
-  }, [text]);
-
-  return (
-    <SectionBlock
-      title={props.title}
-      className={`description-block${props.onEdit ? " description-block-editable" : ""}`}
-    >
-      {text ? (
+      }}
+      footer={(
         <>
-          <div
-            className={`description-block-content${isLong && !expanded ? " collapsed" : ""}`}
-            aria-label={props.onEdit ? "Beschreibung bearbeiten" : undefined}
-            {...editInteractionProps}
-          >
-            <RichText text={text} />
-          </div>
-          {isLong ? (
-            <button type="button" className="small-button description-toggle" onClick={() => setExpanded((current) => !current)}>
-              {expanded ? "Weniger anzeigen" : "Mehr anzeigen"}
-            </button>
-          ) : null}
+          <button type="submit" className="primary-button" disabled={!canSave || saving}>Speichern</button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={saving}>Abbrechen</button>
         </>
-      ) : (
-        <div
-          className="description-empty-surface"
-          aria-label={props.onEdit ? "Beschreibung bearbeiten" : undefined}
-          {...editInteractionProps}
-        >
-          <strong>{props.emptyTitle}</strong>
-          {props.emptyDescription ? <p>{props.emptyDescription}</p> : null}
-        </div>
       )}
-    </SectionBlock>
-  );
-}
-
-function MetadataGrid(props: { items: Array<{ label: string; value: ReactNode | null | undefined }> }) {
-  const items = props.items.filter((item) => item.value !== null && item.value !== undefined && item.value !== "");
-  return (
-    <SectionBlock title="Metadaten" description="Sekundäre Fakten und technische Einordnung." className="metadata-section">
-      {items.length === 0 ? (
-        <EmptyState title="Keine Metadaten vorhanden" />
-      ) : (
-        <dl className="metadata-grid">
-          {items.map((item) => (
-            <div key={item.label}>
-              <dt>{item.label}</dt>
-              <dd>{item.value}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-    </SectionBlock>
-  );
-}
-
-function RelationList(props: { children: ReactNode; emptyTitle: string; emptyDescription?: string }) {
-  const hasChildren = Children.count(props.children) > 0;
-  return <div className="relation-list">{hasChildren ? props.children : <EmptyState title={props.emptyTitle} description={props.emptyDescription} />}</div>;
-}
-
-function RelationGroup(props: { title: string; description?: string | null; actions?: ReactNode; children: ReactNode; emptyTitle: string; emptyDescription?: string }) {
-  return (
-    <section className="relation-group">
-      <SectionHeader title={props.title} description={props.description} actions={props.actions} />
-      <RelationList emptyTitle={props.emptyTitle} emptyDescription={props.emptyDescription}>
-        {props.children}
-      </RelationList>
-    </section>
-  );
-}
-
-function RelationItem(props: {
-  icon: ReactNode;
-  title: string;
-  meta?: string | null;
-  detail?: string | null;
-  onOpen?: () => void;
-  actions?: ReactNode;
-}) {
-  const content = (
-    <>
-      <div className="entity-icon">{props.icon}</div>
-      <div className="relation-item-copy">
-        <strong>{props.title}</strong>
-        {props.meta ? <p>{props.meta}</p> : null}
-        {props.detail ? <span>{props.detail}</span> : null}
+    >
+      <label>
+        Anzeigename
+        <input autoFocus value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+      </label>
+      <label>
+        Anrede
+        <select value={salutation} onChange={(event) => setSalutation(event.target.value as Person["salutation"])}>
+          <option value="unknown">Unbekannt</option>
+          <option value="mr">Herr</option>
+          <option value="mrs">Frau</option>
+        </select>
+      </label>
+      <label>
+        Titel
+        <input value={academicTitle} onChange={(event) => setAcademicTitle(event.target.value)} />
+      </label>
+      <div className="modal-two-column">
+        <label>
+          Vorname
+          <input value={firstName} onChange={(event) => setFirstName(event.target.value)} />
+        </label>
+        <label>
+          Nachname
+          <input value={lastName} onChange={(event) => setLastName(event.target.value)} />
+        </label>
       </div>
-      {props.actions ? <div className="relation-item-actions">{props.actions}</div> : null}
-    </>
+      <label>
+        Zusatz
+        <input value={nameSuffix} onChange={(event) => setNameSuffix(event.target.value)} />
+      </label>
+      {error ? <p className="inline-error">{error}</p> : null}
+    </EditModal>
   );
-
-  if (props.onOpen) {
-    return (
-      <button type="button" className="relation-item relation-button" onClick={props.onOpen}>
-        {content}
-      </button>
-    );
-  }
-
-  return <div className="relation-item">{content}</div>;
 }
 
-function ErrorState(props: { title: string; description?: string | null }) {
+function PersonRelationsSection(props: {
+  person: Person;
+  relationships: PersonDetail["relationships"];
+  onOpenPerson: (partyId: number) => void;
+  onOpenOrganization: (partyId: number) => void;
+}) {
+  const organizationRelationships = props.relationships.filter((relationship) => {
+    const otherParty = relationship.fromPartyId === props.person.id ? relationship.toParty : relationship.fromParty;
+    return otherParty.type === "organization";
+  });
+  const personRelationships = props.relationships.filter((relationship) => {
+    const otherParty = relationship.fromPartyId === props.person.id ? relationship.toParty : relationship.fromParty;
+    return otherParty.type === "person";
+  });
+
   return (
-    <div className="error-state" role="alert">
-      <strong>{props.title}</strong>
-      {props.description ? <p>{props.description}</p> : null}
-    </div>
+    <SectionBlock title="Beziehungen" description="Organisationen und Personen, die mit dieser Person verbunden sind.">
+      <div className="relation-section-stack">
+        <RelationGroup
+          title="Organisationen"
+          description="Arbeit, Mitgliedschaften und andere Organisationsbeziehungen."
+          emptyTitle="Keine Organisationsbeziehungen"
+          emptyDescription="Diese Person ist noch mit keiner Organisation verbunden."
+        >
+          {organizationRelationships.map((relationship) => {
+            const organization = relationship.fromPartyId === props.person.id ? relationship.toParty : relationship.fromParty;
+            return (
+              <RelationItem
+                key={relationship.id}
+                icon={<Building2 size={16} />}
+                title={organization.displayName}
+                meta={partyRelationshipLabel(relationship, props.person.id)}
+                onOpen={() => props.onOpenOrganization(organization.id)}
+              />
+            );
+          })}
+        </RelationGroup>
+        <RelationGroup
+          title="Personen"
+          description="Weitere direkte Personenbeziehungen."
+          emptyTitle="Keine Personenbeziehungen"
+          emptyDescription="Noch keine weitere Person ist verknüpft."
+        >
+          {personRelationships.map((relationship) => {
+            const otherPerson = relationship.fromPartyId === props.person.id ? relationship.toParty : relationship.fromParty;
+            return (
+              <RelationItem
+                key={relationship.id}
+                icon={<Users size={16} />}
+                title={otherPerson.displayName}
+                meta={partyRelationshipLabel(relationship, props.person.id)}
+                onOpen={() => props.onOpenPerson(otherPerson.id)}
+              />
+            );
+          })}
+        </RelationGroup>
+      </div>
+    </SectionBlock>
+  );
+}
+
+function PersonParticipationsSection(props: {
+  participants: EntityParticipant[];
+  initiatives: Initiative[];
+  tasks: Task[];
+  onOpenInitiative: (initiativeId: number) => void;
+  onOpenTask: (taskId: number) => void;
+}) {
+  const initiativeById = new Map(props.initiatives.map((initiative) => [initiative.id, initiative]));
+  const taskById = new Map(props.tasks.map((task) => [task.id, task]));
+
+  return (
+    <SectionBlock title="DMAX-Kontexte" description="Initiativen und Maßnahmen, in denen diese Person vorkommt.">
+      <RelationList emptyTitle="Keine DMAX-Kontexte" emptyDescription="Diese Person ist noch keiner Initiative oder Maßnahme zugeordnet.">
+        {props.participants.map((participant) => {
+          const title =
+            participant.entityType === "initiative"
+              ? initiativeById.get(participant.entityId)?.name
+              : participant.entityType === "task"
+                ? taskById.get(participant.entityId)?.title
+                : null;
+          return (
+            <RelationItem
+              key={participant.id}
+              icon={participant.entityType === "task" ? <ClipboardList size={16} /> : <Blocks size={16} />}
+              title={title ?? `${entityTypeLabel(participant.entityType)} #${participant.entityId}`}
+              meta={`${entityTypeLabel(participant.entityType)} · ${participantRoleSummary(participant)}`}
+              onOpen={() => {
+                if (participant.entityType === "initiative") props.onOpenInitiative(participant.entityId);
+                if (participant.entityType === "task") props.onOpenTask(participant.entityId);
+              }}
+            />
+          );
+        })}
+      </RelationList>
+    </SectionBlock>
   );
 }
 
@@ -9021,15 +10742,16 @@ function OrganizationDetailView(props: {
   initiatives: Initiative[];
   tasks: Task[];
   people: Person[];
+  organizations: Organization[];
   relationshipTypes: RelationshipType[];
   coreModalOpen: boolean;
   onCloseCoreModal: () => void;
   onUpdateOrganization: (partyId: number, input: { name?: string; legalName?: string | null; organizationType?: string | null; markdown?: string | null }) => Promise<void>;
-  onCreateContactPoint: (partyId: number, input: Omit<CreateContactPointDraft, "partyId">) => Promise<void>;
-  onUpdateContactPoint: (contactPointId: number, input: Partial<Omit<CreateContactPointDraft, "partyId">>) => Promise<void>;
+  onCreateContactPoint: (partyId: number, input: ContactPointInput) => Promise<void>;
+  onUpdateContactPoint: (contactPointId: number, input: Partial<ContactPointInput>) => Promise<void>;
   onDeleteContactPoint: (contactPointId: number) => Promise<void>;
-  onCreateAddress: (partyId: number, input: Omit<CreateAddressDraft, "partyId">) => Promise<void>;
-  onUpdateAddress: (addressId: number, input: Partial<Omit<CreateAddressDraft, "partyId">>) => Promise<void>;
+  onCreateAddress: (partyId: number, input: AddressInput) => Promise<void>;
+  onUpdateAddress: (addressId: number, input: Partial<AddressInput>) => Promise<void>;
   onDeleteAddress: (addressId: number) => Promise<void>;
   onCreateRelationship: (input: {
     fromPartyId: number;
@@ -9038,9 +10760,17 @@ function OrganizationDetailView(props: {
     roleLabel?: string | null;
     status?: "active" | "inactive";
   }) => Promise<void>;
+  onCreateParticipant: (input: {
+    partyId: number;
+    entityType: "initiative" | "task";
+    entityId: number;
+    roleLabel?: string | null;
+    isPrimary?: boolean;
+  }) => Promise<void>;
   onOpenInitiative: (initiativeId: number) => void;
   onOpenTask: (taskId: number) => void;
   onOpenPerson: (partyId: number) => void;
+  onOpenOrganization: (partyId: number) => void;
 }) {
   const organization = props.detail?.organization;
 
@@ -9089,6 +10819,7 @@ function OrganizationDetailView(props: {
         <ContactPointList
           partyId={organization.id}
           contactPoints={props.detail.contactPoints}
+          description={null}
           onCreate={props.onCreateContactPoint}
           onUpdate={props.onUpdateContactPoint}
           onDelete={props.onDeleteContactPoint}
@@ -9096,6 +10827,7 @@ function OrganizationDetailView(props: {
         <AddressBlock
           partyId={organization.id}
           addresses={props.detail.addresses}
+          description={null}
           onCreate={props.onCreateAddress}
           onUpdate={props.onUpdateAddress}
           onDelete={props.onDeleteAddress}
@@ -9104,15 +10836,19 @@ function OrganizationDetailView(props: {
       <OrganizationRelationsSection
         organization={organization}
         people={props.people}
+        organizations={props.organizations}
         relationshipTypes={props.relationshipTypes}
         relationships={props.detail.relationships}
         onCreateRelationship={props.onCreateRelationship}
         onOpenPerson={props.onOpenPerson}
+        onOpenOrganization={props.onOpenOrganization}
       />
       <OrganizationParticipationsSection
+        organization={organization}
         participants={props.detail.participants}
         initiatives={props.initiatives}
         tasks={props.tasks}
+        onCreateParticipant={props.onCreateParticipant}
         onOpenInitiative={props.onOpenInitiative}
         onOpenTask={props.onOpenTask}
       />
@@ -9243,672 +10979,10 @@ function OrganizationDescriptionSection(props: {
   );
 }
 
-type CreateContactPointDraft = {
-  partyId: number;
-  type: PartyContactPoint["type"];
-  label?: string | null;
-  value: string;
-  isPrimary?: boolean;
-  isPreferred?: boolean;
-  canSend?: boolean;
-  canReceive?: boolean;
-  provider?: string | null;
-};
-
-type CreateAddressDraft = {
-  partyId: number;
-  label?: string | null;
-  line1: string;
-  line2?: string | null;
-  postalCode?: string | null;
-  city?: string | null;
-  region?: string | null;
-  country?: string | null;
-  isPrimary?: boolean;
-};
-
-const contactPointTypeOptions: Array<{
-  value: PartyContactPoint["type"];
-  label: string;
-  inputType: "email" | "tel" | "url" | "text";
-  placeholder: string;
-}> = [
-  { value: "email", label: "E-Mail", inputType: "email", placeholder: "name@example.com" },
-  { value: "phone", label: "Telefon", inputType: "tel", placeholder: "+49 ..." },
-  { value: "whatsapp", label: "WhatsApp", inputType: "tel", placeholder: "+49 ..." },
-  { value: "signal", label: "Signal", inputType: "tel", placeholder: "+49 ..." },
-  { value: "telegram", label: "Telegram", inputType: "text", placeholder: "@username" },
-  { value: "linkedin", label: "LinkedIn", inputType: "url", placeholder: "https://linkedin.com/in/..." },
-  { value: "website", label: "Webseite", inputType: "url", placeholder: "https://..." },
-  { value: "other", label: "Sonstiges", inputType: "text", placeholder: "Kontaktwert" }
-];
-
-function contactPointTypeOption(type: PartyContactPoint["type"]) {
-  return contactPointTypeOptions.find((option) => option.value === type) ?? contactPointTypeOptions[0];
-}
-
-function contactPointTypeLabel(type: PartyContactPoint["type"]): string {
-  return contactPointTypeOption(type).label;
-}
-
-function contactPointCapabilities(type: PartyContactPoint["type"]): { canSend: boolean; canReceive: boolean } {
-  if (type === "website") return { canSend: false, canReceive: false };
-  return { canSend: true, canReceive: true };
-}
-
-function ContactPointList(props: {
-  partyId: number;
-  contactPoints: PartyContactPoint[];
-  onCreate: (partyId: number, input: Omit<CreateContactPointDraft, "partyId">) => Promise<void>;
-  onUpdate: (contactPointId: number, input: Partial<Omit<CreateContactPointDraft, "partyId">>) => Promise<void>;
-  onDelete: (contactPointId: number) => Promise<void>;
-}) {
-  const [editingContactPoint, setEditingContactPoint] = useState<PartyContactPoint | "new" | null>(null);
-  const [deletingContactPoint, setDeletingContactPoint] = useState<PartyContactPoint | null>(null);
-  const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  return (
-    <SectionBlock
-      title="Kontaktwege"
-      description="Direkte Wege zur Organisation."
-      actions={(
-        <button type="button" className="section-primary-action" onClick={() => setEditingContactPoint("new")} disabled={busyAction !== null}>
-          <Plus size={15} />
-          Kontaktweg hinzufügen
-        </button>
-      )}
-    >
-      <RelationList emptyTitle="Keine Kontaktwege" emptyDescription="E-Mail, Telefon oder Website können ergänzt werden.">
-        {props.contactPoints.map((contactPoint) => (
-          <RelationItem
-            key={contactPoint.id}
-            icon={<Send size={15} />}
-            title={contactPoint.value}
-            meta={[contactPointTypeLabel(contactPoint.type), contactPoint.label, contactPoint.isPreferred ? "bevorzugt" : null, contactPoint.isPrimary ? "primär" : null]
-              .filter(Boolean)
-              .join(" · ")}
-            actions={(
-              <>
-                <button
-                  type="button"
-                  className="icon-button compact"
-                  disabled={busyAction !== null}
-                  title="Kontaktweg bearbeiten"
-                  onClick={() => setEditingContactPoint(contactPoint)}
-                >
-                  <Pencil size={14} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-button compact"
-                  disabled={busyAction !== null}
-                  title="Kontaktweg löschen"
-                  onClick={() => {
-                    if (busyAction) return;
-                    setDeletingContactPoint(contactPoint);
-                  }}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </>
-            )}
-          />
-        ))}
-      </RelationList>
-      {error ? <ErrorState title="Kontaktweg konnte nicht gespeichert werden" description={error} /> : null}
-      {editingContactPoint ? (
-        <ContactPointModal
-          contactPoint={editingContactPoint === "new" ? null : editingContactPoint}
-          onCancel={() => setEditingContactPoint(null)}
-          onSave={async (input) => {
-            if (busyAction) return;
-            setBusyAction(editingContactPoint === "new" ? "create" : `update:${editingContactPoint.id}`);
-            setError(null);
-            try {
-              if (editingContactPoint === "new") {
-                await props.onCreate(props.partyId, input);
-              } else {
-                await props.onUpdate(editingContactPoint.id, input);
-              }
-              setEditingContactPoint(null);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht gespeichert werden.");
-              throw err;
-            } finally {
-              setBusyAction(null);
-            }
-          }}
-        />
-      ) : null}
-      {deletingContactPoint ? (
-        <ConfirmModal
-          title="Kontaktweg löschen?"
-          description={<p>„{deletingContactPoint.value}“ wird aus dieser Organisation entfernt.</p>}
-          confirmLabel="Kontaktweg löschen"
-          busy={busyAction !== null}
-          onCancel={() => setDeletingContactPoint(null)}
-          onConfirm={async () => {
-            if (busyAction) return;
-            setBusyAction(`delete:${deletingContactPoint.id}`);
-            setError(null);
-            try {
-              await props.onDelete(deletingContactPoint.id);
-              setDeletingContactPoint(null);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht gelöscht werden.");
-            } finally {
-              setBusyAction(null);
-            }
-          }}
-        />
-      ) : null}
-    </SectionBlock>
-  );
-}
-
-function ContactPointsPanel(props: {
-  partyId: number;
-  contactPoints: PartyContactPoint[];
-  onCreate: (partyId: number, input: Omit<CreateContactPointDraft, "partyId">) => Promise<void>;
-  onUpdate: (contactPointId: number, input: Partial<Omit<CreateContactPointDraft, "partyId">>) => Promise<void>;
-  onDelete: (contactPointId: number) => Promise<void>;
-}) {
-  const [editingContactPoint, setEditingContactPoint] = useState<PartyContactPoint | "new" | null>(null);
-  const [deletingContactPoint, setDeletingContactPoint] = useState<PartyContactPoint | null>(null);
-  const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  return (
-    <Panel title="Kontaktwege">
-      <div className="panel-heading-actions">
-        <button type="button" className="primary-button compact" onClick={() => setEditingContactPoint("new")} disabled={busyAction !== null}>
-          <Plus size={15} />
-          Kontaktweg
-        </button>
-      </div>
-      <div className="relationship-list">
-        {props.contactPoints.length === 0 ? <p className="muted-text">Noch keine Kontaktwege.</p> : null}
-        {props.contactPoints.map((contactPoint) => (
-          <div className="relationship-row" key={contactPoint.id}>
-            <div className="entity-icon"><Send size={15} /></div>
-            <div>
-              <strong>{contactPoint.value}</strong>
-              <p>{contactPointTypeLabel(contactPoint.type)}{contactPoint.label ? ` · ${contactPoint.label}` : ""}{contactPoint.isPreferred ? " · bevorzugt" : ""}</p>
-            </div>
-            <button
-              type="button"
-              className="icon-button compact"
-              disabled={busyAction !== null}
-              title="Kontaktweg bearbeiten"
-              onClick={() => setEditingContactPoint(contactPoint)}
-            >
-              <Pencil size={14} />
-            </button>
-            <button
-              type="button"
-              className="icon-button compact"
-              disabled={busyAction !== null}
-              title="Kontaktweg löschen"
-              onClick={() => {
-                if (busyAction) return;
-                setDeletingContactPoint(contactPoint);
-              }}
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
-        ))}
-      </div>
-      {error ? <p className="inline-error">{error}</p> : null}
-      {editingContactPoint ? (
-        <ContactPointModal
-          contactPoint={editingContactPoint === "new" ? null : editingContactPoint}
-          onCancel={() => setEditingContactPoint(null)}
-          onSave={async (input) => {
-            if (busyAction) return;
-            setBusyAction(editingContactPoint === "new" ? "create" : `update:${editingContactPoint.id}`);
-            setError(null);
-            try {
-              if (editingContactPoint === "new") {
-                await props.onCreate(props.partyId, input);
-              } else {
-                await props.onUpdate(editingContactPoint.id, input);
-              }
-              setEditingContactPoint(null);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht gespeichert werden.");
-              throw err;
-            } finally {
-              setBusyAction(null);
-            }
-          }}
-        />
-      ) : null}
-      {deletingContactPoint ? (
-        <ConfirmModal
-          title="Kontaktweg löschen?"
-          description={<p>„{deletingContactPoint.value}“ wird entfernt.</p>}
-          confirmLabel="Kontaktweg löschen"
-          busy={busyAction !== null}
-          onCancel={() => setDeletingContactPoint(null)}
-          onConfirm={async () => {
-            if (busyAction) return;
-            setBusyAction(`delete:${deletingContactPoint.id}`);
-            setError(null);
-            try {
-              await props.onDelete(deletingContactPoint.id);
-              setDeletingContactPoint(null);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht gelöscht werden.");
-            } finally {
-              setBusyAction(null);
-            }
-          }}
-        />
-      ) : null}
-    </Panel>
-  );
-}
-
-function ContactPointModal(props: {
-  contactPoint: PartyContactPoint | null;
-  onCancel: () => void;
-  onSave: (input: Omit<CreateContactPointDraft, "partyId">) => Promise<void>;
-}) {
-  const [type, setType] = useState<PartyContactPoint["type"]>(props.contactPoint?.type ?? "email");
-  const [label, setLabel] = useState(props.contactPoint?.label ?? "");
-  const [value, setValue] = useState(props.contactPoint?.value ?? "");
-  const [isPrimary, setIsPrimary] = useState(props.contactPoint?.isPrimary ?? false);
-  const [isPreferred, setIsPreferred] = useState(props.contactPoint?.isPreferred ?? false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const selectedType = contactPointTypeOption(type);
-
-  useModalEscape(props.onCancel);
-
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
-      <form
-        className="compact-modal party-edit-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Kontaktweg bearbeiten"
-        onMouseDown={(event) => event.stopPropagation()}
-        onKeyDown={(event) => handleModalEscape(event, props.onCancel)}
-        onSubmit={async (event) => {
-          event.preventDefault();
-          if (!value.trim() || busy) return;
-          setBusy(true);
-          setError(null);
-          try {
-            await props.onSave({
-              type,
-              label: label.trim() || null,
-              value: value.trim(),
-              isPrimary,
-              isPreferred,
-              ...contactPointCapabilities(type)
-            });
-          } catch (err) {
-            setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht gespeichert werden.");
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        <header className="modal-title-block">
-          <h2>{props.contactPoint ? "Kontaktweg bearbeiten" : "Kontaktweg hinzufügen"}</h2>
-        </header>
-        <label>
-          Typ
-          <select value={type} onChange={(event) => setType(event.target.value as PartyContactPoint["type"])}>
-            {contactPointTypeOptions.map((entry) => (
-              <option key={entry.value} value={entry.value}>{entry.label}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Label
-          <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="z.B. Zentrale, Vertrieb" />
-        </label>
-        <label>
-          Wert
-          <input autoFocus type={selectedType.inputType} value={value} onChange={(event) => setValue(event.target.value)} placeholder={selectedType.placeholder} />
-        </label>
-        <label className="inline-checkbox">
-          <input type="checkbox" checked={isPrimary} onChange={(event) => setIsPrimary(event.target.checked)} />
-          Primär
-        </label>
-        <label className="inline-checkbox">
-          <input type="checkbox" checked={isPreferred} onChange={(event) => setIsPreferred(event.target.checked)} />
-          Bevorzugt
-        </label>
-        {error ? <p className="inline-error">{error}</p> : null}
-        <footer className="modal-actions">
-          <button type="submit" className="primary-button" disabled={!value.trim() || busy}>Speichern</button>
-          <button type="button" className="small-button" onClick={props.onCancel} disabled={busy}>Abbrechen</button>
-        </footer>
-      </form>
-    </div>
-  );
-}
-
-function AddressesPanel(props: {
-  partyId: number;
-  addresses: PartyAddress[];
-  onCreate: (partyId: number, input: Omit<CreateAddressDraft, "partyId">) => Promise<void>;
-  onUpdate: (addressId: number, input: Partial<Omit<CreateAddressDraft, "partyId">>) => Promise<void>;
-  onDelete: (addressId: number) => Promise<void>;
-}) {
-  const [editingAddress, setEditingAddress] = useState<PartyAddress | "new" | null>(null);
-  const [deletingAddress, setDeletingAddress] = useState<PartyAddress | null>(null);
-  const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  return (
-    <Panel title="Postanschriften">
-      <div className="panel-heading-actions">
-        <button type="button" className="primary-button compact" onClick={() => setEditingAddress("new")} disabled={busyAction !== null}>
-          <Plus size={15} />
-          Anschrift
-        </button>
-      </div>
-      <div className="relationship-list">
-        {props.addresses.length === 0 ? <p className="muted-text">Noch keine Postanschriften.</p> : null}
-        {props.addresses.map((address) => (
-          <div className="relationship-row" key={address.id}>
-            <div className="entity-icon"><Building2 size={15} /></div>
-            <div>
-              <strong>{address.line1}</strong>
-              <p>{formatAddressLine(address)}{address.label ? ` · ${address.label}` : ""}{address.isPrimary ? " · primär" : ""}</p>
-            </div>
-            <button
-              type="button"
-              className="icon-button compact"
-              disabled={busyAction !== null}
-              title="Anschrift bearbeiten"
-              onClick={() => setEditingAddress(address)}
-            >
-              <Pencil size={14} />
-            </button>
-            <button
-              type="button"
-              className="icon-button compact"
-              disabled={busyAction !== null}
-              title="Anschrift löschen"
-              onClick={() => {
-                if (busyAction) return;
-                setDeletingAddress(address);
-              }}
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
-        ))}
-      </div>
-      {error ? <p className="inline-error">{error}</p> : null}
-      {editingAddress ? (
-        <AddressModal
-          address={editingAddress === "new" ? null : editingAddress}
-          onCancel={() => setEditingAddress(null)}
-          onSave={async (input) => {
-            if (busyAction) return;
-            setBusyAction(editingAddress === "new" ? "create" : `update:${editingAddress.id}`);
-            setError(null);
-            try {
-              if (editingAddress === "new") {
-                await props.onCreate(props.partyId, input);
-              } else {
-                await props.onUpdate(editingAddress.id, input);
-              }
-              setEditingAddress(null);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Anschrift konnte nicht gespeichert werden.");
-              throw err;
-            } finally {
-              setBusyAction(null);
-            }
-          }}
-        />
-      ) : null}
-      {deletingAddress ? (
-        <ConfirmModal
-          title="Anschrift löschen?"
-          description={<p>„{deletingAddress.line1}“ wird entfernt.</p>}
-          confirmLabel="Anschrift löschen"
-          busy={busyAction !== null}
-          onCancel={() => setDeletingAddress(null)}
-          onConfirm={async () => {
-            if (busyAction) return;
-            setBusyAction(`delete:${deletingAddress.id}`);
-            setError(null);
-            try {
-              await props.onDelete(deletingAddress.id);
-              setDeletingAddress(null);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Anschrift konnte nicht gelöscht werden.");
-            } finally {
-              setBusyAction(null);
-            }
-          }}
-        />
-      ) : null}
-    </Panel>
-  );
-}
-
-function AddressModal(props: {
-  address: PartyAddress | null;
-  onCancel: () => void;
-  onSave: (input: Omit<CreateAddressDraft, "partyId">) => Promise<void>;
-}) {
-  const [label, setLabel] = useState(props.address?.label ?? "");
-  const [line1, setLine1] = useState(props.address?.line1 ?? "");
-  const [line2, setLine2] = useState(props.address?.line2 ?? "");
-  const [postalCode, setPostalCode] = useState(props.address?.postalCode ?? "");
-  const [city, setCity] = useState(props.address?.city ?? "");
-  const [region, setRegion] = useState(props.address?.region ?? "");
-  const [country, setCountry] = useState(props.address?.country ?? "");
-  const [isPrimary, setIsPrimary] = useState(props.address?.isPrimary ?? false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useModalEscape(props.onCancel);
-
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
-      <form
-        className="compact-modal party-edit-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Postanschrift bearbeiten"
-        onMouseDown={(event) => event.stopPropagation()}
-        onKeyDown={(event) => handleModalEscape(event, props.onCancel)}
-        onSubmit={async (event) => {
-          event.preventDefault();
-          if (!line1.trim() || busy) return;
-          setBusy(true);
-          setError(null);
-          try {
-            await props.onSave({
-              label: label.trim() || null,
-              line1: line1.trim(),
-              line2: line2.trim() || null,
-              postalCode: postalCode.trim() || null,
-              city: city.trim() || null,
-              region: region.trim() || null,
-              country: country.trim() || null,
-              isPrimary
-            });
-          } catch (err) {
-            setError(err instanceof Error ? err.message : "Anschrift konnte nicht gespeichert werden.");
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        <header className="modal-title-block">
-          <h2>{props.address ? "Postanschrift bearbeiten" : "Postanschrift hinzufügen"}</h2>
-        </header>
-        <label>
-          Label
-          <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="z.B. Büro, Rechnung" />
-        </label>
-        <label>
-          Adresse 1
-          <input autoFocus value={line1} onChange={(event) => setLine1(event.target.value)} />
-        </label>
-        <label>
-          Adresse 2
-          <input value={line2} onChange={(event) => setLine2(event.target.value)} />
-        </label>
-        <div className="modal-two-column">
-          <label>
-            PLZ
-            <input value={postalCode} onChange={(event) => setPostalCode(event.target.value)} />
-          </label>
-          <label>
-            Ort
-            <input value={city} onChange={(event) => setCity(event.target.value)} />
-          </label>
-        </div>
-        <div className="modal-two-column">
-          <label>
-            Region
-            <input value={region} onChange={(event) => setRegion(event.target.value)} />
-          </label>
-          <label>
-            Land
-            <input value={country} onChange={(event) => setCountry(event.target.value)} />
-          </label>
-        </div>
-        <label className="inline-checkbox">
-          <input type="checkbox" checked={isPrimary} onChange={(event) => setIsPrimary(event.target.checked)} />
-          Primär
-        </label>
-        {error ? <p className="inline-error">{error}</p> : null}
-        <footer className="modal-actions">
-          <button type="submit" className="primary-button" disabled={!line1.trim() || busy}>Speichern</button>
-          <button type="button" className="small-button" onClick={props.onCancel} disabled={busy}>Abbrechen</button>
-        </footer>
-      </form>
-    </div>
-  );
-}
-
-function AddressBlock(props: {
-  partyId: number;
-  addresses: PartyAddress[];
-  onCreate: (partyId: number, input: Omit<CreateAddressDraft, "partyId">) => Promise<void>;
-  onUpdate: (addressId: number, input: Partial<Omit<CreateAddressDraft, "partyId">>) => Promise<void>;
-  onDelete: (addressId: number) => Promise<void>;
-}) {
-  const [editingAddress, setEditingAddress] = useState<PartyAddress | "new" | null>(null);
-  const [deletingAddress, setDeletingAddress] = useState<PartyAddress | null>(null);
-  const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  return (
-    <SectionBlock
-      title="Anschriften"
-      description="Postalische Orte und Rechnungsadressen."
-      actions={(
-        <button type="button" className="section-primary-action" onClick={() => setEditingAddress("new")} disabled={busyAction !== null}>
-          <Plus size={15} />
-          Anschrift hinzufügen
-        </button>
-      )}
-    >
-      <RelationList emptyTitle="Keine Anschriften" emptyDescription="Post- oder Rechnungsadressen können ergänzt werden.">
-        {props.addresses.map((address) => (
-          <RelationItem
-            key={address.id}
-            icon={<Building2 size={15} />}
-            title={address.line1}
-            meta={[formatAddressLine(address), address.label, address.isPrimary ? "primär" : null].filter(Boolean).join(" · ")}
-            actions={(
-              <>
-                <button
-                  type="button"
-                  className="icon-button compact"
-                  disabled={busyAction !== null}
-                  title="Anschrift bearbeiten"
-                  onClick={() => setEditingAddress(address)}
-                >
-                  <Pencil size={14} />
-                </button>
-                <button
-                  type="button"
-                  className="icon-button compact"
-                  disabled={busyAction !== null}
-                  title="Anschrift löschen"
-                  onClick={() => {
-                    if (busyAction) return;
-                    setDeletingAddress(address);
-                  }}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </>
-            )}
-          />
-        ))}
-      </RelationList>
-      {error ? <ErrorState title="Anschrift konnte nicht gespeichert werden" description={error} /> : null}
-      {editingAddress ? (
-        <AddressModal
-          address={editingAddress === "new" ? null : editingAddress}
-          onCancel={() => setEditingAddress(null)}
-          onSave={async (input) => {
-            if (busyAction) return;
-            setBusyAction(editingAddress === "new" ? "create" : `update:${editingAddress.id}`);
-            setError(null);
-            try {
-              if (editingAddress === "new") {
-                await props.onCreate(props.partyId, input);
-              } else {
-                await props.onUpdate(editingAddress.id, input);
-              }
-              setEditingAddress(null);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Anschrift konnte nicht gespeichert werden.");
-              throw err;
-            } finally {
-              setBusyAction(null);
-            }
-          }}
-        />
-      ) : null}
-      {deletingAddress ? (
-        <ConfirmModal
-          title="Anschrift löschen?"
-          description={<p>„{deletingAddress.line1}“ wird aus dieser Organisation entfernt.</p>}
-          confirmLabel="Anschrift löschen"
-          busy={busyAction !== null}
-          onCancel={() => setDeletingAddress(null)}
-          onConfirm={async () => {
-            if (busyAction) return;
-            setBusyAction(`delete:${deletingAddress.id}`);
-            setError(null);
-            try {
-              await props.onDelete(deletingAddress.id);
-              setDeletingAddress(null);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Anschrift konnte nicht gelöscht werden.");
-            } finally {
-              setBusyAction(null);
-            }
-          }}
-        />
-      ) : null}
-    </SectionBlock>
-  );
-}
-
 function OrganizationRelationsSection(props: {
   organization: Organization;
   people: Person[];
+  organizations: Organization[];
   relationshipTypes: RelationshipType[];
   relationships: OrganizationDetail["relationships"];
   onCreateRelationship: (input: {
@@ -9919,11 +10993,16 @@ function OrganizationRelationsSection(props: {
     status?: "active" | "inactive";
   }) => Promise<void>;
   onOpenPerson: (partyId: number) => void;
+  onOpenOrganization: (partyId: number) => void;
 }) {
-  const [managerOpen, setManagerOpen] = useState(false);
+  const [personManagerOpen, setPersonManagerOpen] = useState(false);
+  const [organizationManagerOpen, setOrganizationManagerOpen] = useState(false);
   const [personId, setPersonId] = useState("");
+  const [organizationId, setOrganizationId] = useState("");
   const [relationshipTypeId, setRelationshipTypeId] = useState("");
+  const [organizationRelationshipTypeId, setOrganizationRelationshipTypeId] = useState("");
   const [roleLabel, setRoleLabel] = useState("");
+  const [organizationRoleLabel, setOrganizationRoleLabel] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const memberRelationships = props.relationships.filter((relationship) => {
@@ -9943,17 +11022,25 @@ function OrganizationRelationsSection(props: {
     const otherParty = relationship.fromPartyId === props.organization.id ? relationship.toParty : relationship.fromParty;
     return otherParty.type !== "person";
   });
+  const existingOrganizationIds = new Set(otherRelationships.map((relationship) => (
+    relationship.fromPartyId === props.organization.id ? relationship.toParty.id : relationship.fromParty.id
+  )));
+  const availableOrganizations = props.organizations.filter((organization) => organization.id !== props.organization.id && !existingOrganizationIds.has(organization.id));
+  const defaultOrganizationRelationshipType =
+    props.relationshipTypes.find((type) => type.key === "partner_of")
+    ?? props.relationshipTypes.find((type) => type.key === "customer_of")
+    ?? props.relationshipTypes[0];
+  const selectedOrganizationRelationshipTypeId =
+    organizationRelationshipTypeId || (defaultOrganizationRelationshipType ? String(defaultOrganizationRelationshipType.id) : "");
 
   return (
-    <SectionBlock title="Beziehungen" description="Personen, Organisationen und DMAX-Kontexte, die mit dieser Organisation verbunden sind.">
+    <SectionBlock title="Beziehungen">
       <div className="relation-section-stack">
         <RelationGroup
           title="Personen"
-          description="Mitglieder und andere Personenbeziehungen."
-          emptyTitle="Keine Personenbeziehungen"
-          emptyDescription="Noch keine Person ist mit dieser Organisation verbunden."
+          emptyMode="none"
           actions={(
-            <button type="button" className="section-primary-action" onClick={() => setManagerOpen(true)} disabled={saving || availablePeople.length === 0 || props.relationshipTypes.length === 0}>
+            <button type="button" className="section-primary-action" onClick={() => setPersonManagerOpen(true)} disabled={saving || availablePeople.length === 0 || props.relationshipTypes.length === 0}>
               <Plus size={15} />
               Person verknüpfen
             </button>
@@ -9980,9 +11067,13 @@ function OrganizationRelationsSection(props: {
         </RelationGroup>
         <RelationGroup
           title="Organisationen"
-          description="Weitere Parteienbeziehungen."
-          emptyTitle="Keine Organisationsbeziehungen"
-          emptyDescription="Keine weitere Organisation ist verknüpft."
+          emptyMode="none"
+          actions={(
+            <button type="button" className="section-primary-action" onClick={() => setOrganizationManagerOpen(true)} disabled={saving || availableOrganizations.length === 0 || props.relationshipTypes.length === 0}>
+              <Plus size={15} />
+              Organisation verknüpfen
+            </button>
+          )}
         >
           {otherRelationships.map((relationship) => {
             const otherParty = relationship.fromPartyId === props.organization.id ? relationship.toParty : relationship.fromParty;
@@ -9998,18 +11089,19 @@ function OrganizationRelationsSection(props: {
                 icon={<Building2 size={16} />}
                 title={otherParty.displayName}
                 meta={[label, relationship.roleLabel].filter(Boolean).join(" · ")}
+                onOpen={() => props.onOpenOrganization(otherParty.id)}
               />
             );
           })}
         </RelationGroup>
       </div>
       {error ? <ErrorState title="Beziehung konnte nicht gespeichert werden" description={error} /> : null}
-      {managerOpen ? (
+      {personManagerOpen ? (
         <EditModal
           title="Person verknüpfen"
           label="Person mit Organisation verknüpfen"
           className="party-edit-modal"
-          onCancel={() => setManagerOpen(false)}
+          onCancel={() => setPersonManagerOpen(false)}
           onSubmit={async (event) => {
             event.preventDefault();
             const nextPersonId = Number(personId);
@@ -10027,7 +11119,7 @@ function OrganizationRelationsSection(props: {
               });
               setPersonId("");
               setRoleLabel("");
-              setManagerOpen(false);
+              setPersonManagerOpen(false);
             } catch (err) {
               setError(err instanceof Error ? err.message : "Beziehung konnte nicht hinzugefügt werden.");
             } finally {
@@ -10037,7 +11129,7 @@ function OrganizationRelationsSection(props: {
           footer={(
             <>
               <button type="submit" className="primary-button" disabled={!personId || !selectedRelationshipTypeId || saving}>Speichern</button>
-              <button type="button" className="small-button" onClick={() => setManagerOpen(false)} disabled={saving}>Abbrechen</button>
+              <button type="button" className="small-button" onClick={() => setPersonManagerOpen(false)} disabled={saving}>Abbrechen</button>
             </>
           )}
         >
@@ -10064,14 +11156,78 @@ function OrganizationRelationsSection(props: {
           </label>
         </EditModal>
       ) : null}
+      {organizationManagerOpen ? (
+        <EditModal
+          title="Organisation verknüpfen"
+          label="Organisation mit Organisation verknüpfen"
+          className="party-edit-modal"
+          onCancel={() => setOrganizationManagerOpen(false)}
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const nextOrganizationId = Number(organizationId);
+            const nextTypeId = Number(selectedOrganizationRelationshipTypeId);
+            if (!nextOrganizationId || !nextTypeId || saving) return;
+            setSaving(true);
+            setError(null);
+            try {
+              await props.onCreateRelationship({
+                fromPartyId: props.organization.id,
+                toPartyId: nextOrganizationId,
+                relationshipTypeId: nextTypeId,
+                roleLabel: organizationRoleLabel.trim() || null,
+                status: "active"
+              });
+              setOrganizationId("");
+              setOrganizationRoleLabel("");
+              setOrganizationManagerOpen(false);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Organisation konnte nicht verknüpft werden.");
+            } finally {
+              setSaving(false);
+            }
+          }}
+          footer={(
+            <>
+              <button type="submit" className="primary-button" disabled={!organizationId || !selectedOrganizationRelationshipTypeId || saving}>Speichern</button>
+              <button type="button" className="small-button" onClick={() => setOrganizationManagerOpen(false)} disabled={saving}>Abbrechen</button>
+            </>
+          )}
+        >
+          <label>
+            Organisation
+            <select value={organizationId} onChange={(event) => setOrganizationId(event.target.value)} disabled={saving}>
+              <option value="">Organisation auswählen</option>
+              {availableOrganizations.map((organization) => (
+                <option key={organization.id} value={organization.id}>{organization.displayName}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Beziehung
+            <select value={selectedOrganizationRelationshipTypeId} onChange={(event) => setOrganizationRelationshipTypeId(event.target.value)} disabled={saving || props.relationshipTypes.length === 0}>
+              {props.relationshipTypes.map((type) => (
+                <option key={type.id} value={type.id}>{type.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Rolle / Kontext
+            <input value={organizationRoleLabel} onChange={(event) => setOrganizationRoleLabel(event.target.value)} disabled={saving} />
+          </label>
+        </EditModal>
+      ) : null}
     </SectionBlock>
   );
 }
 
-function formatAddressLine(address: PartyAddress): string {
-  return [address.line2, [address.postalCode, address.city].filter(Boolean).join(" "), address.region, address.country]
-    .filter(Boolean)
-    .join(" · ");
+function partyRelationshipLabel(relationship: PartyRelationshipWithParties, perspectivePartyId: number): string {
+  const label =
+    relationship.relationshipType.directionality === "symmetric"
+      ? relationship.relationshipType.label
+      : relationship.fromPartyId === perspectivePartyId
+        ? relationship.relationshipType.label
+        : relationship.relationshipType.inverseLabel ?? relationship.relationshipType.label;
+  return [label, relationship.roleLabel].filter(Boolean).join(" · ");
 }
 
 function PartyRelationshipsPanel(props: { partyId: number; relationships: PersonDetail["relationships"] }) {
@@ -10103,18 +11259,68 @@ function PartyRelationshipsPanel(props: { partyId: number; relationships: Person
 }
 
 function OrganizationParticipationsSection(props: {
+  organization: Organization;
   participants: EntityParticipant[];
   initiatives: Initiative[];
   tasks: Task[];
+  onCreateParticipant: (input: {
+    partyId: number;
+    entityType: "initiative" | "task";
+    entityId: number;
+    roleLabel?: string | null;
+    isPrimary?: boolean;
+  }) => Promise<void>;
   onOpenInitiative: (initiativeId: number) => void;
   onOpenTask: (taskId: number) => void;
 }) {
   const initiativeById = new Map(props.initiatives.map((initiative) => [initiative.id, initiative]));
   const taskById = new Map(props.tasks.map((task) => [task.id, task]));
+  const linkedInitiativeIds = new Set(props.participants.filter((participant) => participant.entityType === "initiative").map((participant) => participant.entityId));
+  const linkedTaskIds = new Set(props.participants.filter((participant) => participant.entityType === "task").map((participant) => participant.entityId));
+  const availableInitiatives = props.initiatives.filter((initiative) => !linkedInitiativeIds.has(initiative.id));
+  const availableTasks = props.tasks.filter((task) => !linkedTaskIds.has(task.id));
+  const [linkType, setLinkType] = useState<"initiative" | "task" | null>(null);
+  const [entityId, setEntityId] = useState("");
+  const [roleLabel, setRoleLabel] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const availableEntities = linkType === "task" ? availableTasks : availableInitiatives;
 
   return (
-    <SectionBlock title="DMAX-Kontexte" description="Initiativen und Maßnahmen, in denen diese Organisation vorkommt.">
-      <RelationList emptyTitle="Keine DMAX-Kontexte" emptyDescription="Diese Organisation ist noch keiner Initiative oder Maßnahme zugeordnet.">
+    <SectionBlock
+      title="Verknüpfte Initiativen und Maßnahmen"
+      actions={(
+        <>
+          <button
+            type="button"
+            className="section-primary-action"
+            disabled={saving || availableInitiatives.length === 0}
+            onClick={() => {
+              setLinkType("initiative");
+              setEntityId("");
+              setRoleLabel("");
+            }}
+          >
+            <Plus size={15} />
+            Initiative verknüpfen
+          </button>
+          <button
+            type="button"
+            className="section-primary-action"
+            disabled={saving || availableTasks.length === 0}
+            onClick={() => {
+              setLinkType("task");
+              setEntityId("");
+              setRoleLabel("");
+            }}
+          >
+            <Plus size={15} />
+            Maßnahme verknüpfen
+          </button>
+        </>
+      )}
+    >
+      <RelationList emptyMode="none">
         {props.participants.map((participant) => {
           const title =
             participant.entityType === "initiative"
@@ -10136,6 +11342,58 @@ function OrganizationParticipationsSection(props: {
           );
         })}
       </RelationList>
+      {error ? <ErrorState title="Verknüpfung konnte nicht gespeichert werden" description={error} /> : null}
+      {linkType ? (
+        <EditModal
+          title={linkType === "task" ? "Maßnahme verknüpfen" : "Initiative verknüpfen"}
+          label={linkType === "task" ? "Organisation mit Maßnahme verknüpfen" : "Organisation mit Initiative verknüpfen"}
+          className="party-edit-modal"
+          onCancel={() => setLinkType(null)}
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const nextEntityId = Number(entityId);
+            if (!nextEntityId || saving) return;
+            setSaving(true);
+            setError(null);
+            try {
+              await props.onCreateParticipant({
+                partyId: props.organization.id,
+                entityType: linkType,
+                entityId: nextEntityId,
+                roleLabel: roleLabel.trim() || null,
+                isPrimary: false
+              });
+              setEntityId("");
+              setRoleLabel("");
+              setLinkType(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Verknüpfung konnte nicht gespeichert werden.");
+            } finally {
+              setSaving(false);
+            }
+          }}
+          footer={(
+            <>
+              <button type="submit" className="primary-button" disabled={!entityId || saving}>Speichern</button>
+              <button type="button" className="small-button" onClick={() => setLinkType(null)} disabled={saving}>Abbrechen</button>
+            </>
+          )}
+        >
+          <label>
+            {linkType === "task" ? "Maßnahme" : "Initiative"}
+            <select value={entityId} onChange={(event) => setEntityId(event.target.value)} disabled={saving}>
+              <option value="">{linkType === "task" ? "Maßnahme auswählen" : "Initiative auswählen"}</option>
+              {availableEntities.map((entity) => (
+                <option key={entity.id} value={entity.id}>{linkType === "task" ? (entity as Task).title : (entity as Initiative).name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Rolle / Kontext
+            <input value={roleLabel} onChange={(event) => setRoleLabel(event.target.value)} disabled={saving} />
+          </label>
+        </EditModal>
+      ) : null}
     </SectionBlock>
   );
 }
@@ -10203,6 +11461,18 @@ function salutationLabel(salutation: Person["salutation"]): string {
   if (salutation === "mr") return "Herr";
   if (salutation === "mrs") return "Frau";
   return "Anrede unbekannt";
+}
+
+function personHeaderContext(person: Person): string {
+  const nameParts = [person.firstName, person.lastName].filter(Boolean).join(" ");
+  return [
+    person.salutation !== "unknown" ? salutationLabel(person.salutation) : null,
+    person.academicTitle,
+    nameParts && nameParts !== person.displayName ? nameParts : null,
+    person.nameSuffix
+  ]
+    .filter(Boolean)
+    .join(" · ") || "Person";
 }
 
 function sortTasksByCompletionAndRank(tasks: Task[]): Task[] {
@@ -10868,74 +12138,6 @@ function OnboardingView({ onCreateCategory, onNavigate }: { onCreateCategory: (n
   );
 }
 
-function RichText({ text }: { text: string }) {
-  const blocks = text.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
-
-  return (
-    <div className="rich-text">
-      {blocks.map((block, index) => {
-        const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
-        if (lines.length > 1 && /^#{1,3}\s+/.test(lines[0])) {
-          return (
-            <section className="rich-section" key={index}>
-              <h4>{lines[0].replace(/^#{1,3}\s+/, "")}</h4>
-              <RichText text={lines.slice(1).join("\n")} />
-            </section>
-          );
-        }
-        if (lines.length === 1 && /^#{1,3}\s+/.test(lines[0])) {
-          return <h4 key={index}>{lines[0].replace(/^#{1,3}\s+/, "")}</h4>;
-        }
-        const ordered = lines.every((line) => /^\d+\.\s+/.test(line));
-        const unordered = lines.every((line) => /^[-*]\s+/.test(line));
-        if (ordered || unordered) {
-          const Tag = ordered ? "ol" : "ul";
-          return (
-            <Tag key={index}>
-              {lines.map((line) => (
-                <li key={line}>{renderInlineMarkup(line.replace(/^\d+\.\s+|^[-*]\s+/, ""))}</li>
-              ))}
-            </Tag>
-          );
-        }
-        return <p key={index}>{renderInlineMarkup(block)}</p>;
-      })}
-    </div>
-  );
-}
-
-function renderInlineMarkup(text: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const pattern = /(\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s)<]+))/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      nodes.push(text.slice(lastIndex, match.index));
-    }
-
-    if (match[2]) {
-      nodes.push(<strong key={`${match.index}-strong`}>{match[2]}</strong>);
-    } else {
-      const label = match[3] ?? match[5];
-      const href = match[4] ?? match[5];
-      nodes.push(
-        <a key={`${match.index}-link`} href={href} target="_blank" rel="noreferrer">
-          {label}
-        </a>
-      );
-    }
-    lastIndex = pattern.lastIndex;
-  }
-
-  if (lastIndex < text.length) {
-    nodes.push(text.slice(lastIndex));
-  }
-
-  return nodes.length ? nodes : [text];
-}
-
 function ActivityTrail({ activities }: { activities: ChatActivity[] }) {
   return (
     <div className="activity-trail">
@@ -10978,16 +12180,6 @@ function Metric({ label, value }: { label: string; value: number }) {
     <div className="metric">
       <span>{label}</span>
       <strong>{value}</strong>
-    </div>
-  );
-}
-
-function EmptyState({ title, description, action }: { title: string; description?: string | null; action?: ReactNode }) {
-  return (
-    <div className="empty-state">
-      <strong>{title}</strong>
-      {description ? <p>{description}</p> : null}
-      {action ? <div className="empty-state-action">{action}</div> : null}
     </div>
   );
 }

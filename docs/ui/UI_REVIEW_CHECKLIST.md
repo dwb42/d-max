@@ -6,6 +6,8 @@ A UI task is not done until this checklist has been applied.
 
 Also check `UI_DESIGN_DECISIONS.md`. Any implementation that conflicts with an accepted decision in that file fails review unless the decision is explicitly changed first.
 
+For entity detail routes, also check `UI_ENTITY_DETAIL_CANONICAL_PATTERN.md`.
+
 ## 1. Product coherence
 
 - Does this screen feel like part of DMAX rather than a standalone implementation?
@@ -19,6 +21,7 @@ Also check `UI_DESIGN_DECISIONS.md`. Any implementation that conflicts with an a
 - Is the primary object obvious within three seconds?
 - Is the object type clear?
 - Is the title/name visually dominant enough?
+- Does the header avoid default decorative title icons and unnecessary entity-type eyebrows?
 - Is the current state/status clear?
 - Is the main next action clear?
 
@@ -45,6 +48,7 @@ Also check `UI_DESIGN_DECISIONS.md`. Any implementation that conflicts with an a
 - Are edits intentional and clear?
 - Are inline edits used only for small high-frequency fields?
 - Are grouped fields edited in a modal or drawer?
+- Are description/context blocks editable through a quiet direct interaction rather than mandatory visible edit/add buttons?
 - Are save/cancel actions consistent?
 - Are validation and save states handled?
 
@@ -55,12 +59,16 @@ Also check `UI_DESIGN_DECISIONS.md`. Any implementation that conflicts with an a
 - Are destructive actions separated or protected?
 - Are repeated actions named consistently?
 - Are actions placed where the user expects them?
+- Are useful section-level actions visible enough even when empty relation groups render no heavy empty block?
+- Are link actions named consistently, for example `Person verknüpfen`, `Organisation verknüpfen`, `Initiative verknüpfen`, `Maßnahme verknüpfen`?
 
 ## 7. Copy and terminology
 
 - Are object names consistent with `UI_COPY_LANGUAGE.md`?
 - Is the current language decision in `UI_DESIGN_DECISIONS.md` respected?
 - Are section labels specific and useful?
+- Does each section subtitle add real value, or can it be removed?
+- Does the section explain itself through title and content rather than redundant helper text?
 - Are buttons written as clear verbs?
 - Are error and empty states specific?
 - Is there any unnecessary explanatory copy?
@@ -69,10 +77,13 @@ Also check `UI_DESIGN_DECISIONS.md`. Any implementation that conflicts with an a
 
 - Are linked objects shown in a consistent relationship pattern?
 - Are relationships grouped when necessary?
+- Are relation group subtitles omitted when the group title is self-explanatory?
 - Is the relationship type clear where relevant?
+- Are relationship display and dense relationship management separated when inline controls become too heavy?
 - Can the user open related objects easily?
 - Are relation actions such as link/unlink/edit clear?
 - Are read-only relationship display and relationship editing separated?
+- Does `Verknüpfte Initiativen und Maßnahmen` label party-to-initiative/task links where applicable?
 
 ## 9. Empty states
 
@@ -80,6 +91,9 @@ Also check `UI_DESIGN_DECISIONS.md`. Any implementation that conflicts with an a
 - Is the empty state specific to the section?
 - Does it suggest a reasonable next action?
 - Does it avoid generic "No data" language?
+- Are ordinary empty relationship groups visually light rather than heavy cards?
+- Are empty relationship groups creating a wall of absence?
+- Is a full `EmptyState` used only when the absence itself is important enough to explain?
 
 ## 10. Loading states
 

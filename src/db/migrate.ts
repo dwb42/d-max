@@ -15,6 +15,7 @@ export function migrate(databasePath?: string): void {
     migrateInitiativeStorage(db);
     migrateExistingAppChatMessages(db);
     migrateRemovedThinkingDomain(db);
+    migrateAppChatAudioMetadata(db);
     migrateSortOrder(db);
     migrateCategoryColors(db);
     migrateCategoryEmojis(db);
@@ -176,6 +177,23 @@ function migrateExistingAppChatMessages(db: ReturnType<typeof openDatabase>): vo
   if (!chatColumns.some((column) => column.name === "conversation_id")) {
     db.exec("alter table app_chat_messages add column conversation_id integer references app_conversations(id)");
   }
+}
+
+function migrateAppChatAudioMetadata(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "app_chat_messages")) {
+    return;
+  }
+
+  ensureColumn(
+    db,
+    "app_chat_messages",
+    "audio_generation_status",
+    "text not null default 'none' check (audio_generation_status in ('none', 'pending', 'ready', 'failed'))"
+  );
+  ensureColumn(db, "app_chat_messages", "audio_provider", "text");
+  ensureColumn(db, "app_chat_messages", "audio_error", "text");
+  ensureColumn(db, "app_chat_messages", "audio_generated_from_message_id", "integer references app_chat_messages(id)");
+  ensureColumn(db, "app_chat_messages", "audio_generated_at", "text");
 }
 
 function migratePromptLogs(db: ReturnType<typeof openDatabase>): void {

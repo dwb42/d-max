@@ -40,6 +40,9 @@ import { TaskChecklistItemRepository } from "../repositories/task-checklist-item
 import { StateEventRepository } from "../repositories/state-events.js";
 import type { CreateStateEventInput, StateEvent } from "../repositories/state-events.js";
 import { AppChatService } from "../chat/app-chat.js";
+import type { AppChatMessageResult } from "../chat/app-chat.js";
+import { AppChatRepository } from "../repositories/app-chat.js";
+import type { AppChatMessage } from "../repositories/app-chat.js";
 import { conversationContextSchema, listPromptTemplates } from "../chat/conversation-context.js";
 import {
   checkOpenClawGatewayStatus,
@@ -50,6 +53,7 @@ import {
 } from "../chat/openclaw-agent.js";
 import type { OpenClawActivityCursor } from "../chat/openclaw-agent.js";
 import { transcribeAudio } from "../chat/openai-transcription.js";
+import { synthesizeSpeech } from "../chat/text-to-speech.js";
 import { createLiveKitVoiceSession } from "./livekit.js";
 import { sendStaticWebAsset } from "./static-files.js";
 import { createChatTurnTraceId, recordChatTurnDiagnosticEvent } from "../diagnostics/chat-turns.js";
@@ -83,6 +87,7 @@ const tasks = new TaskRepository(db);
 const taskChecklistItems = new TaskChecklistItemRepository(db);
 const stateEvents = new StateEventRepository(db);
 const chat = new AppChatService(db);
+const chatMessages = new AppChatRepository(db);
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -1195,7 +1200,7 @@ const server = http.createServer(async (req, res) => {
       const agentResult = await chat.runPreparedTurn(prepared);
       const result = chat.completePreparedTurn(prepared, agentResult);
       recordApiDiagnostic(traceId, traceStartedAt, "api_response_send_started", { conversationId: result.conversationId });
-      sendJson(res, 200, result);
+      sendJson(res, 200, appChatResultForApi(result));
       return;
     }
 
@@ -1252,20 +1257,21 @@ const server = http.createServer(async (req, res) => {
           clearInterval(activityInterval);
           const activities = agentResult.activities.length ? agentResult.activities : publishActivities();
           const result = chat.completePreparedTurn(prepared, { ...agentResult, activities });
+          const apiResult = appChatResultForApi(result);
           send("activity", { activities: result.activities });
           recordApiDiagnostic(traceId, traceStartedAt, "api_sse_final_activity_sent", { activityCount: result.activities.length });
           let sentFirstAnswerDelta = false;
-          for (const chunk of chunkText(result.reply, 18)) {
+          for (const chunk of chunkText(apiResult.reply, 18)) {
             if (!sentFirstAnswerDelta) {
               sentFirstAnswerDelta = true;
-              recordApiDiagnostic(traceId, traceStartedAt, "api_sse_first_answer_delta_sent", { replyChars: result.reply.length });
+              recordApiDiagnostic(traceId, traceStartedAt, "api_sse_first_answer_delta_sent", { replyChars: apiResult.reply.length });
             }
             send("answer_delta", { delta: chunk });
             await delay(18);
           }
-          recordApiDiagnostic(traceId, traceStartedAt, "api_sse_answer_deltas_finished", { replyChars: result.reply.length });
-          send("done", result);
-          recordApiDiagnostic(traceId, traceStartedAt, "api_sse_done_sent", { conversationId: result.conversationId });
+          recordApiDiagnostic(traceId, traceStartedAt, "api_sse_answer_deltas_finished", { replyChars: apiResult.reply.length });
+          send("done", apiResult);
+          recordApiDiagnostic(traceId, traceStartedAt, "api_sse_done_sent", { conversationId: apiResult.conversationId });
         } catch (error) {
           clearInterval(activityInterval);
           if (isAbortError(error) || signal.aborted) {
@@ -1275,17 +1281,18 @@ const server = http.createServer(async (req, res) => {
           const detail = error instanceof Error ? error.message : "Unknown agent error";
           const agentResult = { text: `Ich konnte den Agent-Turn nicht sauber abschließen: ${detail}`, activities: [] };
           const result = chat.completePreparedTurn(prepared, agentResult);
+          const apiResult = appChatResultForApi(result);
           send("activity", { activities: result.activities });
           let sentFirstAnswerDelta = false;
-          for (const chunk of chunkText(result.reply, 18)) {
+          for (const chunk of chunkText(apiResult.reply, 18)) {
             if (!sentFirstAnswerDelta) {
               sentFirstAnswerDelta = true;
-              recordApiDiagnostic(traceId, traceStartedAt, "api_sse_first_answer_delta_sent", { replyChars: result.reply.length, error: true });
+              recordApiDiagnostic(traceId, traceStartedAt, "api_sse_first_answer_delta_sent", { replyChars: apiResult.reply.length, error: true });
             }
             send("answer_delta", { delta: chunk });
             await delay(18);
           }
-          send("done", result);
+          send("done", apiResult);
           recordApiDiagnostic(traceId, traceStartedAt, "api_sse_error_done_sent", { error: detail });
         }
       }, traceId);
@@ -1308,7 +1315,79 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/api/chat/messages") {
       const conversationId = parseOptionalPositiveInt(url.searchParams.get("conversationId"));
-      sendJson(res, 200, { messages: chat.listMessages(conversationId ? { conversationId } : undefined) });
+      sendJson(res, 200, { messages: chat.listMessages(conversationId ? { conversationId } : undefined).map(chatMessageForApi) });
+      return;
+    }
+
+    const chatMessageAudioMatch = url.pathname.match(/^\/api\/chat\/messages\/(\d+)\/audio$/);
+    if (req.method === "POST" && chatMessageAudioMatch) {
+      const messageId = Number(chatMessageAudioMatch[1]);
+      const message = chatMessages.findById(messageId);
+      if (!message || message.role !== "assistant") {
+        sendJson(res, 404, { error: "Assistant chat message not found" });
+        return;
+      }
+
+      const existingAudio = assistantAudioAttachment(message.id);
+      if (existingAudio) {
+        const updated = message.audioGenerationStatus === "ready"
+          ? message
+          : chatMessages.updateAudio({
+              id: message.id,
+              audioGenerationStatus: "ready",
+              audioError: null,
+              audioGeneratedAt: message.audioGeneratedAt ?? new Date().toISOString()
+            });
+        sendJson(res, 200, { message: chatMessageForApi(updated) });
+        return;
+      }
+
+      chatMessages.updateAudio({
+        id: message.id,
+        audioGenerationStatus: "pending",
+        audioProvider: "openai",
+        audioError: null
+      });
+
+      try {
+        const speech = await synthesizeSpeech({ text: message.content });
+        const stored = mediaStorage.store({
+          buffer: speech.audio,
+          mimeType: speech.mimeType,
+          originalName: `dmax-chat-message-${message.id}.mp3`
+        });
+        const asset = mediaAssets.findByHash(stored.sha256, stored.byteSize)
+          ?? mediaAssets.create({
+            ...stored,
+            summary: `Sprachantwort zu Chat-Nachricht ${message.id}`,
+            textExcerpt: null,
+            transcript: null
+          });
+        const attachment = mediaLinks.create({
+          assetId: asset.id,
+          entityType: "app_chat_message",
+          entityId: message.id,
+          role: "assistant_audio"
+        });
+        emitApiStateEvent(stateEventForMediaLink("createChatMessageAudio", attachment));
+        const updated = chatMessages.updateAudio({
+          id: message.id,
+          audioGenerationStatus: "ready",
+          audioProvider: `${speech.provider}:${speech.model}`,
+          audioError: null,
+          audioGeneratedAt: new Date().toISOString()
+        });
+        sendJson(res, 200, { message: chatMessageForApi(updated) });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unknown text-to-speech error";
+        const updated = chatMessages.updateAudio({
+          id: message.id,
+          audioGenerationStatus: "failed",
+          audioProvider: "openai",
+          audioError: detail
+        });
+        sendJson(res, 500, { error: detail, message: chatMessageForApi(updated) });
+      }
       return;
     }
 
@@ -2161,6 +2240,10 @@ function ensureMediaEntityExists(entityType: MediaEntityType, entityId: number):
     if (!tasks.findById(entityId)) throw new Error(`Task not found: ${entityId}`);
     return;
   }
+  if (entityType === "app_chat_message") {
+    if (!chatMessages.findById(entityId)) throw new Error(`Chat message not found: ${entityId}`);
+    return;
+  }
 
   throw new Error(`Media attachments for ${entityType} are not supported yet`);
 }
@@ -2177,6 +2260,29 @@ function mediaAttachmentForApi(attachment: MediaAttachment): Omit<MediaAttachmen
   return {
     ...attachment,
     asset: mediaAssetForApi(attachment.asset)
+  };
+}
+
+function assistantAudioAttachment(messageId: number): MediaAttachment | null {
+  return mediaLinks.listForEntity("app_chat_message", messageId).find((attachment) => attachment.role === "assistant_audio") ?? null;
+}
+
+function chatMessageForApi(message: AppChatMessage): AppChatMessage & {
+  audioAttachment: ReturnType<typeof mediaAttachmentForApi> | null;
+} {
+  const attachment = assistantAudioAttachment(message.id);
+  return {
+    ...message,
+    audioAttachment: attachment ? mediaAttachmentForApi(attachment) : null
+  };
+}
+
+function appChatResultForApi(result: AppChatMessageResult): Omit<AppChatMessageResult, "messages"> & {
+  messages: ReturnType<typeof chatMessageForApi>[];
+} {
+  return {
+    ...result,
+    messages: result.messages.map(chatMessageForApi)
   };
 }
 

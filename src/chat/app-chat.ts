@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import { AppConversationRepository } from "../repositories/app-conversations.js";
 import type { AppConversation } from "../repositories/app-conversations.js";
 import { AppChatRepository } from "../repositories/app-chat.js";
-import type { AppChatMessage } from "../repositories/app-chat.js";
+import type { AppChatMessage, AppChatSource } from "../repositories/app-chat.js";
 import { AppPromptLogRepository } from "../repositories/app-prompt-logs.js";
 import type { AppPromptLog } from "../repositories/app-prompt-logs.js";
 import { prepareOpenClawSession, readOpenClawTrajectorySummary, runOpenClawSessionTurn } from "./openclaw-agent.js";
@@ -37,6 +37,8 @@ export type AppChatAgentRunner = (
 
 export type PreparedAppChatTurn = {
   conversationId: number;
+  userMessageId: number;
+  userMessageSource: AppChatSource;
   promptLogId: number;
   context: ConversationContext;
   agentMessage: string;
@@ -250,6 +252,8 @@ export class AppChatService {
 
     return {
       conversationId: conversation.id,
+      userMessageId: userMessage.id,
+      userMessageSource: userMessage.source,
       promptLogId: promptLog.id,
       context: resolved.context,
       agentMessage,
@@ -303,7 +307,9 @@ export class AppChatService {
       conversationId: prepared.conversationId,
       role: "assistant",
       content: agentResult.text,
-      source: "system"
+      source: "system",
+      audioGenerationStatus: prepared.userMessageSource === "app_voice_message" ? "pending" : "none",
+      audioGeneratedFromMessageId: prepared.userMessageSource === "app_voice_message" ? prepared.userMessageId : null
     });
     addTurnTraceEvent(prepared.trace, "assistant_message_persisted", {
       assistantMessageId: assistantMessage.id

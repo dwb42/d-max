@@ -11,6 +11,20 @@ Evidence sources:
 - `docs/ui/UI_PATTERN_GAPS.md`
 - `docs/ui/UI_SCREENSHOT_INVENTORY.md`
 - `docs/ui/UI_SCREENSHOT_AUDIT.md`
+- `docs/ui/UI_REFERENCE_REVIEW_ORGANIZATION_DETAIL.md`
+- `docs/ui/UI_REFERENCE_REVIEW_INITIATIVE_PROJECT_DETAIL.md`
+- `docs/ui/UI_ENTITY_DETAIL_CANONICAL_PATTERN.md`
+
+## Phase 8 consolidation note
+
+Phase 8 consolidates the accepted entity detail direction in `UI_ENTITY_DETAIL_CANONICAL_PATTERN.md` and the extraction plan in `UI_COMPONENT_EXTRACTION_PLAN.md`.
+
+The validated reference pages are:
+
+- `/organizations/:id` for context/contact-oriented detail pages.
+- `/projects/:id` and `/initiatives/:id` for planning/action-oriented detail pages.
+
+Next recommended implementation phase: Phase 9A, extracting canonical entity detail components before migrating another route.
 
 ## 1. Executive Summary
 
@@ -218,12 +232,12 @@ This table is the default direction if German is confirmed.
 
 ### UI-DEC-015: Empty sections on detail pages
 
-- Decision: Empty detail sections must be useful but visually subordinate. Empty relationship groups should collapse or de-emphasize when they are not the current primary workflow.
+- Decision: Empty detail sections must be useful but visually subordinate. Ordinary empty relationship groups should collapse, render no body, or use a tiny inline hint when they are not the current primary workflow. Heavy empty-state cards are reserved for meaningful empty pages, major empty work areas or absence that is itself action-relevant.
 - Rationale: Empty boxes with equal weight make sparse entities feel busier than they are.
 - Evidence from audit: `03`, `06`, `11`, `24` show empty panels/columns competing with populated content.
 - Applies to: relationships, contact points, addresses, tasks, notes, descriptions.
-- Implementation implications: `EmptyState` must support compact section variant and optional action.
-- Components involved: `EmptyState`, `SectionBlock`, `RelationGroup`, `DescriptionBlock`.
+- Implementation implications: `RelationList` / `RelationGroup` must support light empty behavior such as hidden empty body, inline hint, or full card only when justified. `EmptyState` must not be the automatic default for every empty relation group.
+- Components involved: `EmptyState`, `SectionBlock`, `RelationList`, `RelationGroup`, `DescriptionBlock`.
 - Priority: high.
 - Status: accepted.
 
@@ -255,11 +269,11 @@ This table is the default direction if German is confirmed.
 
 ### UI-DEC-018: Section block usage
 
-- Decision: `SectionBlock` is the default detail-page section primitive. It must include a consistent `SectionHeader`, optional description, action slot, body and compact empty state.
+- Decision: `SectionBlock` is the default detail-page section primitive. It must include a consistent `SectionHeader`, optional description, action slot, body and compact empty state. Section descriptions are optional, not default, and must be omitted when the title and content are self-explanatory.
 - Rationale: Current panels use similar visual boxes without shared hierarchy.
 - Evidence from audit: `03`, `06`, `08`, `10`, `11`, `14` show many bordered boxes of equal weight.
 - Applies to: all detail pages, utility pages where appropriate.
-- Implementation implications: existing generic `Panel` should evolve into `SectionBlock` or be wrapped by it during migration.
+- Implementation implications: existing generic `Panel` should evolve into `SectionBlock` or be wrapped by it during migration. Do not add subtitles like `Direkte Wege zur Organisation`, `Postalische Orte und Rechnungsadressen` or generic relationship explanations when titles such as `Kontaktwege`, `Anschriften` and `Beziehungen` are enough.
 - Components involved: `SectionBlock`, `SectionHeader`, `EmptyState`.
 - Priority: high.
 - Status: accepted.
@@ -325,11 +339,11 @@ This table is the default direction if German is confirmed.
 
 ### UI-DEC-024: Relationship management
 
-- Decision: Relationship reading and relationship editing must be separated. Complex add/remove/edit flows open `RelationshipManager` in a drawer or modal with `RelationPicker`; inline relationship forms are not default.
+- Decision: Relationship reading and relationship editing must be separated. `RelationList`, `RelationGroup` and `RelationItem` are display primitives. Section/group-level link actions may be visible, but complex add/remove/edit flows open `RelationshipManager` in a drawer or modal with `RelationPicker`; inline relationship forms are not default.
 - Rationale: Inline relationship editing competes with reading current relationships.
 - Evidence from audit: `03-organization-detail.png` shows inline member creation; Phase 2 identifies `InitiativeRelationsPanel` as a four-column display/edit mix.
 - Applies to: organization members, participants, party relationships, initiative dependencies, DMAX participations.
-- Implementation implications: first reference route should display members/relationships read-first and open add/link in a manager.
+- Implementation implications: relationship sections should keep add/link actions visible but calm. Use labels such as `Person verknüpfen`, `Organisation verknüpfen`, `Initiative verknüpfen` and `Maßnahme verknüpfen` when the backend/data model supports those links. Do not turn empty relation groups into heavy "nothing here" blocks.
 - Components involved: `RelationshipManager`, `RelationPicker`, `RelationList`, `EditDrawer`, `EditModal`.
 - Priority: high.
 - Status: accepted.
@@ -338,22 +352,22 @@ This table is the default direction if German is confirmed.
 
 ### UI-DEC-025: Contact points
 
-- Decision: Contact points use `ContactPointList` and `ContactPointEditor`. Display rows show type, value, optional label, primary/preferred state and copy/open/edit actions.
+- Decision: Contact points use `ContactPointList` and `ContactPointEditor`. Display rows show type, value, optional label, primary/preferred state and copy/open/edit actions. `Kontaktwege` is normally self-explanatory and does not need a subtitle.
 - Rationale: Contact points are reused by people and organizations and are close to canonical already.
 - Evidence from audit: `03`, `19`, `25` show the same contact point modal/list pattern across parties.
 - Applies to: `/people/:id`, `/organizations/:id`.
-- Implementation implications: promote current party contact implementation into a shared component during organization reference work.
+- Implementation implications: promote current party contact implementation into a shared component during organization reference work. Keep `Kontaktweg hinzufügen` visible enough when the list is empty, but keep the empty copy compact.
 - Components involved: `ContactPointList`, `ContactPointEditor`, `EditModal`, `EmptyState`.
 - Priority: high.
 - Status: accepted.
 
 ### UI-DEC-026: Addresses
 
-- Decision: Addresses use `AddressBlock` and `AddressEditor`. Display mode is human-readable address lines; edit mode is a structured modal/drawer.
+- Decision: Addresses use `AddressBlock` and `AddressEditor`. Display mode is human-readable address lines; edit mode is a structured modal/drawer. `Anschriften` is normally self-explanatory and does not need a subtitle.
 - Rationale: Addresses should not look like raw postal field grids outside editing.
 - Evidence from audit: `03` shows address display; `20` shows raw address edit fields.
 - Applies to: organizations now; people later if person addresses are added.
-- Implementation implications: organization reference route should keep address display compact and move editing to `AddressEditor`.
+- Implementation implications: organization reference route should keep address display compact and move editing to `AddressEditor`. Keep `Anschrift hinzufügen` visible enough when the list is empty, but keep the empty copy compact.
 - Components involved: `AddressBlock`, `AddressEditor`, `EditModal`, `EmptyState`.
 - Priority: medium.
 - Status: accepted.
