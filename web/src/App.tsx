@@ -1,7 +1,9 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Children, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   DragEvent,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   MutableRefObject,
   PointerEvent as ReactPointerEvent,
@@ -149,6 +151,11 @@ import type {
   CalendarEventVisibilityHiddenScope,
   CalendarSource,
   ConversationContext,
+  ContextPayload,
+  ContextPayloadBlock,
+  ContextPayloadDeduplication,
+  ContextPayloadEntity,
+  ContextPayloadOmittedEntity,
   GoogleCalendarAccountStatus,
   GoogleCalendarAuthStatus,
   GoogleCalendarListItem,
@@ -571,6 +578,17 @@ function conversationContextKey(context: ConversationContext | null): string {
   }
 }
 
+function contextualAgentErrorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : "";
+  if (message.includes("contextEntityId is required")) {
+    return "DMAX konnte den Kontext für diese Ansicht nicht öffnen. Der technische Kontext wurde nicht vollständig übergeben.";
+  }
+  if (message.includes("gateway") || message.includes("OpenClaw")) {
+    return "DMAX ist gerade nicht erreichbar. Bitte versuche es gleich erneut.";
+  }
+  return "Der DMAX-Kontext konnte gerade nicht geladen werden.";
+}
+
 async function loadPersistedChatMessages(conversationId?: number | null): Promise<ChatMessage[]> {
   const messages = await fetchChatMessages(conversationId);
   return messages.map(chatMessageFromPersisted);
@@ -637,6 +655,7 @@ export default function App() {
   const [organizationList, setOrganizationList] = useState<Organization[] | null>(null);
   const [personDetail, setPersonDetail] = useState<PersonDetail | null>(null);
   const [organizationDetail, setOrganizationDetail] = useState<OrganizationDetail | null>(null);
+  const [organizationLoadError, setOrganizationLoadError] = useState<string | null>(null);
   const [participantRoleTypes, setParticipantRoleTypes] = useState<ParticipantRoleType[]>([]);
   const [relationshipTypes, setRelationshipTypes] = useState<RelationshipType[]>([]);
   const [organizationCoreModalOpen, setOrganizationCoreModalOpen] = useState(false);
@@ -863,7 +882,7 @@ export default function App() {
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          text: err instanceof Error ? err.message : "Chat request failed."
+          text: contextualAgentErrorMessage(err)
         }
       ]);
     } finally {
@@ -903,6 +922,14 @@ export default function App() {
   }
 
   async function loadContextualAgent(context: ConversationContext, label: string, preferredConversationId?: number | null) {
+    setAgentDrawer({
+      open: true,
+      context,
+      label,
+      conversationId: null,
+      conversations: []
+    });
+    setChatMessages([]);
     try {
       setError(null);
       setActiveActivityConversationId(null);
@@ -920,7 +947,7 @@ export default function App() {
       });
       setChatMessages(messages);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load contextual chat.");
+      setError(contextualAgentErrorMessage(err));
     }
   }
 
@@ -948,7 +975,7 @@ export default function App() {
       }));
       setChatMessages([]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create chat session.");
+      setError(contextualAgentErrorMessage(err));
     }
   }
 
@@ -1314,14 +1341,20 @@ export default function App() {
   useEffect(() => {
     if (route.view !== "organization" || !route.partyId) {
       setOrganizationDetail(null);
+      setOrganizationLoadError(null);
       setOrganizationCoreModalOpen(false);
       return;
     }
 
     setOrganizationCoreModalOpen(false);
+    setOrganizationDetail(null);
+    setOrganizationLoadError(null);
     fetchOrganizationDetail(route.partyId)
       .then(setOrganizationDetail)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load organization."));
+      .catch(() => {
+        setOrganizationDetail(null);
+        setOrganizationLoadError("Organisation nicht gefunden");
+      });
     fetchPeople()
       .then(setPeopleList)
       .catch(() => undefined);
@@ -1429,6 +1462,7 @@ export default function App() {
           </div>
           <InitiativeDetailHeader
             initiative={initiative}
+            category={category ?? null}
             projectCalendarBinding={initiativeDetail?.projectCalendarBinding ?? null}
             onUpdateInitiative={async (initiativeId, input) => {
               await updateInitiative(initiativeId, input);
@@ -1497,6 +1531,8 @@ export default function App() {
     }
 
     if (view === "organization") {
+      const organization = organizationDetail?.organization ?? null;
+      const organizationTypeLabel = organization?.organizationType?.trim() || "Organisation";
       return (
         <div className="content-header-title">
           <div className="back-actions">
@@ -1506,21 +1542,48 @@ export default function App() {
               </button>
             </div>
           </div>
-          <div className="section-heading">
-            <div className="initiative-title-line">
-              <Building2 size={24} />
+          <EntityHeader
+            titleContent={(
+              <InlineEditableText
+                value={organization?.displayName ?? "Organisation"}
+                label="Organisationsname"
+                required
+                disabled={!organization}
+                className="entity-title-edit"
+                onSave={async (value) => {
+                  if (!organization) return;
+                  await updateOrganization(organization.id, { name: value });
+                  setOrganizationDetail(await fetchOrganizationDetail(organization.id));
+                  setOrganizationList(await fetchOrganizations());
+                }}
+              />
+            )}
+            subtitleContent={(
+              <InlineEditableText
+                value={organizationTypeLabel}
+                label="Organisationstyp"
+                disabled={!organization}
+                className="entity-subtitle-edit"
+                onSave={async (value) => {
+                  if (!organization) return;
+                  await updateOrganization(organization.id, { organizationType: value.trim() || null });
+                  setOrganizationDetail(await fetchOrganizationDetail(organization.id));
+                  setOrganizationList(await fetchOrganizations());
+                }}
+              />
+            )}
+            secondaryActions={organizationDetail ? (
               <button
                 type="button"
-                className="page-title-button"
+                className="small-button header-secondary-action"
                 onClick={() => setOrganizationCoreModalOpen(true)}
-                disabled={!organizationDetail}
                 title="Stammdaten bearbeiten"
               >
-                {organizationDetail?.organization.displayName ?? "Organisation"}
+                <Pencil size={15} />
+                Stammdaten
               </button>
-            </div>
-            <p>{organizationDetail?.organization.organizationType ?? "Organisation"}</p>
-          </div>
+            ) : null}
+          />
         </div>
       );
     }
@@ -1553,7 +1616,7 @@ export default function App() {
 
   return (
     <div
-      className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${agentDrawer.open ? "with-agent-drawer" : ""}`}
+      className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${agentDrawer.open ? "with-agent-drawer" : ""} ${view === "organization" ? "organization-route" : ""} ${view === "initiative" ? "initiative-route" : ""}`}
       ref={appShellRef}
       style={{ "--agent-drawer-width": `${agentDrawerWidth}px` } as CSSProperties}
     >
@@ -1999,6 +2062,7 @@ export default function App() {
           {view === "organization" && (
           <OrganizationDetailView
             detail={organizationDetail}
+            loadError={organizationLoadError}
             initiatives={overview?.initiatives ?? []}
             tasks={overview?.tasks ?? []}
             people={peopleList ?? []}
@@ -2387,11 +2451,15 @@ function AgentDrawer(props: {
   return (
     <aside className="agent-drawer" aria-label="Contextual d-max chat">
       <div className="agent-drawer-header">
-        <button className="small-button" onClick={() => setShowOldChats((current) => !current)} disabled={props.conversations.length === 0}>
-          Alte Chats
-          {props.conversations.length > 0 ? ` (${props.conversations.length})` : ""}
-        </button>
+        <div className="agent-context-title">
+          <span>DMAX-Kontext</span>
+          <strong>{props.label}</strong>
+        </div>
         <div className="agent-drawer-actions">
+          <button className="small-button" onClick={() => setShowOldChats((current) => !current)} disabled={props.conversations.length === 0}>
+            Alte Chats
+            {props.conversations.length > 0 ? ` (${props.conversations.length})` : ""}
+          </button>
           <button
             className="small-button"
             onClick={() => {
@@ -2646,6 +2714,10 @@ function initiativeTypeLabel(type: InitiativeType): string {
 
 function initiativeStatusLabel(status: Initiative["status"]): string {
   return initiativeStatusOptions.find((option) => option.value === status)?.label ?? status;
+}
+
+function projectPhaseLabel(phase: ProjectPhase): string {
+  return projectPhaseOptions.find((option) => option.value === phase)?.label ?? phase;
 }
 
 function pluralLabelForInitiativeType(type: InitiativeType): string {
@@ -3581,6 +3653,7 @@ function ConfigView() {
             <form
               className="compact-modal"
               onMouseDown={(mouseEvent) => mouseEvent.stopPropagation()}
+              onKeyDown={(event) => handleModalEscape(event, () => setAddAccountOpen(false))}
               onSubmit={(event) => {
                 event.preventDefault();
                 if (newAccountLabel.trim()) {
@@ -3603,11 +3676,11 @@ function ConfigView() {
                 </datalist>
               </label>
               <div className="modal-actions">
-                <button className="secondary-action compact" type="button" onClick={() => setAddAccountOpen(false)}>Abbrechen</button>
                 <button className="primary-action compact" type="submit" disabled={!globalStatus?.configured || !newAccountLabel.trim()}>
                   <Clock size={16} />
                   OAuth starten
                 </button>
+                <button className="secondary-action compact" type="button" onClick={() => setAddAccountOpen(false)}>Abbrechen</button>
               </div>
             </form>
           </div>
@@ -5675,36 +5748,54 @@ function InitiativeDetailView(props: {
   onReorderMedia: (initiativeId: number, linkIds: number[]) => Promise<void>;
 }) {
   if (!props.detail) {
-    return <EmptyState title="Loading initiative..." />;
+    return <EmptyState title="Initiative wird geladen" description="Die Detaildaten werden aus DMAX geladen." />;
   }
 
   const initiativeId = props.detail.initiative.id;
   const initiative = props.detail.initiative;
+  const predecessors = props.detail.predecessors ?? [];
+  const successors = props.detail.successors ?? [];
+  const participants = props.detail.participants ?? [];
+  const mediaAttachments = props.detail.mediaAttachments ?? [];
+  const category = props.categories.find((candidate) => candidate.id === initiative.categoryId) ?? null;
+  const openTasks = props.detail.tasks.filter((task) => task.status !== "done").length;
+  const doneTasks = props.detail.tasks.length - openTasks;
+  const relationCount =
+    participants.length
+    + predecessors.length
+    + successors.length
+    + props.allInitiatives.filter((candidate) => candidate.parentId === initiative.id).length
+    + (initiative.parentId ? 1 : 0);
   return (
-    <section className="initiative-detail">
+    <EntityDetailPage
+      className="initiative-reference-detail"
+      aside={(
+        <MetadataGrid
+          items={[
+            { label: "Typ", value: initiativeTypeLabel(initiative.type) },
+            { label: "Lebensbereich", value: category?.name ?? null },
+            { label: "Status", value: initiativeStatusLabel(initiative.status) },
+            { label: "Phase", value: initiative.type === "project" ? projectPhaseLabel(initiative.projectPhase) : null },
+            { label: "Zeitraum", value: initiative.type === "project" ? formatInitiativeDateRangeForUi(initiative) : null },
+            { label: "Zeitraum fixiert", value: initiative.type === "project" ? (initiative.isLocked ? "Ja" : "Nein") : null },
+            { label: "Maßnahmen", value: `${openTasks} offen · ${doneTasks} erledigt` },
+            { label: "Beteiligte", value: String(participants.length) },
+            { label: "Beziehungen", value: String(relationCount) },
+            { label: "Medien", value: String(mediaAttachments.length) },
+            { label: "Aktualisiert", value: formatDateTimeForUi(initiative.updatedAt) }
+          ]}
+        />
+      )}
+    >
       <InitiativeMarkdownPanel initiative={initiative} onUpdateInitiative={props.onUpdateInitiative} />
-      <MediaAttachmentsPanel
-        entityType="initiative"
-        entityId={initiative.id}
-        attachments={props.detail.mediaAttachments ?? []}
-        onUpload={props.onUploadMedia}
-        onUpdate={props.onUpdateMedia}
-        onDelete={props.onDeleteMedia}
-        onReorder={props.onReorderMedia}
-      />
-      <ParticipantsPanel
-        entityType="initiative"
-        entityId={initiative.id}
-        participants={props.detail.participants ?? []}
-        people={props.people}
-        organizations={props.organizations}
-        roleTypes={props.participantRoleTypes}
-        onCreateParticipant={props.onCreateParticipant}
-        onDeleteParticipant={props.onDeleteParticipant}
-      />
-      <Panel title="Massnahmen">
+      <SectionBlock
+        title="Maßnahmen"
+        description={`${openTasks} offen · ${doneTasks} erledigt`}
+        actions={<TaskCreateInlineForm label="Maßnahme hinzufügen" onCreateTask={(title) => props.onCreateTask(initiativeId, title)} />}
+        className="initiative-tasks-section"
+      >
         {props.detail.tasks.length === 0 ? (
-          <EmptyState title="Noch keine Massnahmen" />
+          <EmptyState title="Noch keine Maßnahmen" description="Lege die nächste konkrete Aktion direkt hier an." />
         ) : (
           <TasksView
             tasks={props.detail.tasks}
@@ -5717,23 +5808,41 @@ function InitiativeDetailView(props: {
             onReorderTasks={(taskIds) => void props.onReorderTasks?.(initiativeId, taskIds)}
           />
         )}
-        <TaskCreateInlineForm
-          onCreateTask={(title) => props.onCreateTask(initiativeId, title)}
-        />
-      </Panel>
+      </SectionBlock>
+      <ParticipantsPanel
+        entityType="initiative"
+        entityId={initiative.id}
+        participants={participants}
+        people={props.people}
+        organizations={props.organizations}
+        roleTypes={props.participantRoleTypes}
+        surface="section"
+        onCreateParticipant={props.onCreateParticipant}
+        onDeleteParticipant={props.onDeleteParticipant}
+      />
       <InitiativeRelationsPanel
         initiative={initiative}
         allInitiatives={props.allInitiatives}
         categories={props.categories}
-        predecessors={props.detail.predecessors ?? []}
-        successors={props.detail.successors ?? []}
+        predecessors={predecessors}
+        successors={successors}
         onOpenInitiative={props.onOpenInitiative}
         onCreateInitiative={props.onCreateInitiative}
         onUpdateInitiative={props.onUpdateInitiative}
         onCreateRelation={props.onCreateRelation}
         onDeleteRelation={props.onDeleteRelation}
       />
-    </section>
+      <MediaAttachmentsPanel
+        entityType="initiative"
+        entityId={initiative.id}
+        attachments={mediaAttachments}
+        surface="section"
+        onUpload={props.onUploadMedia}
+        onUpdate={props.onUpdateMedia}
+        onDelete={props.onDeleteMedia}
+        onReorder={props.onReorderMedia}
+      />
+    </EntityDetailPage>
   );
 }
 
@@ -5911,20 +6020,22 @@ function InitiativeRelationsPanel(props: {
   };
 
   return (
-    <details
-      className="panel initiative-relations-panel"
-      open={expanded}
-      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    <SectionBlock
+      title="Beziehungen"
+      description={hasRelations ? "Struktur, Abhängigkeiten und Initiative-Verbindungen." : "Noch keine strukturellen Beziehungen."}
+      className="initiative-relations-panel"
+      actions={(
+        <button type="button" className="small-button" onClick={() => setExpanded((current) => !current)}>
+          {expanded ? "Weniger" : "Bearbeiten"}
+        </button>
+      )}
     >
-      <summary>
-        <h3>Relations</h3>
-        <span>{hasRelations ? "Verknüpft" : "Keine Relations"}</span>
-      </summary>
+      {expanded ? (
       <div className="initiative-relations-grid">
         <div className="initiative-relation-group">
           <InitiativeParentChildColumn
-            title="Parent"
-            emptyLabel="None"
+            title="Übergeordnet"
+            emptyLabel="Keine übergeordnete Initiative"
             initiatives={parentInitiative ? [parentInitiative] : []}
             busyRelationId={busyRelationId}
             onOpenInitiative={props.onOpenInitiative}
@@ -5943,7 +6054,7 @@ function InitiativeRelationsPanel(props: {
               aria-label="Parent auswählen"
               onChange={(event) => setParentDraft(event.target.value)}
             >
-              <option value="">{parentInitiative ? "Change parent" : "Add parent"}</option>
+              <option value="">{parentInitiative ? "Übergeordnete Initiative ändern" : "Übergeordnete Initiative verknüpfen"}</option>
               {initiativeCandidateOptionGroups(parentCandidates, props.categories, props.initiative.categoryId)}
             </select>
             <button type="submit" className="icon-button compact" disabled={!parentDraft || busyRelationId !== null} title="Parent verknüpfen">
@@ -5951,8 +6062,8 @@ function InitiativeRelationsPanel(props: {
             </button>
           </form>
           <InitiativeRelationCreateForm
-            label="Create parent"
-            namePlaceholder="New parent"
+            label="Übergeordnete Initiative anlegen"
+            namePlaceholder="Neue übergeordnete Initiative"
             categories={props.categories}
             draft={createDrafts.parent}
             disabled={busyRelationId !== null}
@@ -5962,8 +6073,8 @@ function InitiativeRelationsPanel(props: {
         </div>
         <div className="initiative-relation-group">
           <InitiativeParentChildColumn
-            title="Children"
-            emptyLabel="None"
+            title="Untergeordnet"
+            emptyLabel="Keine untergeordneten Initiativen"
             initiatives={childInitiatives}
             busyRelationId={busyRelationId}
             onOpenInitiative={props.onOpenInitiative}
@@ -5982,7 +6093,7 @@ function InitiativeRelationsPanel(props: {
               aria-label="Child auswählen"
               onChange={(event) => setChildDraft(event.target.value)}
             >
-              <option value="">Add child</option>
+              <option value="">Untergeordnete Initiative verknüpfen</option>
               {initiativeCandidateOptionGroups(childCandidates, props.categories, props.initiative.categoryId)}
             </select>
             <button type="submit" className="icon-button compact" disabled={!childDraft || busyRelationId !== null} title="Child verknüpfen">
@@ -5990,8 +6101,8 @@ function InitiativeRelationsPanel(props: {
             </button>
           </form>
           <InitiativeRelationCreateForm
-            label="Create child"
-            namePlaceholder="New child"
+            label="Untergeordnete Initiative anlegen"
+            namePlaceholder="Neue untergeordnete Initiative"
             categories={props.categories}
             draft={createDrafts.child}
             disabled={busyRelationId !== null}
@@ -6001,8 +6112,8 @@ function InitiativeRelationsPanel(props: {
         </div>
         <div className="initiative-relation-group">
           <InitiativeRelationColumn
-            title="Predecessors"
-            emptyLabel="None"
+            title="Vorgänger"
+            emptyLabel="Keine Vorgänger"
             relations={props.predecessors}
             direction="predecessor"
             busyRelationId={busyRelationId}
@@ -6022,7 +6133,7 @@ function InitiativeRelationsPanel(props: {
               aria-label="Vorgänger auswählen"
               onChange={(event) => setPredecessorDraft(event.target.value)}
             >
-              <option value="">Add predecessor</option>
+              <option value="">Vorgänger verknüpfen</option>
               {initiativeCandidateOptionGroups(predecessorCandidates, props.categories, props.initiative.categoryId)}
             </select>
             <button type="submit" className="icon-button compact" disabled={!predecessorDraft || busyRelationId !== null} title="Vorgänger verknüpfen">
@@ -6030,8 +6141,8 @@ function InitiativeRelationsPanel(props: {
             </button>
           </form>
           <InitiativeRelationCreateForm
-            label="Create predecessor"
-            namePlaceholder="New predecessor"
+            label="Vorgänger anlegen"
+            namePlaceholder="Neuer Vorgänger"
             categories={props.categories}
             draft={createDrafts.predecessor}
             disabled={busyRelationId !== null}
@@ -6041,8 +6152,8 @@ function InitiativeRelationsPanel(props: {
         </div>
         <div className="initiative-relation-group">
           <InitiativeRelationColumn
-            title="Successors"
-            emptyLabel="None"
+            title="Nachfolger"
+            emptyLabel="Keine Nachfolger"
             relations={props.successors}
             direction="successor"
             busyRelationId={busyRelationId}
@@ -6062,7 +6173,7 @@ function InitiativeRelationsPanel(props: {
               aria-label="Nachfolger auswählen"
               onChange={(event) => setSuccessorDraft(event.target.value)}
             >
-              <option value="">Add successor</option>
+              <option value="">Nachfolger verknüpfen</option>
               {initiativeCandidateOptionGroups(successorCandidates, props.categories, props.initiative.categoryId)}
             </select>
             <button type="submit" className="icon-button compact" disabled={!successorDraft || busyRelationId !== null} title="Nachfolger verknüpfen">
@@ -6070,8 +6181,8 @@ function InitiativeRelationsPanel(props: {
             </button>
           </form>
           <InitiativeRelationCreateForm
-            label="Create successor"
-            namePlaceholder="New successor"
+            label="Nachfolger anlegen"
+            namePlaceholder="Neuer Nachfolger"
             categories={props.categories}
             draft={createDrafts.successor}
             disabled={busyRelationId !== null}
@@ -6080,7 +6191,12 @@ function InitiativeRelationsPanel(props: {
           />
         </div>
       </div>
-    </details>
+      ) : (
+        <RelationList emptyTitle="Beziehungen eingeklappt" emptyDescription="Öffne den Bereich, um Parent/Child- und Vorgänger/Nachfolger-Beziehungen zu bearbeiten.">
+          {null}
+        </RelationList>
+      )}
+    </SectionBlock>
   );
 }
 
@@ -6222,6 +6338,7 @@ function InitiativeRelationColumn(props: {
 
 function InitiativeDetailHeader(props: {
   initiative: Initiative | null;
+  category: AppOverview["categories"][number] | null;
   projectCalendarBinding: InitiativeDetail["projectCalendarBinding"] | null;
   onUpdateInitiative: (initiativeId: number, input: UpdateInitiativeInput) => Promise<void>;
   onCalendarBindingChange: () => Promise<void>;
@@ -6412,6 +6529,7 @@ function InitiativeDetailHeader(props: {
                 {props.projectCalendarBinding ? <span className="calendar-google-badge" title="Mit Google Calendar verknüpft">G</span> : null}
               </button>
             ) : null}
+            {props.category ? <span className="detail-pill-static">{props.category.name}</span> : null}
             {initiative.isSystem ? <span className="system-badge">System</span> : null}
             {headerError ? <span className="initiative-date-error">{headerError}</span> : null}
           </>
@@ -6562,6 +6680,7 @@ function ProjectDateCalendarModal(props: {
   const [calendarSourceId, setCalendarSourceId] = useState<number | null>(null);
   const [calendarBusy, setCalendarBusy] = useState(false);
   const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [unlinkConfirmOpen, setUnlinkConfirmOpen] = useState(false);
   const writableSources = sources.filter((source) => source.enabled && !source.readOnly);
   const hasCompleteDateRange = Boolean(props.startDate && props.endDate);
   const dateRangeChanged = props.startDate !== (props.initiative.startDate ?? "") || props.endDate !== (props.initiative.endDate ?? "") || props.isLocked !== props.initiative.isLocked;
@@ -6571,6 +6690,8 @@ function ProjectDateCalendarModal(props: {
   const bindingCalendarLabel = props.binding?.calendarSource
     ? props.binding.calendarSource.accountLabel
     : props.binding?.externalCalendarId ?? "nicht verknüpft";
+
+  useModalEscape(props.onCancel, !unlinkConfirmOpen);
 
   useEffect(() => {
     fetchCalendarSources()
@@ -6601,9 +6722,8 @@ function ProjectDateCalendarModal(props: {
     }
   }
 
-  async function unlinkGoogleEvent() {
+  async function unlinkGoogleEvent(deleteGoogleEvent: boolean) {
     if (!props.binding || calendarBusy) return;
-    const deleteGoogleEvent = window.confirm("Google Event ebenfalls löschen?");
     setCalendarBusy(true);
     setCalendarError(null);
     try {
@@ -6619,7 +6739,14 @@ function ProjectDateCalendarModal(props: {
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
-      <section className="compact-modal project-date-calendar-modal" role="dialog" aria-modal="true" aria-label="Projektzeitraum und Google Calendar" onMouseDown={(event) => event.stopPropagation()}>
+      <section
+        className="compact-modal project-date-calendar-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Projektzeitraum und Google Calendar"
+        onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => handleModalEscape(event, props.onCancel)}
+      >
         <header className="google-event-modal-header">
           <div>
             <span>Projektzeitraum</span>
@@ -6687,7 +6814,7 @@ function ProjectDateCalendarModal(props: {
             )}
           </div>
           {props.binding ? (
-            <button type="button" className="project-date-text-link project-date-modal-full" disabled={calendarBusy} onClick={() => void unlinkGoogleEvent()}>
+            <button type="button" className="project-date-text-link project-date-modal-full" disabled={calendarBusy} onClick={() => setUnlinkConfirmOpen(true)}>
               Verknüpfung lösen
             </button>
           ) : (
@@ -6711,6 +6838,28 @@ function ProjectDateCalendarModal(props: {
         <div className="modal-actions">
           <button type="button" className="primary-action compact" disabled={props.busy || calendarBusy} onClick={() => void props.onSaveDateRange()}>OK</button>
         </div>
+        {unlinkConfirmOpen ? (
+          <ConfirmModal
+            title="Google Event ebenfalls löschen?"
+            description={<p>Die Verknüpfung zum Projektzeitraum wird gelöst. Entscheide, ob das verknüpfte Google Event im Kalender ebenfalls gelöscht werden soll.</p>}
+            confirmLabel="Event löschen"
+            busy={calendarBusy}
+            onCancel={() => setUnlinkConfirmOpen(false)}
+            extraActions={(
+              <button
+                type="button"
+                className="small-button"
+                disabled={calendarBusy}
+                onClick={() => {
+                  void unlinkGoogleEvent(false);
+                }}
+              >
+                Nur Verknüpfung lösen
+              </button>
+            )}
+            onConfirm={() => unlinkGoogleEvent(true)}
+          />
+        ) : null}
       </section>
     </div>
   );
@@ -6747,12 +6896,36 @@ function InitiativeMarkdownPanel(props: {
 
   if (editing) {
     return (
-      <form
-        className="panel initiative-markdown-panel editing"
+      <EditModal
+        title="Beschreibung bearbeiten"
+        label="Initiative-Beschreibung bearbeiten"
+        className="markdown-modal"
+        onCancel={() => {
+          setMarkdown(props.initiative.markdown);
+          setEditing(false);
+        }}
         onSubmit={(event) => {
           event.preventDefault();
           void saveMarkdown();
         }}
+        footer={(
+          <>
+            <button className="primary-action compact" type="submit" disabled={busy}>
+              Speichern
+            </button>
+            <button
+              type="button"
+              className="small-button"
+              onClick={() => {
+                setMarkdown(props.initiative.markdown);
+                setEditing(false);
+              }}
+              disabled={busy}
+            >
+              Abbrechen
+            </button>
+          </>
+        )}
       >
         <textarea
           autoFocus
@@ -6773,35 +6946,17 @@ function InitiativeMarkdownPanel(props: {
             }
           }}
         />
-        <div className="form-actions">
-          <button
-            type="button"
-            className="small-button"
-            onClick={() => {
-              setMarkdown(props.initiative.markdown);
-              setEditing(false);
-            }}
-            disabled={busy}
-          >
-            Abbrechen
-          </button>
-          <button className="primary-action compact" type="submit" disabled={busy}>
-            Speichern
-          </button>
-        </div>
-      </form>
+      </EditModal>
     );
   }
 
   return (
-    <button
-      type="button"
-      className="panel initiative-markdown-panel"
-      onClick={() => setEditing(true)}
-      title="Markdown bearbeiten"
-    >
-      <RichText text={props.initiative.markdown || "Noch kein Markdown."} />
-    </button>
+    <DescriptionBlock
+      text={props.initiative.markdown}
+      emptyTitle="Noch keine Beschreibung vorhanden."
+      emptyDescription="Klicke in diese Fläche, um Kontext zu ergänzen."
+      onEdit={() => setEditing(true)}
+    />
   );
 }
 
@@ -6894,6 +7049,7 @@ function ParticipantsPanel(props: {
   people: Person[];
   organizations: Organization[];
   roleTypes: ParticipantRoleType[];
+  surface?: "panel" | "section";
   onCreateParticipant: (input: {
     partyId: number;
     entityType: "initiative" | "task";
@@ -6915,18 +7071,15 @@ function ParticipantsPanel(props: {
   const [isPrimary, setIsPrimary] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  return (
-    <Panel title="Beteiligte">
-      <div className="relationship-list">
-        {props.participants.length === 0 ? <p className="muted-text">Noch keine Beteiligten.</p> : null}
-        {props.participants.map((participant) => (
-          <div className="relationship-row" key={participant.id}>
-            <div className="entity-icon">{participant.party.type === "person" ? <Users size={16} /> : <Building2 size={16} />}</div>
-            <div>
-              <strong>{participant.party.displayName}</strong>
-              <p>{participantRoleSummary(participant)}</p>
-            </div>
+  const relationList = props.surface === "section" ? (
+    <RelationList emptyTitle="Noch keine Beteiligten" emptyDescription="Verknüpfe Personen oder Organisationen, die für diese Initiative relevant sind.">
+      {props.participants.map((participant) => (
+        <RelationItem
+          key={participant.id}
+          icon={participant.party.type === "person" ? <Users size={16} /> : <Building2 size={16} />}
+          title={participant.party.displayName}
+          meta={participantRoleSummary(participant)}
+          actions={(
             <button
               type="button"
               className="icon-button compact"
@@ -6947,11 +7100,49 @@ function ParticipantsPanel(props: {
             >
               <Trash2 size={14} />
             </button>
+          )}
+        />
+      ))}
+    </RelationList>
+  ) : (
+    <div className="relationship-list">
+      {props.participants.length === 0 ? <p className="muted-text">Noch keine Beteiligten.</p> : null}
+      {props.participants.map((participant) => (
+        <div className="relationship-row" key={participant.id}>
+          <div className="entity-icon">{participant.party.type === "person" ? <Users size={16} /> : <Building2 size={16} />}</div>
+          <div>
+            <strong>{participant.party.displayName}</strong>
+            <p>{participantRoleSummary(participant)}</p>
           </div>
-        ))}
-      </div>
+          <button
+            type="button"
+            className="icon-button compact"
+            disabled={busy}
+            title="Beteiligung entfernen"
+            onClick={async () => {
+              if (busy) return;
+              setBusy(true);
+              setError(null);
+              try {
+                await props.onDeleteParticipant(participant.id);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Beteiligung konnte nicht entfernt werden.");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+  const content = (
+    <>
+      {relationList}
       <form
-        className="contact-point-create-form"
+        className="contact-point-create-form participant-create-form"
         onSubmit={async (event) => {
           event.preventDefault();
           const parsedPartyId = Number(partyId);
@@ -6995,12 +7186,26 @@ function ParticipantsPanel(props: {
           <input type="checkbox" checked={isPrimary} onChange={(event) => setIsPrimary(event.target.checked)} />
           Primär
         </label>
-        <button type="submit" className="primary-button" disabled={!partyId || busy}>
+        <button type="submit" className={props.surface === "section" ? "section-primary-action" : "primary-button"} disabled={!partyId || busy}>
           <Plus size={15} />
-          Hinzufügen
+          Verknüpfen
         </button>
       </form>
       {error ? <p className="inline-error">{error}</p> : null}
+    </>
+  );
+
+  if (props.surface === "section") {
+    return (
+      <SectionBlock title="Beteiligte" description="Personen und Organisationen, die mit dieser Initiative verbunden sind.">
+        {content}
+      </SectionBlock>
+    );
+  }
+
+  return (
+    <Panel title="Beteiligte">
+      {content}
     </Panel>
   );
 }
@@ -7009,6 +7214,7 @@ function MediaAttachmentsPanel(props: {
   entityType: Extract<MediaEntityType, "initiative" | "task">;
   entityId: number;
   attachments: MediaAttachment[];
+  surface?: "panel" | "section";
   onUpload: (entityId: number, file: File) => Promise<void>;
   onUpdate: (linkId: number, input: { caption?: string | null; role?: string | null }) => Promise<void>;
   onDelete: (linkId: number) => Promise<void>;
@@ -7075,7 +7281,7 @@ function MediaAttachmentsPanel(props: {
 
   return (
     <section
-      className={`panel media-panel ${dragActive ? "drag-active" : ""}`}
+      className={`${props.surface === "section" ? "section-block" : "panel"} media-panel ${dragActive ? "drag-active" : ""}`}
       onDragOver={(event) => {
         if (draggedLinkId || event.dataTransfer.types.includes("application/x-dmax-media-link")) {
           return;
@@ -7986,26 +8192,11 @@ function TasksView(props: {
 }) {
   const [draggedTaskId, setDraggedTaskId] = useState<number | null>(null);
   const [taskDropId, setTaskDropId] = useState<number | null>(null);
+  const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
   const initiativeById = new Map(props.initiatives.map((project) => [project.id, project]));
   const visibleTasks = props.groupByCompletionStatus ? sortTasksByCompletionAndRank(props.tasks) : props.tasks;
   const taskIds = visibleTasks.map((task) => task.id);
   const showInitiativeName = props.showInitiativeName ?? true;
-  const confirmDeleteTask = (task: Task) => {
-    if (!props.onDeleteTask) return;
-    const confirmed = window.confirm(
-      [
-        `Bist du sicher, dass du die Aufgabe „${task.title}“ löschen möchtest?`,
-        "",
-        "Beim Löschen werden ebenfalls entfernt:",
-        "- Beschreibung (Description)",
-        "- Checkliste (falls vorhanden)",
-        "- angehängte Medien (z. B. Bilder, Videos)"
-      ].join("\n")
-    );
-    if (confirmed) {
-      void props.onDeleteTask(task);
-    }
-  };
   return (
     <section className="task-list">
       {visibleTasks.map((task) => (
@@ -8070,7 +8261,7 @@ function TasksView(props: {
               title="Aufgabe löschen"
               onClick={(event) => {
                 event.stopPropagation();
-                confirmDeleteTask(task);
+                setTaskToDelete(task);
               }}
             >
               <Trash2 size={15} />
@@ -8078,6 +8269,28 @@ function TasksView(props: {
           ) : null}
         </article>
       ))}
+      {taskToDelete && props.onDeleteTask ? (
+        <ConfirmModal
+          title="Aufgabe löschen?"
+          description={(
+            <>
+              <p>Die Aufgabe „{taskToDelete.title}“ wird gelöscht.</p>
+              <p>Beim Löschen werden ebenfalls entfernt:</p>
+              <ul>
+                <li>Beschreibung</li>
+                <li>Checkliste, falls vorhanden</li>
+                <li>Angehängte Medien</li>
+              </ul>
+            </>
+          )}
+          confirmLabel="Aufgabe löschen"
+          onCancel={() => setTaskToDelete(null)}
+          onConfirm={async () => {
+            await props.onDeleteTask?.(taskToDelete);
+            setTaskToDelete(null);
+          }}
+        />
+      ) : null}
     </section>
   );
 }
@@ -8403,8 +8616,408 @@ function PersonDetailView(props: {
   );
 }
 
+function EntityHeader(props: {
+  icon?: ReactNode;
+  entityType?: string;
+  title?: string;
+  titleContent?: ReactNode;
+  subtitle?: string | null;
+  subtitleContent?: ReactNode;
+  facts?: Array<{ label: string; value: ReactNode }>;
+  primaryAction?: ReactNode;
+  secondaryActions?: ReactNode;
+}) {
+  return (
+    <div className="entity-header">
+      <div className="entity-header-main">
+        {props.icon ? <div className="entity-header-icon">{props.icon}</div> : null}
+        <div className="entity-header-title-block">
+          {props.entityType ? <span className="entity-header-eyebrow">{props.entityType}</span> : null}
+          <h1>{props.titleContent ?? props.title}</h1>
+          {props.subtitleContent || props.subtitle ? <p>{props.subtitleContent ?? props.subtitle}</p> : null}
+          {props.facts && props.facts.length > 0 ? (
+            <div className="entity-header-facts">
+              {props.facts.map((fact) => (
+                <span key={fact.label}>
+                  {fact.label}: {fact.value}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      {props.primaryAction || props.secondaryActions ? (
+        <div className="entity-header-actions">
+          {props.secondaryActions}
+          {props.primaryAction}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function InlineEditableText(props: {
+  value: string;
+  label: string;
+  required?: boolean;
+  disabled?: boolean;
+  className?: string;
+  onSave: (value: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(props.value);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!editing) {
+      setDraft(props.value);
+      setError(null);
+    }
+  }, [editing, props.value]);
+
+  async function commit() {
+    const nextValue = draft.trim();
+    if (props.required && !nextValue) {
+      setError("Dieses Feld darf nicht leer sein.");
+      return;
+    }
+    if (nextValue === props.value.trim()) {
+      setEditing(false);
+      setError(null);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await props.onSave(nextValue);
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Änderung konnte nicht gespeichert werden.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <span className={`inline-edit-field${props.className ? ` ${props.className}` : ""}`}>
+        <input
+          autoFocus
+          aria-label={props.label}
+          value={draft}
+          disabled={saving}
+          onBlur={() => {
+            void commit();
+          }}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setDraft(props.value);
+              setEditing(false);
+              setError(null);
+            }
+          }}
+        />
+        {error ? <span className="inline-edit-error">{error}</span> : null}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className={`inline-edit-trigger${props.className ? ` ${props.className}` : ""}`}
+      onClick={() => {
+        if (props.disabled) return;
+        setDraft(props.value);
+        setEditing(true);
+      }}
+      disabled={props.disabled}
+      title={`${props.label} bearbeiten`}
+    >
+      {props.value}
+    </button>
+  );
+}
+
+function EntityDetailPage(props: { children: ReactNode; aside?: ReactNode; className?: string }) {
+  return (
+    <section className={`entity-detail-page${props.className ? ` ${props.className}` : ""}`}>
+      <div className="entity-detail-primary">{props.children}</div>
+      {props.aside ? <aside className="entity-detail-aside">{props.aside}</aside> : null}
+    </section>
+  );
+}
+
+function SectionHeader(props: { title?: string | null; description?: string | null; actions?: ReactNode }) {
+  return (
+    <header className="section-block-header">
+      <div>
+        {props.title ? <h3>{props.title}</h3> : null}
+        {props.description ? <p>{props.description}</p> : null}
+      </div>
+      {props.actions ? <div className="section-block-actions">{props.actions}</div> : null}
+    </header>
+  );
+}
+
+function SectionBlock(props: {
+  title?: string | null;
+  description?: string | null;
+  actions?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`section-block${props.className ? ` ${props.className}` : ""}`}>
+      {props.title || props.description || props.actions ? <SectionHeader title={props.title} description={props.description} actions={props.actions} /> : null}
+      {props.children}
+    </section>
+  );
+}
+
+function EditModal(props: {
+  title: string;
+  description?: string | null;
+  label: string;
+  onCancel: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  children: ReactNode;
+  footer: ReactNode;
+  className?: string;
+}) {
+  useModalEscape(props.onCancel);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
+      <form
+        className={`compact-modal${props.className ? ` ${props.className}` : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={props.label}
+        onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => handleModalEscape(event, props.onCancel)}
+        onSubmit={props.onSubmit}
+      >
+        <header className="modal-title-block">
+          <h2>{props.title}</h2>
+          {props.description ? <p>{props.description}</p> : null}
+        </header>
+        {props.children}
+        <footer className="modal-actions">{props.footer}</footer>
+      </form>
+    </div>
+  );
+}
+
+function ConfirmModal(props: {
+  title: string;
+  description?: ReactNode;
+  confirmLabel: string;
+  cancelLabel?: string;
+  extraActions?: ReactNode;
+  busy?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+}) {
+  useModalEscape(props.onCancel);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
+      <form
+        className="compact-modal confirm-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={props.title}
+        onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => handleModalEscape(event, props.onCancel)}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (props.busy) return;
+          void props.onConfirm();
+        }}
+      >
+        <header className="modal-title-block">
+          <h2>{props.title}</h2>
+          {props.description ? <div className="confirm-modal-description">{props.description}</div> : null}
+        </header>
+        <footer className="modal-actions">
+          <button type="submit" className="danger-button" disabled={props.busy}>{props.confirmLabel}</button>
+          {props.extraActions}
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={props.busy}>{props.cancelLabel ?? "Abbrechen"}</button>
+        </footer>
+      </form>
+    </div>
+  );
+}
+
+function handleModalEscape(event: ReactKeyboardEvent<HTMLElement>, onCancel: () => void) {
+  if (event.key !== "Escape") return;
+  event.preventDefault();
+  event.stopPropagation();
+  onCancel();
+}
+
+function useModalEscape(onCancel: () => void, enabled = true) {
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onCancel();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [enabled, onCancel]);
+}
+
+function DescriptionBlock(props: {
+  title?: string | null;
+  text: string | null | undefined;
+  emptyTitle: string;
+  emptyDescription?: string;
+  onEdit?: () => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const text = props.text?.trim() ?? "";
+  const isLong = text.length > 1100 || text.split("\n").length > 14;
+  const editInteractionProps = props.onEdit
+    ? {
+        role: "button",
+        tabIndex: 0,
+        onClick: props.onEdit,
+        onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            props.onEdit?.();
+          }
+        }
+      }
+    : {};
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [text]);
+
+  return (
+    <SectionBlock
+      title={props.title}
+      className={`description-block${props.onEdit ? " description-block-editable" : ""}`}
+    >
+      {text ? (
+        <>
+          <div
+            className={`description-block-content${isLong && !expanded ? " collapsed" : ""}`}
+            aria-label={props.onEdit ? "Beschreibung bearbeiten" : undefined}
+            {...editInteractionProps}
+          >
+            <RichText text={text} />
+          </div>
+          {isLong ? (
+            <button type="button" className="small-button description-toggle" onClick={() => setExpanded((current) => !current)}>
+              {expanded ? "Weniger anzeigen" : "Mehr anzeigen"}
+            </button>
+          ) : null}
+        </>
+      ) : (
+        <div
+          className="description-empty-surface"
+          aria-label={props.onEdit ? "Beschreibung bearbeiten" : undefined}
+          {...editInteractionProps}
+        >
+          <strong>{props.emptyTitle}</strong>
+          {props.emptyDescription ? <p>{props.emptyDescription}</p> : null}
+        </div>
+      )}
+    </SectionBlock>
+  );
+}
+
+function MetadataGrid(props: { items: Array<{ label: string; value: ReactNode | null | undefined }> }) {
+  const items = props.items.filter((item) => item.value !== null && item.value !== undefined && item.value !== "");
+  return (
+    <SectionBlock title="Metadaten" description="Sekundäre Fakten und technische Einordnung." className="metadata-section">
+      {items.length === 0 ? (
+        <EmptyState title="Keine Metadaten vorhanden" />
+      ) : (
+        <dl className="metadata-grid">
+          {items.map((item) => (
+            <div key={item.label}>
+              <dt>{item.label}</dt>
+              <dd>{item.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </SectionBlock>
+  );
+}
+
+function RelationList(props: { children: ReactNode; emptyTitle: string; emptyDescription?: string }) {
+  const hasChildren = Children.count(props.children) > 0;
+  return <div className="relation-list">{hasChildren ? props.children : <EmptyState title={props.emptyTitle} description={props.emptyDescription} />}</div>;
+}
+
+function RelationGroup(props: { title: string; description?: string | null; actions?: ReactNode; children: ReactNode; emptyTitle: string; emptyDescription?: string }) {
+  return (
+    <section className="relation-group">
+      <SectionHeader title={props.title} description={props.description} actions={props.actions} />
+      <RelationList emptyTitle={props.emptyTitle} emptyDescription={props.emptyDescription}>
+        {props.children}
+      </RelationList>
+    </section>
+  );
+}
+
+function RelationItem(props: {
+  icon: ReactNode;
+  title: string;
+  meta?: string | null;
+  detail?: string | null;
+  onOpen?: () => void;
+  actions?: ReactNode;
+}) {
+  const content = (
+    <>
+      <div className="entity-icon">{props.icon}</div>
+      <div className="relation-item-copy">
+        <strong>{props.title}</strong>
+        {props.meta ? <p>{props.meta}</p> : null}
+        {props.detail ? <span>{props.detail}</span> : null}
+      </div>
+      {props.actions ? <div className="relation-item-actions">{props.actions}</div> : null}
+    </>
+  );
+
+  if (props.onOpen) {
+    return (
+      <button type="button" className="relation-item relation-button" onClick={props.onOpen}>
+        {content}
+      </button>
+    );
+  }
+
+  return <div className="relation-item">{content}</div>;
+}
+
+function ErrorState(props: { title: string; description?: string | null }) {
+  return (
+    <div className="error-state" role="alert">
+      <strong>{props.title}</strong>
+      {props.description ? <p>{props.description}</p> : null}
+    </div>
+  );
+}
+
 function OrganizationDetailView(props: {
   detail: OrganizationDetail | null;
+  loadError: string | null;
   initiatives: Initiative[];
   tasks: Task[];
   people: Person[];
@@ -8431,10 +9044,33 @@ function OrganizationDetailView(props: {
 }) {
   const organization = props.detail?.organization;
 
-  if (!props.detail || !organization) return <EmptyState title="Organisation wird geladen" />;
+  if (props.loadError) {
+    return (
+      <ErrorState
+        title="Organisation nicht gefunden"
+        description="Diese Organisation existiert nicht oder konnte nicht geladen werden. Gehe zurück zur Organisationsliste und wähle einen vorhandenen Eintrag."
+      />
+    );
+  }
+
+  if (!props.detail || !organization) return <EmptyState title="Organisation wird geladen" description="Die Detaildaten werden aus DMAX geladen." />;
 
   return (
-    <section className="organization-detail-layout">
+    <EntityDetailPage
+      className="organization-reference-detail"
+      aside={(
+        <MetadataGrid
+          items={[
+            { label: "Name", value: organization.name },
+            { label: "Anzeigename", value: organization.displayName !== organization.name ? organization.displayName : null },
+            { label: "Rechtlicher Name", value: organization.legalName },
+            { label: "Organisationstyp", value: organization.organizationType },
+            { label: "Erstellt", value: formatDateTimeForUi(organization.createdAt) },
+            { label: "Aktualisiert", value: formatDateTimeForUi(organization.updatedAt) }
+          ]}
+        />
+      )}
+    >
       {props.coreModalOpen ? (
         <OrganizationCoreModal
           organization={organization}
@@ -8445,19 +9081,19 @@ function OrganizationDetailView(props: {
           }}
         />
       ) : null}
-      <OrganizationDescriptionPanel
+      <OrganizationDescriptionSection
         organization={organization}
         onUpdateOrganization={(input) => props.onUpdateOrganization(organization.id, input)}
       />
-      <div className="organization-detail-grid">
-        <ContactPointsPanel
+      <div className="entity-detail-two-column">
+        <ContactPointList
           partyId={organization.id}
           contactPoints={props.detail.contactPoints}
           onCreate={props.onCreateContactPoint}
           onUpdate={props.onUpdateContactPoint}
           onDelete={props.onDeleteContactPoint}
         />
-        <AddressesPanel
+        <AddressBlock
           partyId={organization.id}
           addresses={props.detail.addresses}
           onCreate={props.onCreateAddress}
@@ -8465,7 +9101,7 @@ function OrganizationDetailView(props: {
           onDelete={props.onDeleteAddress}
         />
       </div>
-      <OrganizationMembersPanel
+      <OrganizationRelationsSection
         organization={organization}
         people={props.people}
         relationshipTypes={props.relationshipTypes}
@@ -8473,17 +9109,14 @@ function OrganizationDetailView(props: {
         onCreateRelationship={props.onCreateRelationship}
         onOpenPerson={props.onOpenPerson}
       />
-      <section className="organization-secondary-grid">
-        <PartyRelationshipsPanel partyId={organization.id} relationships={props.detail.relationships} />
-        <PartyParticipationsPanel
-          participants={props.detail.participants}
-          initiatives={props.initiatives}
-          tasks={props.tasks}
-          onOpenInitiative={props.onOpenInitiative}
-          onOpenTask={props.onOpenTask}
-        />
-      </section>
-    </section>
+      <OrganizationParticipationsSection
+        participants={props.detail.participants}
+        initiatives={props.initiatives}
+        tasks={props.tasks}
+        onOpenInitiative={props.onOpenInitiative}
+        onOpenTask={props.onOpenTask}
+      />
+    </EntityDetailPage>
   );
 }
 
@@ -8499,14 +9132,12 @@ function OrganizationCoreModal(props: {
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
-      <form
-        className="compact-modal party-edit-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Organisation bearbeiten"
-        onMouseDown={(event) => event.stopPropagation()}
-        onSubmit={async (event) => {
+    <EditModal
+      title="Organisation bearbeiten"
+      label="Organisation bearbeiten"
+      className="party-edit-modal"
+      onCancel={props.onCancel}
+      onSubmit={async (event) => {
           event.preventDefault();
           if (!name.trim() || saving) return;
           setSaving(true);
@@ -8523,10 +9154,13 @@ function OrganizationCoreModal(props: {
             setSaving(false);
           }
         }}
-      >
-        <header className="modal-title-block">
-          <h2>Organisation bearbeiten</h2>
-        </header>
+      footer={(
+        <>
+          <button type="submit" className="primary-button" disabled={!name.trim() || saving}>Speichern</button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={saving}>Abbrechen</button>
+        </>
+      )}
+    >
         <label>
           Name
           <input autoFocus value={name} onChange={(event) => setName(event.target.value)} />
@@ -8540,16 +9174,11 @@ function OrganizationCoreModal(props: {
           <input value={organizationType} onChange={(event) => setOrganizationType(event.target.value)} />
         </label>
         {error ? <p className="inline-error">{error}</p> : null}
-        <footer className="modal-actions">
-          <button type="button" className="small-button" onClick={props.onCancel} disabled={saving}>Abbrechen</button>
-          <button type="submit" className="primary-button" disabled={!name.trim() || saving}>Speichern</button>
-        </footer>
-      </form>
-    </div>
+    </EditModal>
   );
 }
 
-function OrganizationDescriptionPanel(props: {
+function OrganizationDescriptionSection(props: {
   organization: Organization;
   onUpdateOrganization: (input: { markdown: string }) => Promise<void>;
 }) {
@@ -8566,23 +9195,19 @@ function OrganizationDescriptionPanel(props: {
   }, [props.organization.id, props.organization.markdown]);
 
   return (
-    <section className="panel organization-description-panel">
-      <div className="panel-heading-row">
-        <h3>Beschreibung</h3>
-        <button type="button" className="small-button" onClick={() => setEditing(true)}>Bearbeiten</button>
-      </div>
-      <div className="organization-description-content">
-        <RichText text={props.organization.markdown || "Noch keine Beschreibung."} />
-      </div>
+    <>
+      <DescriptionBlock
+        text={props.organization.markdown}
+        emptyTitle="Noch keine Beschreibung vorhanden."
+        onEdit={() => setEditing(true)}
+      />
       {editing ? (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setEditing(false)}>
-          <form
-            className="compact-modal markdown-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Organisationsbeschreibung bearbeiten"
-            onMouseDown={(event) => event.stopPropagation()}
-            onSubmit={async (event) => {
+        <EditModal
+          title="Beschreibung"
+          label="Organisationsbeschreibung bearbeiten"
+          className="markdown-modal"
+          onCancel={() => setEditing(false)}
+          onSubmit={async (event) => {
               event.preventDefault();
               if (saving) return;
               setSaving(true);
@@ -8596,10 +9221,13 @@ function OrganizationDescriptionPanel(props: {
                 setSaving(false);
               }
             }}
-          >
-            <header className="modal-title-block">
-              <h2>Beschreibung</h2>
-            </header>
+          footer={(
+            <>
+              <button type="submit" className="primary-button" disabled={saving}>Speichern</button>
+              <button type="button" className="small-button" onClick={() => setEditing(false)} disabled={saving}>Abbrechen</button>
+            </>
+          )}
+        >
             <textarea
               autoFocus
               className="initiative-markdown-editor"
@@ -8609,14 +9237,9 @@ function OrganizationDescriptionPanel(props: {
               onChange={(event) => setMarkdown(event.target.value)}
             />
             {error ? <p className="inline-error">{error}</p> : null}
-            <footer className="modal-actions">
-              <button type="button" className="small-button" onClick={() => setEditing(false)} disabled={saving}>Abbrechen</button>
-              <button type="submit" className="primary-button" disabled={saving}>Speichern</button>
-            </footer>
-          </form>
-        </div>
+        </EditModal>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -8673,6 +9296,117 @@ function contactPointCapabilities(type: PartyContactPoint["type"]): { canSend: b
   return { canSend: true, canReceive: true };
 }
 
+function ContactPointList(props: {
+  partyId: number;
+  contactPoints: PartyContactPoint[];
+  onCreate: (partyId: number, input: Omit<CreateContactPointDraft, "partyId">) => Promise<void>;
+  onUpdate: (contactPointId: number, input: Partial<Omit<CreateContactPointDraft, "partyId">>) => Promise<void>;
+  onDelete: (contactPointId: number) => Promise<void>;
+}) {
+  const [editingContactPoint, setEditingContactPoint] = useState<PartyContactPoint | "new" | null>(null);
+  const [deletingContactPoint, setDeletingContactPoint] = useState<PartyContactPoint | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <SectionBlock
+      title="Kontaktwege"
+      description="Direkte Wege zur Organisation."
+      actions={(
+        <button type="button" className="section-primary-action" onClick={() => setEditingContactPoint("new")} disabled={busyAction !== null}>
+          <Plus size={15} />
+          Kontaktweg hinzufügen
+        </button>
+      )}
+    >
+      <RelationList emptyTitle="Keine Kontaktwege" emptyDescription="E-Mail, Telefon oder Website können ergänzt werden.">
+        {props.contactPoints.map((contactPoint) => (
+          <RelationItem
+            key={contactPoint.id}
+            icon={<Send size={15} />}
+            title={contactPoint.value}
+            meta={[contactPointTypeLabel(contactPoint.type), contactPoint.label, contactPoint.isPreferred ? "bevorzugt" : null, contactPoint.isPrimary ? "primär" : null]
+              .filter(Boolean)
+              .join(" · ")}
+            actions={(
+              <>
+                <button
+                  type="button"
+                  className="icon-button compact"
+                  disabled={busyAction !== null}
+                  title="Kontaktweg bearbeiten"
+                  onClick={() => setEditingContactPoint(contactPoint)}
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button compact"
+                  disabled={busyAction !== null}
+                  title="Kontaktweg löschen"
+                  onClick={() => {
+                    if (busyAction) return;
+                    setDeletingContactPoint(contactPoint);
+                  }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </>
+            )}
+          />
+        ))}
+      </RelationList>
+      {error ? <ErrorState title="Kontaktweg konnte nicht gespeichert werden" description={error} /> : null}
+      {editingContactPoint ? (
+        <ContactPointModal
+          contactPoint={editingContactPoint === "new" ? null : editingContactPoint}
+          onCancel={() => setEditingContactPoint(null)}
+          onSave={async (input) => {
+            if (busyAction) return;
+            setBusyAction(editingContactPoint === "new" ? "create" : `update:${editingContactPoint.id}`);
+            setError(null);
+            try {
+              if (editingContactPoint === "new") {
+                await props.onCreate(props.partyId, input);
+              } else {
+                await props.onUpdate(editingContactPoint.id, input);
+              }
+              setEditingContactPoint(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht gespeichert werden.");
+              throw err;
+            } finally {
+              setBusyAction(null);
+            }
+          }}
+        />
+      ) : null}
+      {deletingContactPoint ? (
+        <ConfirmModal
+          title="Kontaktweg löschen?"
+          description={<p>„{deletingContactPoint.value}“ wird aus dieser Organisation entfernt.</p>}
+          confirmLabel="Kontaktweg löschen"
+          busy={busyAction !== null}
+          onCancel={() => setDeletingContactPoint(null)}
+          onConfirm={async () => {
+            if (busyAction) return;
+            setBusyAction(`delete:${deletingContactPoint.id}`);
+            setError(null);
+            try {
+              await props.onDelete(deletingContactPoint.id);
+              setDeletingContactPoint(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht gelöscht werden.");
+            } finally {
+              setBusyAction(null);
+            }
+          }}
+        />
+      ) : null}
+    </SectionBlock>
+  );
+}
+
 function ContactPointsPanel(props: {
   partyId: number;
   contactPoints: PartyContactPoint[];
@@ -8681,6 +9415,7 @@ function ContactPointsPanel(props: {
   onDelete: (contactPointId: number) => Promise<void>;
 }) {
   const [editingContactPoint, setEditingContactPoint] = useState<PartyContactPoint | "new" | null>(null);
+  const [deletingContactPoint, setDeletingContactPoint] = useState<PartyContactPoint | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -8715,18 +9450,9 @@ function ContactPointsPanel(props: {
               className="icon-button compact"
               disabled={busyAction !== null}
               title="Kontaktweg löschen"
-              onClick={async () => {
+              onClick={() => {
                 if (busyAction) return;
-                if (!window.confirm(`Kontaktweg "${contactPoint.value}" löschen?`)) return;
-                setBusyAction(`delete:${contactPoint.id}`);
-                setError(null);
-                try {
-                  await props.onDelete(contactPoint.id);
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht gelöscht werden.");
-                } finally {
-                  setBusyAction(null);
-                }
+                setDeletingContactPoint(contactPoint);
               }}
             >
               <Trash2 size={14} />
@@ -8759,6 +9485,28 @@ function ContactPointsPanel(props: {
           }}
         />
       ) : null}
+      {deletingContactPoint ? (
+        <ConfirmModal
+          title="Kontaktweg löschen?"
+          description={<p>„{deletingContactPoint.value}“ wird entfernt.</p>}
+          confirmLabel="Kontaktweg löschen"
+          busy={busyAction !== null}
+          onCancel={() => setDeletingContactPoint(null)}
+          onConfirm={async () => {
+            if (busyAction) return;
+            setBusyAction(`delete:${deletingContactPoint.id}`);
+            setError(null);
+            try {
+              await props.onDelete(deletingContactPoint.id);
+              setDeletingContactPoint(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht gelöscht werden.");
+            } finally {
+              setBusyAction(null);
+            }
+          }}
+        />
+      ) : null}
     </Panel>
   );
 }
@@ -8777,6 +9525,8 @@ function ContactPointModal(props: {
   const [error, setError] = useState<string | null>(null);
   const selectedType = contactPointTypeOption(type);
 
+  useModalEscape(props.onCancel);
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
       <form
@@ -8785,6 +9535,7 @@ function ContactPointModal(props: {
         aria-modal="true"
         aria-label="Kontaktweg bearbeiten"
         onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => handleModalEscape(event, props.onCancel)}
         onSubmit={async (event) => {
           event.preventDefault();
           if (!value.trim() || busy) return;
@@ -8835,8 +9586,8 @@ function ContactPointModal(props: {
         </label>
         {error ? <p className="inline-error">{error}</p> : null}
         <footer className="modal-actions">
-          <button type="button" className="small-button" onClick={props.onCancel} disabled={busy}>Abbrechen</button>
           <button type="submit" className="primary-button" disabled={!value.trim() || busy}>Speichern</button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={busy}>Abbrechen</button>
         </footer>
       </form>
     </div>
@@ -8851,6 +9602,7 @@ function AddressesPanel(props: {
   onDelete: (addressId: number) => Promise<void>;
 }) {
   const [editingAddress, setEditingAddress] = useState<PartyAddress | "new" | null>(null);
+  const [deletingAddress, setDeletingAddress] = useState<PartyAddress | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -8885,18 +9637,9 @@ function AddressesPanel(props: {
               className="icon-button compact"
               disabled={busyAction !== null}
               title="Anschrift löschen"
-              onClick={async () => {
+              onClick={() => {
                 if (busyAction) return;
-                if (!window.confirm(`Anschrift "${address.line1}" löschen?`)) return;
-                setBusyAction(`delete:${address.id}`);
-                setError(null);
-                try {
-                  await props.onDelete(address.id);
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Anschrift konnte nicht gelöscht werden.");
-                } finally {
-                  setBusyAction(null);
-                }
+                setDeletingAddress(address);
               }}
             >
               <Trash2 size={14} />
@@ -8929,6 +9672,28 @@ function AddressesPanel(props: {
           }}
         />
       ) : null}
+      {deletingAddress ? (
+        <ConfirmModal
+          title="Anschrift löschen?"
+          description={<p>„{deletingAddress.line1}“ wird entfernt.</p>}
+          confirmLabel="Anschrift löschen"
+          busy={busyAction !== null}
+          onCancel={() => setDeletingAddress(null)}
+          onConfirm={async () => {
+            if (busyAction) return;
+            setBusyAction(`delete:${deletingAddress.id}`);
+            setError(null);
+            try {
+              await props.onDelete(deletingAddress.id);
+              setDeletingAddress(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Anschrift konnte nicht gelöscht werden.");
+            } finally {
+              setBusyAction(null);
+            }
+          }}
+        />
+      ) : null}
     </Panel>
   );
 }
@@ -8949,6 +9714,8 @@ function AddressModal(props: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useModalEscape(props.onCancel);
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={props.onCancel}>
       <form
@@ -8957,6 +9724,7 @@ function AddressModal(props: {
         aria-modal="true"
         aria-label="Postanschrift bearbeiten"
         onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => handleModalEscape(event, props.onCancel)}
         onSubmit={async (event) => {
           event.preventDefault();
           if (!line1.trim() || busy) return;
@@ -9021,15 +9789,124 @@ function AddressModal(props: {
         </label>
         {error ? <p className="inline-error">{error}</p> : null}
         <footer className="modal-actions">
-          <button type="button" className="small-button" onClick={props.onCancel} disabled={busy}>Abbrechen</button>
           <button type="submit" className="primary-button" disabled={!line1.trim() || busy}>Speichern</button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={busy}>Abbrechen</button>
         </footer>
       </form>
     </div>
   );
 }
 
-function OrganizationMembersPanel(props: {
+function AddressBlock(props: {
+  partyId: number;
+  addresses: PartyAddress[];
+  onCreate: (partyId: number, input: Omit<CreateAddressDraft, "partyId">) => Promise<void>;
+  onUpdate: (addressId: number, input: Partial<Omit<CreateAddressDraft, "partyId">>) => Promise<void>;
+  onDelete: (addressId: number) => Promise<void>;
+}) {
+  const [editingAddress, setEditingAddress] = useState<PartyAddress | "new" | null>(null);
+  const [deletingAddress, setDeletingAddress] = useState<PartyAddress | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <SectionBlock
+      title="Anschriften"
+      description="Postalische Orte und Rechnungsadressen."
+      actions={(
+        <button type="button" className="section-primary-action" onClick={() => setEditingAddress("new")} disabled={busyAction !== null}>
+          <Plus size={15} />
+          Anschrift hinzufügen
+        </button>
+      )}
+    >
+      <RelationList emptyTitle="Keine Anschriften" emptyDescription="Post- oder Rechnungsadressen können ergänzt werden.">
+        {props.addresses.map((address) => (
+          <RelationItem
+            key={address.id}
+            icon={<Building2 size={15} />}
+            title={address.line1}
+            meta={[formatAddressLine(address), address.label, address.isPrimary ? "primär" : null].filter(Boolean).join(" · ")}
+            actions={(
+              <>
+                <button
+                  type="button"
+                  className="icon-button compact"
+                  disabled={busyAction !== null}
+                  title="Anschrift bearbeiten"
+                  onClick={() => setEditingAddress(address)}
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button compact"
+                  disabled={busyAction !== null}
+                  title="Anschrift löschen"
+                  onClick={() => {
+                    if (busyAction) return;
+                    setDeletingAddress(address);
+                  }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </>
+            )}
+          />
+        ))}
+      </RelationList>
+      {error ? <ErrorState title="Anschrift konnte nicht gespeichert werden" description={error} /> : null}
+      {editingAddress ? (
+        <AddressModal
+          address={editingAddress === "new" ? null : editingAddress}
+          onCancel={() => setEditingAddress(null)}
+          onSave={async (input) => {
+            if (busyAction) return;
+            setBusyAction(editingAddress === "new" ? "create" : `update:${editingAddress.id}`);
+            setError(null);
+            try {
+              if (editingAddress === "new") {
+                await props.onCreate(props.partyId, input);
+              } else {
+                await props.onUpdate(editingAddress.id, input);
+              }
+              setEditingAddress(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Anschrift konnte nicht gespeichert werden.");
+              throw err;
+            } finally {
+              setBusyAction(null);
+            }
+          }}
+        />
+      ) : null}
+      {deletingAddress ? (
+        <ConfirmModal
+          title="Anschrift löschen?"
+          description={<p>„{deletingAddress.line1}“ wird aus dieser Organisation entfernt.</p>}
+          confirmLabel="Anschrift löschen"
+          busy={busyAction !== null}
+          onCancel={() => setDeletingAddress(null)}
+          onConfirm={async () => {
+            if (busyAction) return;
+            setBusyAction(`delete:${deletingAddress.id}`);
+            setError(null);
+            try {
+              await props.onDelete(deletingAddress.id);
+              setDeletingAddress(null);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Anschrift konnte nicht gelöscht werden.");
+            } finally {
+              setBusyAction(null);
+            }
+          }}
+        />
+      ) : null}
+    </SectionBlock>
+  );
+}
+
+function OrganizationRelationsSection(props: {
   organization: Organization;
   people: Person[];
   relationshipTypes: RelationshipType[];
@@ -9043,6 +9920,7 @@ function OrganizationMembersPanel(props: {
   }) => Promise<void>;
   onOpenPerson: (partyId: number) => void;
 }) {
+  const [managerOpen, setManagerOpen] = useState(false);
   const [personId, setPersonId] = useState("");
   const [relationshipTypeId, setRelationshipTypeId] = useState("");
   const [roleLabel, setRoleLabel] = useState("");
@@ -9061,12 +9939,27 @@ function OrganizationMembersPanel(props: {
     ?? props.relationshipTypes.find((type) => type.key === "works_for")
     ?? props.relationshipTypes[0];
   const selectedRelationshipTypeId = relationshipTypeId || (defaultRelationshipType ? String(defaultRelationshipType.id) : "");
+  const otherRelationships = props.relationships.filter((relationship) => {
+    const otherParty = relationship.fromPartyId === props.organization.id ? relationship.toParty : relationship.fromParty;
+    return otherParty.type !== "person";
+  });
 
   return (
-    <Panel title="Mitglieder dieser Organisation">
-      <div className="relationship-list">
-        {memberRelationships.length === 0 ? <p className="muted-text">Noch keine Mitglieder oder Personenbeziehungen.</p> : null}
-        {memberRelationships.map((relationship) => {
+    <SectionBlock title="Beziehungen" description="Personen, Organisationen und DMAX-Kontexte, die mit dieser Organisation verbunden sind.">
+      <div className="relation-section-stack">
+        <RelationGroup
+          title="Personen"
+          description="Mitglieder und andere Personenbeziehungen."
+          emptyTitle="Keine Personenbeziehungen"
+          emptyDescription="Noch keine Person ist mit dieser Organisation verbunden."
+          actions={(
+            <button type="button" className="section-primary-action" onClick={() => setManagerOpen(true)} disabled={saving || availablePeople.length === 0 || props.relationshipTypes.length === 0}>
+              <Plus size={15} />
+              Person verknüpfen
+            </button>
+          )}
+        >
+          {memberRelationships.map((relationship) => {
           const person = relationship.fromPartyId === props.organization.id ? relationship.toParty : relationship.fromParty;
           const direction =
             relationship.relationshipType.directionality === "symmetric"
@@ -9075,61 +9968,103 @@ function OrganizationMembersPanel(props: {
                 ? relationship.relationshipType.label
                 : relationship.relationshipType.inverseLabel ?? relationship.relationshipType.label;
           return (
-            <button type="button" className="relationship-row relationship-button" key={relationship.id} onClick={() => props.onOpenPerson(person.id)}>
-              <div className="entity-icon"><Users size={16} /></div>
-              <div>
-                <strong>{person.displayName}</strong>
-                <p>{direction}{relationship.roleLabel ? ` · ${relationship.roleLabel}` : ""}</p>
-              </div>
-            </button>
+            <RelationItem
+              key={relationship.id}
+              icon={<Users size={16} />}
+              title={person.displayName}
+              meta={[direction, relationship.roleLabel].filter(Boolean).join(" · ")}
+              onOpen={() => props.onOpenPerson(person.id)}
+            />
           );
-        })}
+          })}
+        </RelationGroup>
+        <RelationGroup
+          title="Organisationen"
+          description="Weitere Parteienbeziehungen."
+          emptyTitle="Keine Organisationsbeziehungen"
+          emptyDescription="Keine weitere Organisation ist verknüpft."
+        >
+          {otherRelationships.map((relationship) => {
+            const otherParty = relationship.fromPartyId === props.organization.id ? relationship.toParty : relationship.fromParty;
+            const label =
+              relationship.relationshipType.directionality === "symmetric"
+                ? relationship.relationshipType.label
+                : relationship.fromPartyId === props.organization.id
+                  ? relationship.relationshipType.label
+                  : relationship.relationshipType.inverseLabel ?? relationship.relationshipType.label;
+            return (
+              <RelationItem
+                key={relationship.id}
+                icon={<Building2 size={16} />}
+                title={otherParty.displayName}
+                meta={[label, relationship.roleLabel].filter(Boolean).join(" · ")}
+              />
+            );
+          })}
+        </RelationGroup>
       </div>
-      <form
-        className="member-create-form"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          const nextPersonId = Number(personId);
-          const nextTypeId = Number(selectedRelationshipTypeId);
-          if (!nextPersonId || !nextTypeId || saving) return;
-          setSaving(true);
-          setError(null);
-          try {
-            await props.onCreateRelationship({
-              fromPartyId: nextPersonId,
-              toPartyId: props.organization.id,
-              relationshipTypeId: nextTypeId,
-              roleLabel: roleLabel.trim() || null,
-              status: "active"
-            });
-            setPersonId("");
-            setRoleLabel("");
-          } catch (err) {
-            setError(err instanceof Error ? err.message : "Mitglied konnte nicht hinzugefügt werden.");
-          } finally {
-            setSaving(false);
-          }
-        }}
-      >
-        <select value={personId} onChange={(event) => setPersonId(event.target.value)} disabled={saving}>
-          <option value="">Person auswählen</option>
-          {availablePeople.map((person) => (
-            <option key={person.id} value={person.id}>{person.displayName}</option>
-          ))}
-        </select>
-        <select value={selectedRelationshipTypeId} onChange={(event) => setRelationshipTypeId(event.target.value)} disabled={saving || props.relationshipTypes.length === 0}>
-          {props.relationshipTypes.map((type) => (
-            <option key={type.id} value={type.id}>{type.label}</option>
-          ))}
-        </select>
-        <input value={roleLabel} onChange={(event) => setRoleLabel(event.target.value)} placeholder="Rolle / Kontext" disabled={saving} />
-        <button type="submit" className="primary-button" disabled={!personId || !selectedRelationshipTypeId || saving}>
-          <Plus size={15} />
-          Mitglied
-        </button>
-      </form>
-      {error ? <p className="inline-error">{error}</p> : null}
-    </Panel>
+      {error ? <ErrorState title="Beziehung konnte nicht gespeichert werden" description={error} /> : null}
+      {managerOpen ? (
+        <EditModal
+          title="Person verknüpfen"
+          label="Person mit Organisation verknüpfen"
+          className="party-edit-modal"
+          onCancel={() => setManagerOpen(false)}
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const nextPersonId = Number(personId);
+            const nextTypeId = Number(selectedRelationshipTypeId);
+            if (!nextPersonId || !nextTypeId || saving) return;
+            setSaving(true);
+            setError(null);
+            try {
+              await props.onCreateRelationship({
+                fromPartyId: nextPersonId,
+                toPartyId: props.organization.id,
+                relationshipTypeId: nextTypeId,
+                roleLabel: roleLabel.trim() || null,
+                status: "active"
+              });
+              setPersonId("");
+              setRoleLabel("");
+              setManagerOpen(false);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Beziehung konnte nicht hinzugefügt werden.");
+            } finally {
+              setSaving(false);
+            }
+          }}
+          footer={(
+            <>
+              <button type="submit" className="primary-button" disabled={!personId || !selectedRelationshipTypeId || saving}>Speichern</button>
+              <button type="button" className="small-button" onClick={() => setManagerOpen(false)} disabled={saving}>Abbrechen</button>
+            </>
+          )}
+        >
+          <label>
+            Person
+            <select value={personId} onChange={(event) => setPersonId(event.target.value)} disabled={saving}>
+              <option value="">Person auswählen</option>
+              {availablePeople.map((person) => (
+                <option key={person.id} value={person.id}>{person.displayName}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Beziehung
+            <select value={selectedRelationshipTypeId} onChange={(event) => setRelationshipTypeId(event.target.value)} disabled={saving || props.relationshipTypes.length === 0}>
+              {props.relationshipTypes.map((type) => (
+                <option key={type.id} value={type.id}>{type.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Rolle / Kontext
+            <input value={roleLabel} onChange={(event) => setRoleLabel(event.target.value)} disabled={saving} />
+          </label>
+        </EditModal>
+      ) : null}
+    </SectionBlock>
   );
 }
 
@@ -9164,6 +10099,44 @@ function PartyRelationshipsPanel(props: { partyId: number; relationships: Person
         })}
       </div>
     </Panel>
+  );
+}
+
+function OrganizationParticipationsSection(props: {
+  participants: EntityParticipant[];
+  initiatives: Initiative[];
+  tasks: Task[];
+  onOpenInitiative: (initiativeId: number) => void;
+  onOpenTask: (taskId: number) => void;
+}) {
+  const initiativeById = new Map(props.initiatives.map((initiative) => [initiative.id, initiative]));
+  const taskById = new Map(props.tasks.map((task) => [task.id, task]));
+
+  return (
+    <SectionBlock title="DMAX-Kontexte" description="Initiativen und Maßnahmen, in denen diese Organisation vorkommt.">
+      <RelationList emptyTitle="Keine DMAX-Kontexte" emptyDescription="Diese Organisation ist noch keiner Initiative oder Maßnahme zugeordnet.">
+        {props.participants.map((participant) => {
+          const title =
+            participant.entityType === "initiative"
+              ? initiativeById.get(participant.entityId)?.name
+              : participant.entityType === "task"
+                ? taskById.get(participant.entityId)?.title
+                : null;
+          return (
+            <RelationItem
+              key={participant.id}
+              icon={participant.entityType === "task" ? <ClipboardList size={16} /> : <Blocks size={16} />}
+              title={title ?? `${entityTypeLabel(participant.entityType)} #${participant.entityId}`}
+              meta={`${entityTypeLabel(participant.entityType)} · ${participantRoleSummary(participant)}`}
+              onOpen={() => {
+                if (participant.entityType === "initiative") props.onOpenInitiative(participant.entityId);
+                if (participant.entityType === "task") props.onOpenTask(participant.entityId);
+              }}
+            />
+          );
+        })}
+      </RelationList>
+    </SectionBlock>
   );
 }
 
@@ -9243,7 +10216,7 @@ function taskCompletionRank(status: Task["status"]): number {
   return status === "done" ? 1 : 0;
 }
 
-function TaskCreateInlineForm(props: { onCreateTask: (title: string) => Promise<void> }) {
+function TaskCreateInlineForm(props: { label?: string; onCreateTask: (title: string) => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
@@ -9252,15 +10225,16 @@ function TaskCreateInlineForm(props: { onCreateTask: (title: string) => Promise<
     return (
       <button
         type="button"
-        className="task-create-inline-button"
+        className={props.label ? "section-primary-action" : "task-create-inline-button"}
         onClick={() => {
           setOpen(true);
           setTitle("");
         }}
-        title="Massnahme hinzufuegen"
-        aria-label="Massnahme hinzufuegen"
+        title={props.label ?? "Massnahme hinzufuegen"}
+        aria-label={props.label ?? "Massnahme hinzufuegen"}
       >
         <Plus size={17} />
+        {props.label ? <span>{props.label}</span> : null}
       </button>
     );
   }
@@ -9448,6 +10422,7 @@ function PromptInspectorView(props: {
               {selected.turnTrace ? <TurnTracePanel trace={selected.turnTrace} /> : null}
               <PromptSection title="User Input" text={selected.userInput} />
               <PromptSection title="System / Instructions" text={selected.systemInstructions} />
+              <ContextPayloadDebugView payload={selected.contextPayload} finalPromptChars={selected.finalPrompt.length} contextType={selected.contextType} />
               <PromptSection title="Kontextdaten" text={selected.contextData} />
               <PromptSection title="Memory / Historie" text={selected.memoryHistory} />
               <PromptSection title="Tools / Funktionen" text={selected.tools} />
@@ -9517,6 +10492,293 @@ function TurnTracePanel({ trace }: { trace: AppPromptLog["turnTrace"] }) {
       ) : null}
     </section>
   );
+}
+
+function ContextPayloadDebugView(props: {
+  payload: AppPromptLog["contextPayload"];
+  finalPromptChars: number;
+  contextType: ConversationContext["type"];
+}) {
+  const normalized = normalizeContextPayload(props.payload);
+  const payload = normalized.payload;
+  const loadedEntities = payload?.loadedEntities ?? [];
+  const omittedEntities = payload?.omittedEntities ?? [];
+  const blocks = payload?.blocks ?? [];
+  const deduplications = payload?.deduplications ?? [];
+  const truncatedBlocks = blocks.filter((block) => block.truncated);
+  const omittedBlocks = blocks.filter((block) => block.omitted);
+  const contextMode = formatContextPayloadContext(payload?.context) ?? props.contextType;
+
+  return (
+    <section className="prompt-section context-payload-debug">
+      <div className="context-debug-heading">
+        <div>
+          <h3>Context Payload Debug</h3>
+          <p>Strukturierte Sicht auf geladene Entities, Budgeting, Truncation und Deduplikation.</p>
+        </div>
+        <span>{props.finalPromptChars.toLocaleString("de-DE")} chars final prompt</span>
+      </div>
+
+      <details className="context-debug-details" open>
+        <summary>Overview</summary>
+        <div className="context-debug-overview">
+          <ContextDebugStat label="Context Mode" value={contextMode} />
+          <ContextDebugStat label="Title" value={payload?.title ?? "none"} />
+          <ContextDebugStat label="Version" value={formatUnknown(payload?.version)} />
+          <ContextDebugStat label="Data Sources" value={(payload?.dataSources ?? []).join(", ") || "none"} />
+          <ContextDebugStat label="Loaded Entities" value={String(loadedEntities.length)} />
+          <ContextDebugStat label="Omitted Entities" value={String(omittedEntities.length)} tone={omittedEntities.length > 0 ? "warn" : undefined} />
+          <ContextDebugStat label="Blocks" value={String(blocks.length)} />
+          <ContextDebugStat label="Truncated Blocks" value={String(truncatedBlocks.length)} tone={truncatedBlocks.length > 0 ? "warn" : undefined} />
+          <ContextDebugStat label="Omitted Blocks" value={String(omittedBlocks.length)} tone={omittedBlocks.length > 0 ? "warn" : undefined} />
+          <ContextDebugStat label="Deduplications" value={String(deduplications.length)} />
+        </div>
+      </details>
+
+      <EntityDebugSection title="Loaded Entities" entities={loadedEntities} defaultOpen />
+      <OmittedEntityDebugSection entities={omittedEntities} defaultOpen={omittedEntities.length > 0} />
+      <BlockDebugSection blocks={blocks} defaultOpen={truncatedBlocks.length > 0 || omittedBlocks.length > 0} />
+      {deduplications.length > 0 ? <DeduplicationDebugSection deduplications={deduplications} /> : null}
+      <JsonDebugSection title="Budgets" value={payload?.budgets ?? []} defaultOpen={false} />
+      <JsonDebugSection title="Raw JSON" value={normalized.rawValue} defaultOpen={false} />
+      {normalized.warning ? <p className="context-debug-warning">{normalized.warning}</p> : null}
+    </section>
+  );
+}
+
+function ContextDebugStat({ label, value, tone }: { label: string; value: string; tone?: "warn" }) {
+  return (
+    <div className={tone ? `context-debug-stat ${tone}` : "context-debug-stat"}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function EntityDebugSection({ title, entities, defaultOpen = false }: { title: string; entities: ContextPayloadEntity[]; defaultOpen?: boolean }) {
+  const grouped = groupByRole(entities);
+  return (
+    <details className="context-debug-details" open={defaultOpen}>
+      <summary>{title} ({entities.length})</summary>
+      {entities.length === 0 ? (
+        <p className="muted-text">none</p>
+      ) : (
+        <div className="context-debug-role-groups">
+          {grouped.map(([role, roleEntities]) => (
+            <div className="context-debug-role-group" key={role}>
+              <h4>{role}</h4>
+              <ContextDebugTable
+                headers={["Type", "ID", "Title", "Kind", "Chars", "State"]}
+                rows={roleEntities.map((entity) => [
+                  entity.entityType ?? "unknown",
+                  <code>{entity.id ?? "n/a"}</code>,
+                  entity.title ?? "none",
+                  entity.kind ?? "none",
+                  formatOptionalNumber(entity.emittedChars),
+                  entity.truncated ? <DebugBadge label="truncated" tone="warn" /> : <DebugBadge label="full" />
+                ])}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </details>
+  );
+}
+
+function OmittedEntityDebugSection({ entities, defaultOpen = false }: { entities: ContextPayloadOmittedEntity[]; defaultOpen?: boolean }) {
+  return (
+    <details className="context-debug-details" open={defaultOpen}>
+      <summary>Omitted Entities ({entities.length})</summary>
+      {entities.length === 0 ? (
+        <p className="muted-text">none</p>
+      ) : (
+        <ContextDebugTable
+          headers={["Role", "Type", "ID", "Title", "Reason", "Original Chars"]}
+          rows={entities.map((entity) => [
+            entity.role ?? "unknown",
+            entity.entityType ?? "unknown",
+            <code>{entity.id ?? "n/a"}</code>,
+            entity.title ?? "none",
+            <DebugBadge label={entity.reason ?? "unknown"} tone="warn" />,
+            formatOptionalNumber(entity.originalChars)
+          ])}
+        />
+      )}
+    </details>
+  );
+}
+
+function BlockDebugSection({ blocks, defaultOpen = false }: { blocks: ContextPayloadBlock[]; defaultOpen?: boolean }) {
+  return (
+    <details className="context-debug-details" open={defaultOpen}>
+      <summary>Blocks / Budget & Truncation ({blocks.length})</summary>
+      {blocks.length === 0 ? (
+        <p className="muted-text">none</p>
+      ) : (
+        <ContextDebugTable
+          headers={["Label", "Kind", "Original", "Emitted", "State", "Reason"]}
+          rows={blocks.map((block) => [
+            block.label ?? block.id ?? "unnamed",
+            block.kind ?? "unknown",
+            formatOptionalNumber(block.originalChars),
+            formatOptionalNumber(block.emittedChars),
+            <span className="context-debug-badge-row">
+              {block.truncated ? <DebugBadge label="truncated" tone="warn" /> : null}
+              {block.omitted ? <DebugBadge label="omitted" tone="danger" /> : null}
+              {!block.truncated && !block.omitted ? <DebugBadge label="full" /> : null}
+            </span>,
+            block.reason ? <DebugBadge label={block.reason} tone={block.reason === "duplicate" ? "info" : "warn"} /> : "none"
+          ])}
+        />
+      )}
+    </details>
+  );
+}
+
+function DeduplicationDebugSection({ deduplications }: { deduplications: ContextPayloadDeduplication[] }) {
+  return (
+    <details className="context-debug-details">
+      <summary>Deduplications ({deduplications.length})</summary>
+      <ContextDebugTable
+        headers={["Source Block", "Duplicate Of", "Reason"]}
+        rows={deduplications.map((deduplication) => [
+          <code>{deduplication.sourceBlock ?? "unknown"}</code>,
+          <code>{deduplication.duplicateOf ?? "unknown"}</code>,
+          deduplication.reason ?? "none"
+        ])}
+      />
+    </details>
+  );
+}
+
+function JsonDebugSection({ title, value, defaultOpen = false }: { title: string; value: unknown; defaultOpen?: boolean }) {
+  return (
+    <details className="context-debug-details" open={defaultOpen}>
+      <summary>{title}</summary>
+      <pre className="context-debug-json">{formatJson(value)}</pre>
+    </details>
+  );
+}
+
+function ContextDebugTable({ headers, rows }: { headers: string[]; rows: ReactNode[][] }) {
+  return (
+    <div className="context-debug-table-wrap">
+      <table className="context-debug-table">
+        <thead>
+          <tr>
+            {headers.map((header) => <th key={header}>{header}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function DebugBadge({ label, tone }: { label: string; tone?: "warn" | "danger" | "info" }) {
+  return <span className={tone ? `context-debug-badge ${tone}` : "context-debug-badge"}>{label}</span>;
+}
+
+function normalizeContextPayload(payload: AppPromptLog["contextPayload"]): { payload: ContextPayload | null; rawValue: unknown; warning?: string } {
+  if (!payload) {
+    return { payload: null, rawValue: {}, warning: "No context payload was stored for this prompt log." };
+  }
+  if (typeof payload === "string") {
+    try {
+      const parsed = JSON.parse(payload) as unknown;
+      return isRecord(parsed) ? { payload: coerceContextPayload(parsed), rawValue: parsed } : { payload: null, rawValue: payload, warning: "Context payload string did not parse to an object." };
+    } catch {
+      return { payload: null, rawValue: payload, warning: "Context payload is a string but could not be parsed as JSON." };
+    }
+  }
+  return { payload: coerceContextPayload(payload), rawValue: payload };
+}
+
+function coerceContextPayload(value: Record<string, unknown>): ContextPayload {
+  return {
+    ...value,
+    dataSources: stringArray(value.dataSources),
+    current: unknownArray(value.current),
+    parents: unknownArray(value.parents),
+    children: unknownArray(value.children),
+    siblings: unknownArray(value.siblings),
+    neighbors: unknownArray(value.neighbors),
+    related: unknownArray(value.related),
+    limits: unknownArray(value.limits),
+    notes: stringArray(value.notes),
+    loadedEntities: recordArray(value.loadedEntities) as ContextPayloadEntity[],
+    omittedEntities: recordArray(value.omittedEntities) as ContextPayloadOmittedEntity[],
+    blocks: recordArray(value.blocks) as ContextPayloadBlock[],
+    deduplications: recordArray(value.deduplications) as ContextPayloadDeduplication[]
+  };
+}
+
+function groupByRole<T extends { role?: string }>(items: T[]): Array<[string, T[]]> {
+  const order = ["current", "parent", "child", "sibling", "neighbor", "related", "unknown"];
+  const grouped = new Map<string, T[]>();
+  items.forEach((item) => {
+    const key = item.role || "unknown";
+    grouped.set(key, [...(grouped.get(key) ?? []), item]);
+  });
+  return [...grouped.entries()].sort(([left], [right]) => order.indexOf(left) - order.indexOf(right));
+}
+
+function formatContextPayloadContext(context: unknown): string | null {
+  if (!isRecord(context)) return null;
+  const type = context.type;
+  if (typeof type !== "string") return null;
+  const entityId = typeof context.categoryId === "number"
+    ? context.categoryId
+    : typeof context.initiativeId === "number"
+      ? context.initiativeId
+      : typeof context.taskId === "number"
+        ? context.taskId
+        : typeof context.partyId === "number"
+          ? context.partyId
+          : null;
+  return entityId ? `${type} #${entityId}` : type;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function recordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function unknownArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function formatUnknown(value: unknown): string {
+  if (value === null || value === undefined) return "n/a";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
+function formatOptionalNumber(value: unknown): string {
+  return typeof value === "number" ? value.toLocaleString("de-DE") : "n/a";
+}
+
+function formatJson(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value ?? {}, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function PromptSection({ title, text, emphasis = false }: { title: string; text: string; emphasis?: boolean }) {
@@ -9720,8 +10982,14 @@ function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
-function EmptyState({ title }: { title: string }) {
-  return <div className="empty-state">{title}</div>;
+function EmptyState({ title, description, action }: { title: string; description?: string | null; action?: ReactNode }) {
+  return (
+    <div className="empty-state">
+      <strong>{title}</strong>
+      {description ? <p>{description}</p> : null}
+      {action ? <div className="empty-state-action">{action}</div> : null}
+    </div>
+  );
 }
 
 function titleForView(view: View): string {

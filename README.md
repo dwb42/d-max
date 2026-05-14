@@ -9,6 +9,9 @@ truth for implemented routes, schema, runtime boundaries, and hardening work.
 
 Read [docs/memory-map.md](docs/memory-map.md) for where Markdown memory belongs.
 
+Agent context/prompt architecture notes live in [docs/agent/](docs/agent/).
+Frontend UI governance lives in [docs/ui/](docs/ui/).
+
 ## Local Setup
 
 ```bash

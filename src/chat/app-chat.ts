@@ -239,6 +239,7 @@ export class AppChatService {
       memoryHistory: formatMemoryHistory(previousMessages),
       tools: OPENCLAW_TOOL_CONTEXT,
       finalPrompt: agentMessage,
+      contextPayload: resolved.contextPayload,
       turnTrace: trace
     });
     addTurnTraceEvent(trace, "prompt_log_persisted", {

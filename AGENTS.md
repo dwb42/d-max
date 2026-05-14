@@ -78,3 +78,38 @@ for a provider experiment.
 - Add setup/dev/test scripts when needed.
 - Never commit secrets, `.env`, provider keys, local SQLite runtime data, or
   OpenClaw auth state.
+
+## DMAX UI Governance
+
+When working on frontend UI, route layouts, entity pages, list pages, forms, modals, drawers, navigation, visual hierarchy, UX behavior, component structure, spacing, typography, copy labels, or frontend interaction patterns, you must follow the DMAX UI system documented in:
+
+- `docs/ui/UI_PRINCIPLES.md`
+- `docs/ui/UI_PATTERNS.md`
+- `docs/ui/UI_COPY_LANGUAGE.md`
+- `docs/ui/UI_INFORMATION_ARCHITECTURE.md`
+- `docs/ui/UI_COMPONENTS.md`
+- `docs/ui/UI_REVIEW_CHECKLIST.md`
+
+DMAX frontend work must optimize for a coherent product system, not for locally plausible screens.
+
+Before creating or modifying UI:
+
+1. Identify the relevant canonical pattern.
+2. Reuse existing shared components where possible.
+3. Avoid one-off route-specific UI.
+4. Avoid showing information only because data exists.
+5. Prefer progressive disclosure over information dumping.
+6. Keep terminology consistent across routes.
+7. Do not introduce new colors, spacing, typography, shadows, card styles, layout primitives or interaction patterns unless the UI documentation is updated accordingly.
+
+A UI task is not complete until:
+
+1. The relevant `docs/ui/` rules have been applied.
+2. Comparable routes use consistent patterns.
+3. Empty, loading and error states are handled.
+4. The UI review checklist has been applied.
+5. Any remaining visual uncertainty is explicitly reported.
+
+Hard rule:
+
+Do not solve UI complexity by adding more visible information. Prefer prioritizing, grouping, hiding, collapsing, simplifying and reusing canonical patterns.

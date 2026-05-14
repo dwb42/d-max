@@ -17,6 +17,7 @@ export type AppPromptLog = {
   memoryHistory: string;
   tools: string;
   finalPrompt: string;
+  contextPayload: Record<string, unknown> | null;
   turnTrace: AppChatTurnTrace | null;
   createdAt: string;
 };
@@ -34,6 +35,7 @@ type AppPromptLogRow = {
   memory_history: string;
   tools: string;
   final_prompt: string;
+  context_payload_json: string | null;
   turn_trace: string | null;
   created_at: string;
 };
@@ -50,6 +52,7 @@ export type CreateAppPromptLogInput = {
   memoryHistory: string;
   tools: string;
   finalPrompt: string;
+  contextPayload?: unknown | null;
   turnTrace?: AppChatTurnTrace | null;
 };
 
@@ -67,9 +70,22 @@ function toPromptLog(row: AppPromptLogRow): AppPromptLog {
     memoryHistory: row.memory_history,
     tools: row.tools,
     finalPrompt: row.final_prompt,
+    contextPayload: parseContextPayload(row.context_payload_json),
     turnTrace: parseTurnTrace(row.turn_trace),
     createdAt: row.created_at
   };
+}
+
+function parseContextPayload(value: string | null): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
 }
 
 export class AppPromptLogRepository {
@@ -97,9 +113,10 @@ export class AppPromptLogRepository {
           memory_history,
           tools,
           final_prompt,
+          context_payload_json,
           turn_trace,
           created_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         input.conversationId ?? null,
@@ -113,6 +130,7 @@ export class AppPromptLogRepository {
         input.memoryHistory,
         input.tools,
         input.finalPrompt,
+        input.contextPayload ? JSON.stringify(input.contextPayload) : null,
         input.turnTrace ? JSON.stringify(input.turnTrace) : null,
         now
       );

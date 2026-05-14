@@ -193,6 +193,7 @@ function migratePromptLogs(db: ReturnType<typeof openDatabase>): void {
       memory_history text not null,
       tools text not null,
       final_prompt text not null,
+      context_payload_json text,
       turn_trace text,
       created_at text not null,
       check (
@@ -208,6 +209,9 @@ function migratePromptLogs(db: ReturnType<typeof openDatabase>): void {
   const columns = db.prepare("pragma table_info(app_prompt_logs)").all() as Array<{ name: string }>;
   if (!columns.some((column) => column.name === "turn_trace")) {
     db.exec("alter table app_prompt_logs add column turn_trace text");
+  }
+  if (!columns.some((column) => column.name === "context_payload_json")) {
+    db.exec("alter table app_prompt_logs add column context_payload_json text");
   }
 }
 
@@ -929,7 +933,9 @@ function rebuildAppPromptLogsForInitiativeContext(db: ReturnType<typeof openData
   }
 
   const hasTurnTrace = tableColumns(db, "app_prompt_logs").some((column) => column.name === "turn_trace");
+  const hasContextPayloadJson = tableColumns(db, "app_prompt_logs").some((column) => column.name === "context_payload_json");
   const turnTraceSelect = hasTurnTrace ? "turn_trace" : "null as turn_trace";
+  const contextPayloadJsonSelect = hasContextPayloadJson ? "context_payload_json" : "null as context_payload_json";
   db.exec(`
     create table app_prompt_logs_next (
       id integer primary key,
@@ -944,6 +950,7 @@ function rebuildAppPromptLogsForInitiativeContext(db: ReturnType<typeof openData
       memory_history text not null,
       tools text not null,
       final_prompt text not null,
+      context_payload_json text,
       turn_trace text,
       created_at text not null,
       check (
@@ -953,7 +960,7 @@ function rebuildAppPromptLogsForInitiativeContext(db: ReturnType<typeof openData
     );
     insert into app_prompt_logs_next (
       id, conversation_id, user_message_id, openclaw_session_id, context_type, context_entity_id,
-      user_input, system_instructions, context_data, memory_history, tools, final_prompt, turn_trace, created_at
+      user_input, system_instructions, context_data, memory_history, tools, final_prompt, context_payload_json, turn_trace, created_at
     )
       select
         id,
@@ -968,6 +975,7 @@ function rebuildAppPromptLogsForInitiativeContext(db: ReturnType<typeof openData
         memory_history,
         tools,
         final_prompt,
+        ${contextPayloadJsonSelect},
         ${turnTraceSelect},
         created_at
       from app_prompt_logs
@@ -1260,7 +1268,9 @@ function rebuildAppPromptLogsForWhoContext(db: ReturnType<typeof openDatabase>):
   }
 
   const hasTurnTrace = tableColumns(db, "app_prompt_logs").some((column) => column.name === "turn_trace");
+  const hasContextPayloadJson = tableColumns(db, "app_prompt_logs").some((column) => column.name === "context_payload_json");
   const turnTraceSelect = hasTurnTrace ? "turn_trace" : "null as turn_trace";
+  const contextPayloadJsonSelect = hasContextPayloadJson ? "context_payload_json" : "null as context_payload_json";
   db.exec(`
     create table app_prompt_logs_next (
       id integer primary key,
@@ -1275,6 +1285,7 @@ function rebuildAppPromptLogsForWhoContext(db: ReturnType<typeof openDatabase>):
       memory_history text not null,
       tools text not null,
       final_prompt text not null,
+      context_payload_json text,
       turn_trace text,
       created_at text not null,
       check (
@@ -1284,7 +1295,7 @@ function rebuildAppPromptLogsForWhoContext(db: ReturnType<typeof openDatabase>):
     );
     insert into app_prompt_logs_next (
       id, conversation_id, user_message_id, openclaw_session_id, context_type, context_entity_id,
-      user_input, system_instructions, context_data, memory_history, tools, final_prompt, turn_trace, created_at
+      user_input, system_instructions, context_data, memory_history, tools, final_prompt, context_payload_json, turn_trace, created_at
     )
       select
         id,
@@ -1299,6 +1310,7 @@ function rebuildAppPromptLogsForWhoContext(db: ReturnType<typeof openDatabase>):
         memory_history,
         tools,
         final_prompt,
+        ${contextPayloadJsonSelect},
         ${turnTraceSelect},
         created_at
       from app_prompt_logs

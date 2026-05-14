@@ -1047,6 +1047,8 @@ function conversationContextSearchParams(context: ConversationContext): URLSearc
     params.set("contextEntityId", String(context.initiativeId));
   } else if (context.type === "task") {
     params.set("contextEntityId", String(context.taskId));
+  } else if (context.type === "person" || context.type === "organization") {
+    params.set("contextEntityId", String(context.partyId));
   }
   return params;
 }

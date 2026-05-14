@@ -572,8 +572,66 @@ export type AppPromptLog = {
   memoryHistory: string;
   tools: string;
   finalPrompt: string;
+  contextPayload: ContextPayload | string | null;
   turnTrace: AppChatTurnTrace | null;
   createdAt: string;
+};
+
+export type ContextPayload = {
+  version?: number | string;
+  context?: unknown;
+  title?: string;
+  dataSources?: string[];
+  current?: unknown[];
+  parents?: unknown[];
+  children?: unknown[];
+  siblings?: unknown[];
+  neighbors?: unknown[];
+  related?: unknown[];
+  limits?: unknown[];
+  notes?: string[];
+  loadedEntities?: ContextPayloadEntity[];
+  omittedEntities?: ContextPayloadOmittedEntity[];
+  blocks?: ContextPayloadBlock[];
+  deduplications?: ContextPayloadDeduplication[];
+  budgets?: unknown;
+};
+
+export type ContextPayloadEntity = {
+  role?: string;
+  entityType?: string;
+  id?: string;
+  title?: string;
+  kind?: string;
+  includedFields?: string[];
+  emittedChars?: number;
+  truncated?: boolean;
+};
+
+export type ContextPayloadOmittedEntity = {
+  role?: string;
+  entityType?: string;
+  id?: string;
+  title?: string;
+  reason?: string;
+  originalChars?: number;
+};
+
+export type ContextPayloadBlock = {
+  id?: string;
+  label?: string;
+  kind?: string;
+  originalChars?: number;
+  emittedChars?: number;
+  truncated?: boolean;
+  omitted?: boolean;
+  reason?: string;
+};
+
+export type ContextPayloadDeduplication = {
+  sourceBlock?: string;
+  duplicateOf?: string;
+  reason?: string;
 };
 
 export type PromptTemplateDefinition = {

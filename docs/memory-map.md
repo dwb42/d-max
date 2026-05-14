@@ -11,6 +11,8 @@ This file defines where Markdown-based memory and configuration belongs.
 | `README.md` | Human/developer entry point | Setup, run commands, verification commands, links to current state | Detailed architecture, agent behavior rules, stale plans |
 | `AGENTS.md` | Codex working rules for this repo | Inspection rules, architecture boundaries, engineering constraints | User-facing agent personality, long product docs |
 | `docs/current-state.md` | Implemented-state source of truth | Current runtime, routes, schema, API surface, known hardening | Aspirational plans, historical decisions |
+| `docs/agent/` | Agent context, prompt, budgeting, response-contract, and acceptance docs | Current agent context architecture plus dated research/acceptance records | Raw prompt logs, secrets, runtime session files, or user-specific chat transcripts |
+| `docs/ui/` | Canonical frontend UI governance | UI principles, patterns, copy language, information architecture, component rules, and review checklists | One-off route hacks, transient visual experiments, or implementation notes that belong in code |
 | `docs/app-ui-plan.md` | Active UI notes | Current UI direction and near-term UI work | Implemented-state duplication |
 | `docs/archive/` | Historical docs archive | Superseded plans, dated handoffs, old spec packs, and completed implementation plans kept for background context | Active source-of-truth state, current implementation instructions, or runtime rules |
 
@@ -28,6 +30,10 @@ This file defines where Markdown-based memory and configuration belongs.
 ## Rules
 
 - `docs/current-state.md` wins over older plans.
+- `docs/agent/DMAX_CONTEXT_PROMPT_RESEARCH.md` is a dated baseline. For the
+  current implemented context system, prefer `docs/current-state.md`,
+  `docs/agent/DMAX_CONTEXT_BUDGETING.md`, and
+  `docs/agent/DMAX_CONTEXT_RESPONSE_CONTRACTS.md`.
 - Durable initiative memory lives in `initiatives.markdown`; durable
   organization description/context memory lives in `organizations.markdown`.
   There is no person Markdown memory field yet.

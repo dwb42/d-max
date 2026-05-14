@@ -267,6 +267,11 @@ auto-assigned `emoji` used by the life-area UI. The agent tools do not expose
 emoji editing. `Inbox` is a system category used as the fallback when category
 placement is unclear. There are no exploratory memory tables or session-summary
 tables.
+`app_prompt_logs` stores browser chat prompt diagnostics, including
+`context_payload_json`, a structured view of the context resolver's loaded
+entities, omitted entities, block-level truncation, deduplication decisions, and
+applied budgets. The payload is diagnostic metadata and intentionally does not
+mirror full raw Markdown bodies.
 
 ## Runtime And Provider State
 
@@ -288,6 +293,34 @@ tables.
   task. Media tools can list, link, update, remove, and reorder existing media
   attachments for categories, initiatives, and tasks; browser/API upload creates
   the underlying binary assets.
+- Browser app-chat context is assembled by
+  `src/chat/conversation-context.ts`. The resolver builds a text context block
+  plus structured debug payload and sends the final text to OpenClaw as the
+  session message together with the user's message. OpenClaw still contributes
+  its workspace runtime instructions from `openclaw/workspace/`.
+- The core DMAX chat context modes are `categories`, `category`,
+  `initiatives`, `ideas`, `projects`, `habits`, `idea`, `project`, `habit`,
+  and `task`. Each mode has runtime instructions and response guidance from the
+  same source used by `/prompt-vorlagen`, so prompt-template display and runtime
+  behavior stay synchronized.
+- Context data is mode-specific and budgeted. Detail contexts include current
+  entity memory, category Markdown background, relevant parent/child
+  initiative hierarchy, sibling or same-category neighbors, tasks, media, and
+  participants when available. List and overview contexts include compact
+  cross-type initiative summaries, category excerpts, task summaries, relation
+  summaries, and for `habits` a compact list of life areas without habits.
+- Context budgets, caps, truncation, omitted entities, and deduplication are
+  recorded in `context_payload_json`. Category Detail has an initiative-context
+  total budget, Initiatives Overview emits category background once, and
+  Category Overview avoids repeating the same open tasks globally and per
+  category.
+- Response guidance is context-specific but flexible. It tells the agent to
+  answer the concrete user question first, use context without dumping it,
+  avoid automatic state creation, ask at most one necessary clarifying question,
+  and avoid closing with a question when a clear next step is enough. The
+  `idea` detail mode is intentionally concise for normal exploration: roughly
+  5-7 prioritized points across variants, hypotheses, research fields, and
+  possible condensation, not 3-5 points per subcategory.
 - Browser app-chat context includes initiative/task media summaries and
   initiative precedence/parent context, but the static `OPENCLAW_TOOL_CONTEXT`
   summary in `src/chat/app-chat.ts` currently omits the initiative-relation
@@ -465,12 +498,17 @@ Implemented behavior:
   checked off, deleted, and reordered in the task detail view only.
 - `/drive`: LiveKit room creation, browser mic publishing, audio meter,
   start/end controls.
-- `/prompts`: debug view for prompts sent to OpenClaw.
+- `/prompts`: debug view for prompts sent to OpenClaw. It shows the final
+  prompt, readable prompt sections, and a structured Context Payload view with
+  overview counts, loaded entities, omitted entities, block/budget/truncation
+  data, deduplication entries, budgets, and raw JSON fallback.
 - `/prompt-vorlagen`: accordion overview of the conversation contexts defined in
   `src/chat/conversation-context.ts`, with route and prompt template per context.
-  Current route contexts include `categories`, `category`, `ideas`, `idea`,
-  `projects`, `project`, `habits`, `habit`, `tasks`, and `task`; legacy
-  `initiatives`/`initiative` remains accepted for compatibility.
+  The displayed instructions come from the same runtime source as browser chat,
+  including the global response policy and mode-specific response guidance.
+  Current route contexts include `categories`, `category`, `initiatives`,
+  `ideas`, `idea`, `projects`, `project`, `habits`, `habit`, `tasks`, and
+  `task`; legacy `initiative` remains accepted for compatibility.
 
 ## API Server
 
@@ -632,10 +670,10 @@ data.
 
 ## Verification
 
-Last checked on 2026-05-12:
+Last checked on 2026-05-14:
 
 - `npm run typecheck` passed.
-- `npm test` passed: 24 test files, 89 tests.
+- `npm test` passed: 27 test files, 112 tests.
 - `npm run web:build` passed without Vite large-chunk warnings.
 
 ```bash

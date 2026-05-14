@@ -95,6 +95,23 @@ describe("AppChatService", () => {
     expect(promptLog.systemInstructions).toContain("Context contract");
     expect(promptLog.systemInstructions).toContain("Initiative type guidance");
     expect(promptLog.contextData).toContain("Health Rhythm");
+    expect(promptLog.contextPayload).toMatchObject({
+      version: 1,
+      context: { type: "project", initiativeId: project.id },
+      current: [expect.stringContaining("Health Rhythm")]
+    });
+    expect(promptLog.contextPayload?.parents).toEqual(expect.arrayContaining([expect.stringContaining("category")]));
+    expect(promptLog.contextPayload?.loadedEntities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "current", entityType: "initiative", id: String(project.id) }),
+        expect.objectContaining({ role: "parent", entityType: "category", id: String(category.id) })
+      ])
+    );
+    expect(promptLog.contextPayload?.blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "contextData", id: "context-data-total" })
+      ])
+    );
     expect(promptLog.memoryHistory).toContain("No previous app chat messages");
     expect(promptLog.tools).toContain("createInitiative");
     expect(promptLog.tools).toContain("createInitiative with type = idea");

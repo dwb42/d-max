@@ -337,6 +337,7 @@ create table if not exists app_prompt_logs (
   memory_history text not null,
   tools text not null,
   final_prompt text not null,
+  context_payload_json text,
   turn_trace text,
   created_at text not null,
   check (
