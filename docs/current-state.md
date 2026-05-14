@@ -605,7 +605,7 @@ Known issue:
   summary so OpenClaw receives the same high-level affordance list that the MCP
   registry exposes.
 - Continue advanced Google Calendar integration from
-  `docs/google-calendar-integration-plan.md`: a first pragmatic multi-account
+  `docs/archive/google-calendar-integration-plan.md`: a first pragmatic multi-account
   OAuth/token UI exists, but a first-class connected-account table, account
   metadata from Google identity APIs, background sync/webhooks, recurrence for
   habits, attendee/location/reminder fields, default target calendars, and

@@ -12,10 +12,7 @@ This file defines where Markdown-based memory and configuration belongs.
 | `AGENTS.md` | Codex working rules for this repo | Inspection rules, architecture boundaries, engineering constraints | User-facing agent personality, long product docs |
 | `docs/current-state.md` | Implemented-state source of truth | Current runtime, routes, schema, API surface, known hardening | Aspirational plans, historical decisions |
 | `docs/app-ui-plan.md` | Active UI notes | Current UI direction and near-term UI work | Implemented-state duplication |
-| `docs/realtime-voice-plan.md` | Active voice hardening notes | Current voice path and remaining hardening | Product-wide memory or obsolete architecture |
-| `docs/media-attachments-plan.md` | Media attachment implementation notes and follow-up map | Attachment architecture decisions, current v1 capabilities, and remaining media follow-ups | Source-of-truth implemented state that belongs in `docs/current-state.md` |
-| `docs/google-calendar-integration-plan.md` | Google Calendar integration plan and follow-up map | Agreed Google Calendar semantics, sync roadmap, current limitations, and future account/sync work | Source-of-truth implemented state that belongs in `docs/current-state.md` |
-| `docs/archive/` | Historical docs archive | Superseded plans, dated handoffs, and old spec packs kept for background context | Active source-of-truth state, current implementation instructions, or runtime rules |
+| `docs/archive/` | Historical docs archive | Superseded plans, dated handoffs, old spec packs, and completed implementation plans kept for background context | Active source-of-truth state, current implementation instructions, or runtime rules |
 
 ## OpenClaw Workspace Memory
 

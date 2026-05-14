@@ -135,7 +135,7 @@ Runtime docs:
 - `docs/current-state.md`
 - `docs/memory-map.md`
 - `docs/app-ui-plan.md`
-- `docs/realtime-voice-plan.md`
+- `docs/archive/realtime-voice-plan.md`
 - `README.md`
 - `package.json`
 
