@@ -23,6 +23,11 @@ export type OpenClawGatewayStatus = {
   checkedAt: string;
 };
 
+export type OpenClawGatewayProcessExit = {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+};
+
 export type OpenClawActivity = {
   id: string;
   kind: "tool_call" | "tool_result" | "plan" | "reasoning";
@@ -64,6 +69,7 @@ let gatewayPrewarmFailedKey: string | null = null;
 let gatewayClientModulePromise: Promise<OpenClawGatewayClientModule> | null = null;
 let gatewayConnection: OpenClawGatewayConnection | null = null;
 let gatewayReadyUntil = 0;
+const gatewayProcessExitHandlers = new Set<(exit: OpenClawGatewayProcessExit) => void>();
 const preparedSessionsByKey = new Map<string, OpenClawPreparedSession>();
 const preparedSessionPromisesByKey = new Map<string, Promise<OpenClawPreparedSession>>();
 const GATEWAY_SESSION_FALLBACK_GRACE_MS = 60_000;
@@ -82,6 +88,21 @@ export function resetOpenClawGatewayClientForTests(): void {
   }
 
   gatewayClientModulePromise = null;
+}
+
+export function onOpenClawGatewayProcessExit(handler: (exit: OpenClawGatewayProcessExit) => void): () => void {
+  gatewayProcessExitHandlers.add(handler);
+  return () => {
+    gatewayProcessExitHandlers.delete(handler);
+  };
+}
+
+export function stopOpenClawGatewayProcess(signal: NodeJS.Signals = "SIGTERM"): void {
+  if (!gatewayProcess || gatewayProcess.killed || gatewayProcess.exitCode !== null) {
+    return;
+  }
+
+  gatewayProcess.kill(signal);
 }
 
 type OpenClawGatewayClientModule = {
@@ -324,6 +345,18 @@ async function createOpenClawSession(
 export async function warmOpenClawGatewayForDev(
   options: Pick<OpenClawAgentOptions, "configPath" | "stateDir" | "readyTimeoutMs"> = {}
 ): Promise<void> {
+  await warmOpenClawGatewayForRuntime(options);
+}
+
+export async function warmOpenClawGatewayForProduction(
+  options: Pick<OpenClawAgentOptions, "configPath" | "stateDir" | "readyTimeoutMs"> = {}
+): Promise<void> {
+  await warmOpenClawGatewayForRuntime(options);
+}
+
+async function warmOpenClawGatewayForRuntime(
+  options: Pick<OpenClawAgentOptions, "configPath" | "stateDir" | "readyTimeoutMs"> = {}
+): Promise<void> {
   const stateDir = options.stateDir ?? env.dmaxOpenClawStateDir;
   const configPath = options.configPath ?? env.dmaxOpenClawConfigPath;
   clearStaleOpenClawRuntimeLocks(stateDir);
@@ -509,6 +542,16 @@ async function startOpenClawGateway(options: { configPath: string; stateDir: str
       stdio: ["ignore", "ignore", "ignore"]
     }
   );
+  const spawnedGatewayProcess = gatewayProcess;
+  spawnedGatewayProcess.on("exit", (code, signal) => {
+    if (gatewayProcess === spawnedGatewayProcess) {
+      gatewayProcess = null;
+    }
+    markOpenClawGatewayNotReady();
+    for (const handler of gatewayProcessExitHandlers) {
+      handler({ code, signal });
+    }
+  });
   gatewayProcess.unref();
   traceOpenClaw(options.diagnostics, "openclaw_gateway_process_spawned", { pid: gatewayProcess.pid ?? null });
 

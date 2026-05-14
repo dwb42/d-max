@@ -6,7 +6,7 @@ import { nowIso } from "./time.js";
 import { openDatabase } from "./connection.js";
 
 export function migrate(databasePath?: string): void {
-  const schemaPath = path.resolve("data/schema.sql");
+  const schemaPath = path.resolve(process.env.DMAX_SCHEMA_PATH?.trim() || "data/schema.sql");
   const schema = fs.readFileSync(schemaPath, "utf8");
   const db = openDatabase(databasePath);
 

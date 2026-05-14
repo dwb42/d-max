@@ -45,6 +45,39 @@ Run the mutating MCP smoke test:
 npm run smoke:mcp
 ```
 
+## Production Deployment
+
+The production path is a single container that serves the built React app, the
+API, and the embedded OpenClaw gateway process:
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+Minimum production `.env` settings:
+
+```bash
+NODE_ENV=production
+DMAX_WEB_BASE_URL=https://dmax.example.com
+GOOGLE_OAUTH_REDIRECT_URI=https://dmax.example.com/api/config/google-calendar/oauth/callback
+DMAX_HOST_PORT=49415
+```
+
+Set the provider secrets the enabled features need, for example
+`OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, LiveKit credentials, and
+Google OAuth credentials. `DMAX_WEB_BASE_URL` and
+`GOOGLE_OAUTH_REDIRECT_URI` must point at the public domain.
+
+Terminate TLS in a reverse proxy such as Caddy or Nginx and proxy the public
+domain to `127.0.0.1:${DMAX_HOST_PORT}`. The container listens internally on
+port `3088`; `docker-compose.yml` binds it to localhost only.
+
+Persistent runtime data lives in the named volume `dmax-data` mounted at
+`/app/data`. This includes SQLite, uploaded media, Google OAuth token files,
+and OpenClaw runtime state. Database migrations run automatically during
+`npm run start:prod` before the API/web server starts.
+
 LiveKit Drive Mode requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
 `LIVEKIT_API_SECRET`. xAI realtime voice requires `XAI_API_KEY`.
 

@@ -51,6 +51,7 @@ import {
 import type { OpenClawActivityCursor } from "../chat/openclaw-agent.js";
 import { transcribeAudio } from "../chat/openai-transcription.js";
 import { createLiveKitVoiceSession } from "./livekit.js";
+import { sendStaticWebAsset } from "./static-files.js";
 import { createChatTurnTraceId, recordChatTurnDiagnosticEvent } from "../diagnostics/chat-turns.js";
 
 const port = env.dmaxApiPort;
@@ -1342,6 +1343,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/state/events") {
       const after = parseOptionalNonNegativeInt(url.searchParams.get("after"));
       await streamStateEvents(req, res, after ?? stateEvents.latestId());
+      return;
+    }
+
+    if (sendStaticWebAsset(req, res, url.pathname, { webDistDir: env.dmaxWebDistDir })) {
       return;
     }
 

@@ -21,6 +21,12 @@ Active interfaces:
   `/prompt-vorlagen`, and `/prompts`.
 - Browser/WebRTC realtime voice prototype using LiveKit and xAI realtime voice.
 
+Production deployment is represented in-repo by `Dockerfile` and
+`docker-compose.yml`. The production container runs the built API server, serves
+the Vite build from the same `node:http` server, and starts the OpenClaw
+gateway as a managed subprocess. A host reverse proxy terminates TLS and
+forwards to the localhost-bound compose port.
+
 SQLite is the source of truth. Durable state changes go through tools/API
 services.
 
