@@ -11,6 +11,7 @@ import type {
 } from "react";
 import {
   Blocks,
+  Building2,
   CalendarDays,
   CheckCircle2,
   ChevronDown,
@@ -46,6 +47,7 @@ import {
   Square,
   Trash2,
   Upload,
+  Users,
   X,
   ZoomIn,
   ZoomOut
@@ -60,6 +62,9 @@ import type {
 } from "./planning-canvas-special-google-events.js";
 import {
   createCategory,
+  createOrganization,
+  createPerson,
+  createEntityParticipant,
   createGoogleEventFromDmax,
   createGoogleOnlyEvent,
   createGoogleCalendarAuthUrl,
@@ -70,8 +75,11 @@ import {
   createPlanningCanvasNode,
   createTask,
   createTaskChecklistItem,
+  createPartyContactPoint,
   createVoiceSession,
   deleteInitiativeRelation,
+  deleteEntityParticipant,
+  deletePartyContactPoint,
   deleteTask,
   deleteMediaAttachment,
   deleteTaskChecklistItem,
@@ -93,6 +101,11 @@ import {
   fetchPromptLogs,
   fetchPromptTemplates,
   fetchInitiativeDetail,
+  fetchOrganizations,
+  fetchOrganizationDetail,
+  fetchParticipantRoleTypes,
+  fetchPeople,
+  fetchPersonDetail,
   fetchTaskDetail,
   prewarmOpenClaw,
   reanalyzeMediaAsset,
@@ -107,6 +120,9 @@ import {
   transcribeVoiceMessage,
   updateCalendarSource,
   updateCategory,
+  updateOrganization,
+  updatePartyContactPoint,
+  updatePerson,
   updateInitiative,
   updateGoogleOnlyEvent,
   updateMediaAssetAnalysis,
@@ -135,6 +151,13 @@ import type {
   AppPromptLog,
   PersistedChatMessage,
   OpenClawStatus,
+  Organization,
+  OrganizationDetail,
+  ParticipantRoleType,
+  PartyContactPoint,
+  Person,
+  PersonDetail,
+  EntityParticipant,
   MediaAttachment,
   MediaAsset,
   MediaEntityType,
@@ -165,8 +188,12 @@ type View =
   | "timeline"
   | "planningCanvas"
   | "config"
+  | "people"
+  | "organizations"
   | CollectionView
   | "initiative"
+  | "person"
+  | "organization"
   | "tasks"
   | "task"
   | "promptTemplates"
@@ -175,6 +202,7 @@ type RouteState = {
   view: View;
   initiativeId: number | null;
   taskId: number | null;
+  partyId?: number | null;
   categoryName: string | null;
 };
 type VoiceState = "idle" | "connecting" | "listening" | "speaking";
@@ -309,6 +337,8 @@ const primaryNavItems: NavItem[] = [
   { id: "projects", label: "Projekte", icon: Blocks, path: "/projects" },
   { id: "habits", label: "Gewohnheiten", icon: Repeat2, path: "/habits" },
   { id: "tasks", label: "Massnahmen", icon: ClipboardList, path: "/tasks" },
+  { id: "people", label: "Personen", icon: Users, path: "/people" },
+  { id: "organizations", label: "Organisationen", icon: Building2, path: "/organizations" },
   { id: "calendar", label: "Kalender", icon: CalendarDays, path: "/calendar" },
   { id: "timeline", label: "Timeline", icon: ListTree, path: "/calendar/timeline" },
   { id: "planningCanvas", label: "Planning Canvas", icon: GitPullRequestArrow, path: "/planning-canvas" }
@@ -347,6 +377,14 @@ function routeFromPath(path: string): RouteState {
   if (taskMatch) {
     return { view: "task", initiativeId: null, taskId: Number(taskMatch[1]), categoryName: null };
   }
+  const personMatch = pathname.match(/^\/people\/(\d+)$/);
+  if (personMatch) {
+    return { view: "person", initiativeId: null, taskId: null, partyId: Number(personMatch[1]), categoryName: null };
+  }
+  const organizationMatch = pathname.match(/^\/organizations\/(\d+)$/);
+  if (organizationMatch) {
+    return { view: "organization", initiativeId: null, taskId: null, partyId: Number(organizationMatch[1]), categoryName: null };
+  }
 
   if (pathname === "/drive") return { view: "drive", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/categories" || pathname === "/lebensbereiche") return { view: "lifeAreas", initiativeId: null, taskId: null, categoryName: null };
@@ -358,6 +396,8 @@ function routeFromPath(path: string): RouteState {
   if (pathname === "/projects") return { view: "projects", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/habits") return { view: "habits", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/tasks") return { view: "tasks", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/people") return { view: "people", initiativeId: null, taskId: null, categoryName: null };
+  if (pathname === "/organizations") return { view: "organizations", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/config") return { view: "config", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/prompt-vorlagen") return { view: "promptTemplates", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/prompts") return { view: "prompts", initiativeId: null, taskId: null, categoryName: null };
@@ -367,12 +407,16 @@ function routeFromPath(path: string): RouteState {
 function pathForRoute(view: View, initiativeId?: number | null): string {
   if (view === "initiative") return `/initiatives/${initiativeId}`;
   if (view === "task") return "/tasks";
+  if (view === "person") return "/people";
+  if (view === "organization") return "/organizations";
   if (view === "lifeAreas") return "/categories";
   if (view === "calendar") return "/calendar";
   if (view === "timeline") return "/calendar/timeline";
   if (view === "planningCanvas") return "/planning-canvas";
   if (view === "config") return "/config";
   if (view === "promptTemplates") return "/prompt-vorlagen";
+  if (view === "people") return "/people";
+  if (view === "organizations") return "/organizations";
   return `/${view}`;
 }
 
@@ -432,7 +476,9 @@ function getRouteConversationContext(
   route: RouteState,
   overview: AppOverview | null,
   initiativeDetail: InitiativeDetail | null,
-  taskDetail: TaskDetail | null
+  taskDetail: TaskDetail | null,
+  personDetail: PersonDetail | null,
+  organizationDetail: OrganizationDetail | null
 ): { context: ConversationContext; label: string } | null {
   if ((isCollectionView(route.view) || route.view === "lifeArea") && route.categoryName) {
     const category = overview?.categories.find((candidate) => candidate.name.toLowerCase() === route.categoryName?.toLowerCase());
@@ -451,6 +497,10 @@ function getRouteConversationContext(
     return { context: { type: "initiatives" }, label: titleForView(route.view) };
   }
 
+  if (route.view === "people" || route.view === "organizations") {
+    return { context: { type: route.view }, label: titleForView(route.view) };
+  }
+
   if (route.view === "initiative" && route.initiativeId) {
     const initiativeContextType = initiativeDetail ? initiativeDetail.initiative.type : "initiative";
     return {
@@ -463,6 +513,20 @@ function getRouteConversationContext(
     return {
       context: { type: "task", taskId: route.taskId },
       label: taskDetail?.task.title ?? `Task ${route.taskId}`
+    };
+  }
+
+  if (route.view === "person" && route.partyId) {
+    return {
+      context: { type: "person", partyId: route.partyId },
+      label: personDetail?.person.displayName ?? `Person ${route.partyId}`
+    };
+  }
+
+  if (route.view === "organization" && route.partyId) {
+    return {
+      context: { type: "organization", partyId: route.partyId },
+      label: organizationDetail?.organization.displayName ?? `Organisation ${route.partyId}`
     };
   }
 
@@ -482,6 +546,8 @@ function conversationContextKey(context: ConversationContext | null): string {
     case "habits":
     case "tasks":
     case "initiatives":
+    case "people":
+    case "organizations":
       return context.type;
     case "category":
       return `category:${context.categoryId}`;
@@ -492,6 +558,9 @@ function conversationContextKey(context: ConversationContext | null): string {
       return `${context.type}:${context.initiativeId}`;
     case "task":
       return `task:${context.taskId}`;
+    case "person":
+    case "organization":
+      return `${context.type}:${context.partyId}`;
   }
 }
 
@@ -557,6 +626,11 @@ export default function App() {
   const [route, setRoute] = useState<RouteState>(() => routeFromPath(`${window.location.pathname}${window.location.search}`));
   const [overview, setOverview] = useState<AppOverview | null>(null);
   const [lifeAreaInitiatives, setLifeAreaInitiatives] = useState<Initiative[] | null>(null);
+  const [peopleList, setPeopleList] = useState<Person[] | null>(null);
+  const [organizationList, setOrganizationList] = useState<Organization[] | null>(null);
+  const [personDetail, setPersonDetail] = useState<PersonDetail | null>(null);
+  const [organizationDetail, setOrganizationDetail] = useState<OrganizationDetail | null>(null);
+  const [participantRoleTypes, setParticipantRoleTypes] = useState<ParticipantRoleType[]>([]);
   const [initiativeDetail, setInitiativeDetail] = useState<InitiativeDetail | null>(null);
   const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
   const [calendarControls, setCalendarControls] = useState<CalendarControlsState>(() => calendarControlsFromPath(`${window.location.pathname}${window.location.search}`));
@@ -609,7 +683,12 @@ export default function App() {
   const view = route.view;
   const hasUserCategories = Boolean(overview?.categories.some((category) => !category.isSystem));
   const isEmptyState = Boolean(overview && !hasUserCategories && overview.initiatives.length === 0 && overview.tasks.length === 0);
-  const routeConversationContext = useMemo(() => getRouteConversationContext(route, overview, initiativeDetail, taskDetail), [route, overview, initiativeDetail, taskDetail]);
+  const shouldShowOnboarding =
+    isEmptyState && view !== "lifeAreas" && view !== "people" && view !== "organizations" && view !== "person" && view !== "organization";
+  const routeConversationContext = useMemo(
+    () => getRouteConversationContext(route, overview, initiativeDetail, taskDetail, personDetail, organizationDetail),
+    [route, overview, initiativeDetail, taskDetail, personDetail, organizationDetail]
+  );
   const calendarHeaderRange = useMemo(
     () => calendarVisibleRange(calendarControls.anchorDate, calendarControls.mode),
     [calendarControls.anchorDate, calendarControls.mode]
@@ -999,13 +1078,17 @@ export default function App() {
     chatMediaStreamRef.current = null;
   }
 
-  async function refresh() {
+  async function refresh(options: { silentErrors?: boolean } = {}) {
     try {
-      setError(null);
+      if (!options.silentErrors) {
+        setError(null);
+      }
       const data = await fetchOverview();
       setOverview(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load d-max state.");
+      if (!options.silentErrors) {
+        setError(err instanceof Error ? err.message : "Failed to load d-max state.");
+      }
     }
   }
 
@@ -1022,12 +1105,42 @@ export default function App() {
       await fetchInitiativeDetail(route.initiativeId)
         .then(setInitiativeDetail)
         .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load initiative."));
+      await Promise.all([
+        fetchPeople().then(setPeopleList).catch(() => undefined),
+        fetchOrganizations().then(setOrganizationList).catch(() => undefined)
+      ]);
     }
 
     if (route.view === "task" && route.taskId) {
       await fetchTaskDetail(route.taskId)
         .then(setTaskDetail)
         .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load task."));
+      await Promise.all([
+        fetchPeople().then(setPeopleList).catch(() => undefined),
+        fetchOrganizations().then(setOrganizationList).catch(() => undefined)
+      ]);
+    }
+
+    if (route.view === "people") {
+      await fetchPeople().then(setPeopleList).catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load people."));
+    }
+
+    if (route.view === "organizations") {
+      await fetchOrganizations()
+        .then(setOrganizationList)
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load organizations."));
+    }
+
+    if (route.view === "person" && route.partyId) {
+      await fetchPersonDetail(route.partyId)
+        .then(setPersonDetail)
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load person."));
+    }
+
+    if (route.view === "organization" && route.partyId) {
+      await fetchOrganizationDetail(route.partyId)
+        .then(setOrganizationDetail)
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load organization."));
     }
 
   }
@@ -1099,12 +1212,12 @@ export default function App() {
 
   useEffect(() => {
     const interval = window.setInterval(() => {
-      void refresh();
+      void refresh({ silentErrors: true });
     }, 5000);
 
     const onVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        void refresh();
+        void refresh({ silentErrors: true });
       }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -1124,6 +1237,10 @@ export default function App() {
     fetchInitiativeDetail(route.initiativeId)
       .then(setInitiativeDetail)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load initiative."));
+    void Promise.all([
+      fetchPeople().then(setPeopleList).catch(() => undefined),
+      fetchOrganizations().then(setOrganizationList).catch(() => undefined)
+    ]);
   }, [route]);
 
   useEffect(() => {
@@ -1146,7 +1263,61 @@ export default function App() {
     fetchTaskDetail(route.taskId)
       .then(setTaskDetail)
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load task."));
+    void Promise.all([
+      fetchPeople().then(setPeopleList).catch(() => undefined),
+      fetchOrganizations().then(setOrganizationList).catch(() => undefined)
+    ]);
   }, [route]);
+
+  useEffect(() => {
+    if (route.view !== "people") {
+      setPeopleList(null);
+      return;
+    }
+
+    fetchPeople()
+      .then(setPeopleList)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load people."));
+  }, [route]);
+
+  useEffect(() => {
+    if (route.view !== "organizations") {
+      setOrganizationList(null);
+      return;
+    }
+
+    fetchOrganizations()
+      .then(setOrganizationList)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load organizations."));
+  }, [route]);
+
+  useEffect(() => {
+    if (route.view !== "person" || !route.partyId) {
+      setPersonDetail(null);
+      return;
+    }
+
+    fetchPersonDetail(route.partyId)
+      .then(setPersonDetail)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load person."));
+  }, [route]);
+
+  useEffect(() => {
+    if (route.view !== "organization" || !route.partyId) {
+      setOrganizationDetail(null);
+      return;
+    }
+
+    fetchOrganizationDetail(route.partyId)
+      .then(setOrganizationDetail)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load organization."));
+  }, [route]);
+
+  useEffect(() => {
+    fetchParticipantRoleTypes()
+      .then(setParticipantRoleTypes)
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     chatThreadRef.current?.scrollTo({ top: chatThreadRef.current.scrollHeight, behavior: "smooth" });
@@ -1287,6 +1458,48 @@ export default function App() {
       );
     }
 
+    if (view === "person") {
+      return (
+        <div className="content-header-title">
+          <div className="back-actions">
+            <div className="back-action-group">
+              <button className="small-button back-button" onClick={() => navigate("/people")}>
+                Zurück zu Personen
+              </button>
+            </div>
+          </div>
+          <div className="section-heading">
+            <div className="initiative-title-line">
+              <Users size={24} />
+              <h1>{personDetail?.person.displayName ?? "Person"}</h1>
+            </div>
+            <p>{personDetail ? salutationLabel(personDetail.person.salutation) : "Wird geladen"}</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (view === "organization") {
+      return (
+        <div className="content-header-title">
+          <div className="back-actions">
+            <div className="back-action-group">
+              <button className="small-button back-button" onClick={() => navigate("/organizations")}>
+                Zurück zu Organisationen
+              </button>
+            </div>
+          </div>
+          <div className="section-heading">
+            <div className="initiative-title-line">
+              <Building2 size={24} />
+              <h1>{organizationDetail?.organization.displayName ?? "Organisation"}</h1>
+            </div>
+            <p>{organizationDetail?.organization.organizationType ?? "Organisation"}</p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <header className="topbar">
         <div>
@@ -1363,7 +1576,7 @@ export default function App() {
         <div className="content-scroll-area">
           {error ? <div className="error-banner">{error}</div> : null}
 
-          {isEmptyState && view !== "lifeAreas" ? (
+          {shouldShowOnboarding ? (
           <OnboardingView
             onCreateCategory={async (name) => {
               await createCategory({ name });
@@ -1545,8 +1758,19 @@ export default function App() {
             detail={initiativeDetail}
             allInitiatives={overview?.initiatives ?? []}
             categories={overview?.categories ?? []}
+            people={peopleList ?? []}
+            organizations={organizationList ?? []}
+            participantRoleTypes={participantRoleTypes}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
+            onCreateParticipant={async (input) => {
+              await createEntityParticipant(input);
+              if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
+            }}
+            onDeleteParticipant={async (participantId) => {
+              await deleteEntityParticipant(participantId);
+              if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
+            }}
             onToggleTaskStatus={async (task) => {
               await updateTaskStatus(task.id, task.status === "done" ? "open" : "done");
               await refresh();
@@ -1624,8 +1848,19 @@ export default function App() {
           {!isEmptyState && view === "task" && (
           <TaskDetailView
             detail={taskDetail}
+            people={peopleList ?? []}
+            organizations={organizationList ?? []}
+            participantRoleTypes={participantRoleTypes}
             onBack={() => navigate("/tasks")}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+            onCreateParticipant={async (input) => {
+              await createEntityParticipant(input);
+              if (route.taskId) setTaskDetail(await fetchTaskDetail(route.taskId));
+            }}
+            onDeleteParticipant={async (participantId) => {
+              await deleteEntityParticipant(participantId);
+              if (route.taskId) setTaskDetail(await fetchTaskDetail(route.taskId));
+            }}
             onUpdateTask={async (taskId, input) => {
               await updateTask(taskId, input);
               await refresh();
@@ -1685,6 +1920,80 @@ export default function App() {
               await deleteTask(task.id);
               await refresh();
             }}
+            onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
+          />
+          )}
+          {view === "people" && (
+          <PeopleView
+            people={peopleList ?? []}
+            onOpenPerson={(partyId) => navigate(`/people/${partyId}`)}
+            onCreatePerson={async (input) => {
+              await createPerson(input);
+              setPeopleList(await fetchPeople());
+              await refresh();
+            }}
+          />
+          )}
+          {view === "organizations" && (
+          <OrganizationsView
+            organizations={organizationList ?? []}
+            onOpenOrganization={(partyId) => navigate(`/organizations/${partyId}`)}
+            onCreateOrganization={async (input) => {
+              await createOrganization(input);
+              setOrganizationList(await fetchOrganizations());
+              await refresh();
+            }}
+          />
+          )}
+          {view === "person" && (
+          <PersonDetailView
+            detail={personDetail}
+            initiatives={overview?.initiatives ?? []}
+            tasks={overview?.tasks ?? []}
+            onUpdatePerson={async (partyId, input) => {
+              await updatePerson(partyId, input);
+              setPersonDetail(await fetchPersonDetail(partyId));
+              setPeopleList(await fetchPeople());
+            }}
+            onCreateContactPoint={async (partyId, input) => {
+              await createPartyContactPoint({ partyId, ...input });
+              setPersonDetail(await fetchPersonDetail(partyId));
+            }}
+            onUpdateContactPoint={async (contactPointId, input) => {
+              await updatePartyContactPoint(contactPointId, input);
+              if (route.partyId) setPersonDetail(await fetchPersonDetail(route.partyId));
+            }}
+            onDeleteContactPoint={async (contactPointId) => {
+              await deletePartyContactPoint(contactPointId);
+              if (route.partyId) setPersonDetail(await fetchPersonDetail(route.partyId));
+            }}
+            onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
+            onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
+          />
+          )}
+          {view === "organization" && (
+          <OrganizationDetailView
+            detail={organizationDetail}
+            initiatives={overview?.initiatives ?? []}
+            tasks={overview?.tasks ?? []}
+            onUpdateOrganization={async (partyId, input) => {
+              await updateOrganization(partyId, input);
+              setOrganizationDetail(await fetchOrganizationDetail(partyId));
+              setOrganizationList(await fetchOrganizations());
+            }}
+            onCreateContactPoint={async (partyId, input) => {
+              await createPartyContactPoint({ partyId, ...input });
+              setOrganizationDetail(await fetchOrganizationDetail(partyId));
+            }}
+            onUpdateContactPoint={async (contactPointId, input) => {
+              await updatePartyContactPoint(contactPointId, input);
+              if (route.partyId) setOrganizationDetail(await fetchOrganizationDetail(route.partyId));
+            }}
+            onDeleteContactPoint={async (contactPointId) => {
+              await deletePartyContactPoint(contactPointId);
+              if (route.partyId) setOrganizationDetail(await fetchOrganizationDetail(route.partyId));
+            }}
+            onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
           />
           )}
@@ -1788,7 +2097,9 @@ function renderNavItem(
     view === item.id
     || (view === "lifeArea" && item.id === "lifeAreas")
     || (view === "initiative" && initiativeDetail?.initiative.type && collectionViewForInitiativeType(initiativeDetail.initiative.type) === item.id)
-    || (view === "task" && item.id === "tasks");
+    || (view === "task" && item.id === "tasks")
+    || (view === "person" && item.id === "people")
+    || (view === "organization" && item.id === "organizations");
 
   return (
     <a
@@ -5290,8 +5601,20 @@ function InitiativeDetailView(props: {
   detail: InitiativeDetail | null;
   allInitiatives: Initiative[];
   categories: AppOverview["categories"];
+  people: Person[];
+  organizations: Organization[];
+  participantRoleTypes: ParticipantRoleType[];
   onOpenInitiative: (initiativeId: number) => void;
   onOpenTask: (taskId: number) => void;
+  onCreateParticipant: (input: {
+    partyId: number;
+    entityType: "initiative" | "task";
+    entityId: number;
+    roleTypeId?: number | null;
+    roleLabel?: string | null;
+    isPrimary?: boolean;
+  }) => Promise<void>;
+  onDeleteParticipant: (participantId: number) => Promise<void>;
   onToggleTaskStatus: (task: Task) => Promise<void>;
   onDeleteTask: (task: Task) => Promise<void>;
   onReorderTasks?: (initiativeId: number, taskIds: number[]) => Promise<void>;
@@ -5322,6 +5645,16 @@ function InitiativeDetailView(props: {
         onUpdate={props.onUpdateMedia}
         onDelete={props.onDeleteMedia}
         onReorder={props.onReorderMedia}
+      />
+      <ParticipantsPanel
+        entityType="initiative"
+        entityId={initiative.id}
+        participants={props.detail.participants ?? []}
+        people={props.people}
+        organizations={props.organizations}
+        roleTypes={props.participantRoleTypes}
+        onCreateParticipant={props.onCreateParticipant}
+        onDeleteParticipant={props.onDeleteParticipant}
       />
       <Panel title="Massnahmen">
         {props.detail.tasks.length === 0 ? (
@@ -6428,8 +6761,20 @@ function InitiativeMarkdownPanel(props: {
 
 function TaskDetailView(props: {
   detail: TaskDetail | null;
+  people: Person[];
+  organizations: Organization[];
+  participantRoleTypes: ParticipantRoleType[];
   onBack: () => void;
   onOpenInitiative: (initiativeId: number) => void;
+  onCreateParticipant: (input: {
+    partyId: number;
+    entityType: "initiative" | "task";
+    entityId: number;
+    roleTypeId?: number | null;
+    roleLabel?: string | null;
+    isPrimary?: boolean;
+  }) => Promise<void>;
+  onDeleteParticipant: (participantId: number) => Promise<void>;
   onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void>;
   onCreateChecklistItem: (taskId: number, name: string) => Promise<void>;
   onUpdateChecklistItem: (taskId: number, itemId: number, input: { name?: string; status?: TaskChecklistItem["status"] }) => Promise<void>;
@@ -6474,6 +6819,16 @@ function TaskDetailView(props: {
         onDelete={props.onDeleteMedia}
         onReorder={props.onReorderMedia}
       />
+      <ParticipantsPanel
+        entityType="task"
+        entityId={task.id}
+        participants={props.detail.participants ?? []}
+        people={props.people}
+        organizations={props.organizations}
+        roleTypes={props.participantRoleTypes}
+        onCreateParticipant={props.onCreateParticipant}
+        onDeleteParticipant={props.onDeleteParticipant}
+      />
       <TaskChecklistPanel
         task={task}
         items={props.detail.checklistItems ?? []}
@@ -6483,6 +6838,124 @@ function TaskDetailView(props: {
         onReorderItems={props.onReorderChecklistItems}
       />
     </section>
+  );
+}
+
+function ParticipantsPanel(props: {
+  entityType: "initiative" | "task";
+  entityId: number;
+  participants: EntityParticipant[];
+  people: Person[];
+  organizations: Organization[];
+  roleTypes: ParticipantRoleType[];
+  onCreateParticipant: (input: {
+    partyId: number;
+    entityType: "initiative" | "task";
+    entityId: number;
+    roleTypeId?: number | null;
+    roleLabel?: string | null;
+    isPrimary?: boolean;
+  }) => Promise<void>;
+  onDeleteParticipant: (participantId: number) => Promise<void>;
+}) {
+  const parties = [
+    ...props.people.map((person) => ({ id: person.id, type: "person" as const, displayName: person.displayName })),
+    ...props.organizations.map((organization) => ({ id: organization.id, type: "organization" as const, displayName: organization.displayName }))
+  ].sort((left, right) => left.displayName.localeCompare(right.displayName));
+  const roleTypes = props.roleTypes.filter((roleType) => !roleType.appliesToEntityType || roleType.appliesToEntityType === props.entityType);
+  const [partyId, setPartyId] = useState("");
+  const [roleTypeId, setRoleTypeId] = useState("");
+  const [roleLabel, setRoleLabel] = useState("");
+  const [isPrimary, setIsPrimary] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <Panel title="Beteiligte">
+      <div className="relationship-list">
+        {props.participants.length === 0 ? <p className="muted-text">Noch keine Beteiligten.</p> : null}
+        {props.participants.map((participant) => (
+          <div className="relationship-row" key={participant.id}>
+            <div className="entity-icon">{participant.party.type === "person" ? <Users size={16} /> : <Building2 size={16} />}</div>
+            <div>
+              <strong>{participant.party.displayName}</strong>
+              <p>{participantRoleSummary(participant)}</p>
+            </div>
+            <button
+              type="button"
+              className="icon-button compact"
+              disabled={busy}
+              title="Beteiligung entfernen"
+              onClick={async () => {
+                if (busy) return;
+                setBusy(true);
+                setError(null);
+                try {
+                  await props.onDeleteParticipant(participant.id);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Beteiligung konnte nicht entfernt werden.");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <form
+        className="contact-point-create-form"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          const parsedPartyId = Number(partyId);
+          if (!parsedPartyId || busy) return;
+          setBusy(true);
+          setError(null);
+          try {
+            await props.onCreateParticipant({
+              partyId: parsedPartyId,
+              entityType: props.entityType,
+              entityId: props.entityId,
+              roleTypeId: roleTypeId ? Number(roleTypeId) : null,
+              roleLabel: roleLabel.trim() || null,
+              isPrimary
+            });
+            setPartyId("");
+            setRoleTypeId("");
+            setRoleLabel("");
+            setIsPrimary(false);
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Beteiligung konnte nicht gespeichert werden.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <select value={partyId} onChange={(event) => setPartyId(event.target.value)} aria-label="Person oder Organisation">
+          <option value="">Person oder Organisation</option>
+          {parties.map((party) => (
+            <option key={party.id} value={party.id}>{party.displayName}</option>
+          ))}
+        </select>
+        <select value={roleTypeId} onChange={(event) => setRoleTypeId(event.target.value)} aria-label="Rolle">
+          <option value="">Rolle</option>
+          {roleTypes.map((roleType) => (
+            <option key={roleType.id} value={roleType.id}>{roleType.label}</option>
+          ))}
+        </select>
+        <input value={roleLabel} onChange={(event) => setRoleLabel(event.target.value)} placeholder="Freie Rolle" aria-label="Freie Rolle" />
+        <label className="inline-checkbox">
+          <input type="checkbox" checked={isPrimary} onChange={(event) => setIsPrimary(event.target.checked)} />
+          Primär
+        </label>
+        <button type="submit" className="primary-button" disabled={!partyId || busy}>
+          <Plus size={15} />
+          Hinzufügen
+        </button>
+      </form>
+      {error ? <p className="inline-error">{error}</p> : null}
+    </Panel>
   );
 }
 
@@ -7563,6 +8036,668 @@ function TasksView(props: {
   );
 }
 
+function PeopleView(props: {
+  people: Person[];
+  onOpenPerson: (partyId: number) => void;
+  onCreatePerson: (input: {
+    displayName?: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    salutation?: Person["salutation"];
+    academicTitle?: string | null;
+    nameSuffix?: string | null;
+  }) => Promise<void>;
+}) {
+  const [search, setSearch] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [salutation, setSalutation] = useState<Person["salutation"]>("unknown");
+  const [academicTitle, setAcademicTitle] = useState("");
+  const [nameSuffix, setNameSuffix] = useState("");
+  const [creating, setCreating] = useState(false);
+  const canCreate = Boolean(firstName.trim() || lastName.trim());
+  const filteredPeople = props.people.filter((person) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return [person.displayName, person.firstName, person.lastName, person.academicTitle, salutationLabel(person.salutation)]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(needle);
+  });
+
+  return (
+    <section className="stacked-layout">
+      <form
+        className="panel compact-form"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (!canCreate || creating) return;
+          setCreating(true);
+          try {
+            await props.onCreatePerson({
+              firstName: firstName.trim() || null,
+              lastName: lastName.trim() || null,
+              salutation,
+              academicTitle: academicTitle.trim() || null,
+              nameSuffix: nameSuffix.trim() || null
+            });
+            setFirstName("");
+            setLastName("");
+            setSalutation("unknown");
+            setAcademicTitle("");
+            setNameSuffix("");
+          } finally {
+            setCreating(false);
+          }
+        }}
+      >
+        <div className="form-grid">
+          <label>
+            Anrede
+            <select value={salutation} onChange={(event) => setSalutation(event.target.value as Person["salutation"])}>
+              <option value="unknown">Unbekannt</option>
+              <option value="mr">Herr</option>
+              <option value="mrs">Frau</option>
+            </select>
+          </label>
+          <label>
+            Titel
+            <input value={academicTitle} onChange={(event) => setAcademicTitle(event.target.value)} placeholder="Dr., Prof. Dr." />
+          </label>
+          <label>
+            Vorname
+            <input value={firstName} onChange={(event) => setFirstName(event.target.value)} placeholder="Vorname" />
+          </label>
+          <label>
+            Nachname
+            <input value={lastName} onChange={(event) => setLastName(event.target.value)} placeholder="Nachname" />
+          </label>
+          <label>
+            Zusatz
+            <input value={nameSuffix} onChange={(event) => setNameSuffix(event.target.value)} placeholder="Suffix" />
+          </label>
+        </div>
+        <button type="submit" className="primary-button" disabled={!canCreate || creating}>
+          <Plus size={16} />
+          Person
+        </button>
+      </form>
+
+      <section className="panel compact-form">
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Person suchen" aria-label="Person suchen" />
+      </section>
+
+      <section className="task-list">
+        {props.people.length === 0 ? <EmptyState title="Noch keine Personen" /> : null}
+        {props.people.length > 0 && filteredPeople.length === 0 ? <EmptyState title="Keine Personen gefunden" /> : null}
+        {filteredPeople.map((person) => (
+          <article className="task-row clickable" key={person.id} onClick={() => props.onOpenPerson(person.id)}>
+            <div className="entity-icon">
+              <Users size={18} />
+            </div>
+            <div>
+              <h2>{person.displayName}</h2>
+              <p className="task-row-meta">
+                <span>{salutationLabel(person.salutation)}</span>
+                {person.academicTitle ? <span>{person.academicTitle}</span> : null}
+                {person.firstName || person.lastName ? <span>{[person.firstName, person.lastName].filter(Boolean).join(" ")}</span> : null}
+                {person.nameSuffix ? <span>{person.nameSuffix}</span> : null}
+              </p>
+            </div>
+          </article>
+        ))}
+      </section>
+    </section>
+  );
+}
+
+function OrganizationsView(props: {
+  organizations: Organization[];
+  onOpenOrganization: (partyId: number) => void;
+  onCreateOrganization: (input: { name: string; legalName?: string | null; organizationType?: string | null }) => Promise<void>;
+}) {
+  const [search, setSearch] = useState("");
+  const [name, setName] = useState("");
+  const [legalName, setLegalName] = useState("");
+  const [organizationType, setOrganizationType] = useState("");
+  const [creating, setCreating] = useState(false);
+  const filteredOrganizations = props.organizations.filter((organization) => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return true;
+    return [organization.displayName, organization.name, organization.legalName, organization.organizationType]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(needle);
+  });
+
+  return (
+    <section className="stacked-layout">
+      <form
+        className="panel compact-form"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          const trimmedName = name.trim();
+          if (!trimmedName || creating) return;
+          setCreating(true);
+          try {
+            await props.onCreateOrganization({
+              name: trimmedName,
+              legalName: legalName.trim() || null,
+              organizationType: organizationType.trim() || null
+            });
+            setName("");
+            setLegalName("");
+            setOrganizationType("");
+          } finally {
+            setCreating(false);
+          }
+        }}
+      >
+        <div className="form-grid">
+          <label>
+            Name
+            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Organisation" />
+          </label>
+          <label>
+            Rechtlicher Name
+            <input value={legalName} onChange={(event) => setLegalName(event.target.value)} placeholder="Legal Name" />
+          </label>
+          <label>
+            Typ
+            <input value={organizationType} onChange={(event) => setOrganizationType(event.target.value)} placeholder="Firma, Verein, Club" />
+          </label>
+        </div>
+        <button type="submit" className="primary-button" disabled={!name.trim() || creating}>
+          <Plus size={16} />
+          Organisation
+        </button>
+      </form>
+
+      <section className="panel compact-form">
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Organisation suchen" aria-label="Organisation suchen" />
+      </section>
+
+      <section className="task-list">
+        {props.organizations.length === 0 ? <EmptyState title="Noch keine Organisationen" /> : null}
+        {props.organizations.length > 0 && filteredOrganizations.length === 0 ? <EmptyState title="Keine Organisationen gefunden" /> : null}
+        {filteredOrganizations.map((organization) => (
+          <article className="task-row clickable" key={organization.id} onClick={() => props.onOpenOrganization(organization.id)}>
+            <div className="entity-icon">
+              <Building2 size={18} />
+            </div>
+            <div>
+              <h2>{organization.displayName}</h2>
+              <p className="task-row-meta">
+                {organization.organizationType ? <span>{organization.organizationType}</span> : null}
+                {organization.legalName ? <span>{organization.legalName}</span> : null}
+              </p>
+            </div>
+          </article>
+        ))}
+      </section>
+    </section>
+  );
+}
+
+function PersonDetailView(props: {
+  detail: PersonDetail | null;
+  initiatives: Initiative[];
+  tasks: Task[];
+  onUpdatePerson: (partyId: number, input: {
+    displayName?: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    salutation?: Person["salutation"];
+    academicTitle?: string | null;
+    nameSuffix?: string | null;
+  }) => Promise<void>;
+  onCreateContactPoint: (partyId: number, input: Omit<CreateContactPointDraft, "partyId">) => Promise<void>;
+  onUpdateContactPoint: (contactPointId: number, input: Partial<Omit<CreateContactPointDraft, "partyId">>) => Promise<void>;
+  onDeleteContactPoint: (contactPointId: number) => Promise<void>;
+  onOpenInitiative: (initiativeId: number) => void;
+  onOpenTask: (taskId: number) => void;
+}) {
+  const person = props.detail?.person;
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [salutation, setSalutation] = useState<Person["salutation"]>("unknown");
+  const [academicTitle, setAcademicTitle] = useState("");
+  const [nameSuffix, setNameSuffix] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canSave = Boolean(firstName.trim() || lastName.trim());
+
+  useEffect(() => {
+    setFirstName(person?.firstName ?? "");
+    setLastName(person?.lastName ?? "");
+    setSalutation(person?.salutation ?? "unknown");
+    setAcademicTitle(person?.academicTitle ?? "");
+    setNameSuffix(person?.nameSuffix ?? "");
+    setSaving(false);
+    setError(null);
+  }, [person?.id, person?.firstName, person?.lastName, person?.salutation, person?.academicTitle, person?.nameSuffix]);
+
+  if (!props.detail || !person) return <EmptyState title="Person wird geladen" />;
+
+  return (
+    <section className="split-view party-detail-layout">
+      <div className="detail-pane">
+        <Panel title="Stammdaten">
+          <form
+            className="detail-edit-form"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (!canSave || saving) return;
+              setSaving(true);
+              setError(null);
+              try {
+                await props.onUpdatePerson(person.id, {
+                  firstName: firstName.trim() || null,
+                  lastName: lastName.trim() || null,
+                  salutation,
+                  academicTitle: academicTitle.trim() || null,
+                  nameSuffix: nameSuffix.trim() || null
+                });
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Person konnte nicht gespeichert werden.");
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            <label>
+              Anrede
+              <select value={salutation} onChange={(event) => setSalutation(event.target.value as Person["salutation"])}>
+                <option value="unknown">Unbekannt</option>
+                <option value="mr">Herr</option>
+                <option value="mrs">Frau</option>
+              </select>
+            </label>
+            <label>
+              Titel
+              <input value={academicTitle} onChange={(event) => setAcademicTitle(event.target.value)} />
+            </label>
+            <label>
+              Vorname
+              <input value={firstName} onChange={(event) => setFirstName(event.target.value)} />
+            </label>
+            <label>
+              Nachname
+              <input value={lastName} onChange={(event) => setLastName(event.target.value)} />
+            </label>
+            <label>
+              Zusatz
+              <input value={nameSuffix} onChange={(event) => setNameSuffix(event.target.value)} />
+            </label>
+            <button type="submit" className="primary-button" disabled={!canSave || saving}>Speichern</button>
+            {error ? <p className="inline-error">{error}</p> : null}
+          </form>
+        </Panel>
+        <ContactPointsPanel
+          partyId={person.id}
+          contactPoints={props.detail.contactPoints}
+          onCreate={props.onCreateContactPoint}
+          onUpdate={props.onUpdateContactPoint}
+          onDelete={props.onDeleteContactPoint}
+        />
+      </div>
+      <div className="detail-pane">
+        <PartyRelationshipsPanel partyId={person.id} relationships={props.detail.relationships} />
+        <PartyParticipationsPanel
+          participants={props.detail.participants}
+          initiatives={props.initiatives}
+          tasks={props.tasks}
+          onOpenInitiative={props.onOpenInitiative}
+          onOpenTask={props.onOpenTask}
+        />
+      </div>
+    </section>
+  );
+}
+
+function OrganizationDetailView(props: {
+  detail: OrganizationDetail | null;
+  initiatives: Initiative[];
+  tasks: Task[];
+  onUpdateOrganization: (partyId: number, input: { name?: string; legalName?: string | null; organizationType?: string | null }) => Promise<void>;
+  onCreateContactPoint: (partyId: number, input: Omit<CreateContactPointDraft, "partyId">) => Promise<void>;
+  onUpdateContactPoint: (contactPointId: number, input: Partial<Omit<CreateContactPointDraft, "partyId">>) => Promise<void>;
+  onDeleteContactPoint: (contactPointId: number) => Promise<void>;
+  onOpenInitiative: (initiativeId: number) => void;
+  onOpenTask: (taskId: number) => void;
+}) {
+  const organization = props.detail?.organization;
+  const [name, setName] = useState("");
+  const [legalName, setLegalName] = useState("");
+  const [organizationType, setOrganizationType] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const canSave = Boolean(name.trim());
+
+  useEffect(() => {
+    setName(organization?.name ?? "");
+    setLegalName(organization?.legalName ?? "");
+    setOrganizationType(organization?.organizationType ?? "");
+    setSaving(false);
+    setError(null);
+  }, [organization?.id, organization?.name, organization?.legalName, organization?.organizationType]);
+
+  if (!props.detail || !organization) return <EmptyState title="Organisation wird geladen" />;
+
+  return (
+    <section className="split-view party-detail-layout">
+      <div className="detail-pane">
+        <Panel title="Stammdaten">
+          <form
+            className="detail-edit-form"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              if (!canSave || saving) return;
+              setSaving(true);
+              setError(null);
+              try {
+                await props.onUpdateOrganization(organization.id, {
+                  name: name.trim(),
+                  legalName: legalName.trim() || null,
+                  organizationType: organizationType.trim() || null
+                });
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Organisation konnte nicht gespeichert werden.");
+              } finally {
+                setSaving(false);
+              }
+            }}
+          >
+            <label>
+              Name
+              <input value={name} onChange={(event) => setName(event.target.value)} />
+            </label>
+            <label>
+              Rechtlicher Name
+              <input value={legalName} onChange={(event) => setLegalName(event.target.value)} />
+            </label>
+            <label>
+              Typ
+              <input value={organizationType} onChange={(event) => setOrganizationType(event.target.value)} />
+            </label>
+            <button type="submit" className="primary-button" disabled={!canSave || saving}>Speichern</button>
+            {error ? <p className="inline-error">{error}</p> : null}
+          </form>
+        </Panel>
+        <ContactPointsPanel
+          partyId={organization.id}
+          contactPoints={props.detail.contactPoints}
+          onCreate={props.onCreateContactPoint}
+          onUpdate={props.onUpdateContactPoint}
+          onDelete={props.onDeleteContactPoint}
+        />
+      </div>
+      <div className="detail-pane">
+        <PartyRelationshipsPanel partyId={organization.id} relationships={props.detail.relationships} />
+        <PartyParticipationsPanel
+          participants={props.detail.participants}
+          initiatives={props.initiatives}
+          tasks={props.tasks}
+          onOpenInitiative={props.onOpenInitiative}
+          onOpenTask={props.onOpenTask}
+        />
+      </div>
+    </section>
+  );
+}
+
+type CreateContactPointDraft = {
+  partyId: number;
+  type: PartyContactPoint["type"];
+  label?: string | null;
+  value: string;
+  isPrimary?: boolean;
+  isPreferred?: boolean;
+  canSend?: boolean;
+  canReceive?: boolean;
+  provider?: string | null;
+};
+
+const contactPointTypeOptions: Array<{
+  value: PartyContactPoint["type"];
+  label: string;
+  inputType: "email" | "tel" | "url" | "text";
+  placeholder: string;
+}> = [
+  { value: "email", label: "E-Mail", inputType: "email", placeholder: "name@example.com" },
+  { value: "phone", label: "Telefon", inputType: "tel", placeholder: "+49 ..." },
+  { value: "whatsapp", label: "WhatsApp", inputType: "tel", placeholder: "+49 ..." },
+  { value: "signal", label: "Signal", inputType: "tel", placeholder: "+49 ..." },
+  { value: "telegram", label: "Telegram", inputType: "text", placeholder: "@username" },
+  { value: "linkedin", label: "LinkedIn", inputType: "url", placeholder: "https://linkedin.com/in/..." },
+  { value: "website", label: "Webseite", inputType: "url", placeholder: "https://..." },
+  { value: "other", label: "Sonstiges", inputType: "text", placeholder: "Kontaktwert" }
+];
+
+function contactPointTypeOption(type: PartyContactPoint["type"]) {
+  return contactPointTypeOptions.find((option) => option.value === type) ?? contactPointTypeOptions[0];
+}
+
+function contactPointTypeLabel(type: PartyContactPoint["type"]): string {
+  return contactPointTypeOption(type).label;
+}
+
+function contactPointCapabilities(type: PartyContactPoint["type"]): { canSend: boolean; canReceive: boolean } {
+  if (type === "website") return { canSend: false, canReceive: false };
+  return { canSend: true, canReceive: true };
+}
+
+function ContactPointsPanel(props: {
+  partyId: number;
+  contactPoints: PartyContactPoint[];
+  onCreate: (partyId: number, input: Omit<CreateContactPointDraft, "partyId">) => Promise<void>;
+  onUpdate: (contactPointId: number, input: Partial<Omit<CreateContactPointDraft, "partyId">>) => Promise<void>;
+  onDelete: (contactPointId: number) => Promise<void>;
+}) {
+  const [type, setType] = useState<PartyContactPoint["type"]>("email");
+  const [label, setLabel] = useState("");
+  const [value, setValue] = useState("");
+  const [isPreferred, setIsPreferred] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const selectedType = contactPointTypeOption(type);
+
+  return (
+    <Panel title="Kontaktwege">
+      <div className="relationship-list">
+        {props.contactPoints.length === 0 ? <p className="muted-text">Noch keine Kontaktwege.</p> : null}
+        {props.contactPoints.map((contactPoint) => (
+          <div className="relationship-row" key={contactPoint.id}>
+            <div className="entity-icon"><Send size={15} /></div>
+            <div>
+              <strong>{contactPoint.value}</strong>
+              <p>{contactPointTypeLabel(contactPoint.type)}{contactPoint.label ? ` · ${contactPoint.label}` : ""}{contactPoint.isPreferred ? " · bevorzugt" : ""}</p>
+            </div>
+            <button
+              type="button"
+              className="icon-button compact"
+              disabled={busyAction !== null}
+              title={contactPoint.isPreferred ? "Nicht bevorzugt" : "Bevorzugt"}
+              onClick={async () => {
+                if (busyAction) return;
+                setBusyAction(`update:${contactPoint.id}`);
+                setError(null);
+                try {
+                  await props.onUpdate(contactPoint.id, { isPreferred: !contactPoint.isPreferred });
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht aktualisiert werden.");
+                } finally {
+                  setBusyAction(null);
+                }
+              }}
+            >
+              <Eye size={14} />
+            </button>
+            <button
+              type="button"
+              className="icon-button compact"
+              disabled={busyAction !== null}
+              title="Kontaktweg löschen"
+              onClick={async () => {
+                if (busyAction) return;
+                setBusyAction(`delete:${contactPoint.id}`);
+                setError(null);
+                try {
+                  await props.onDelete(contactPoint.id);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht gelöscht werden.");
+                } finally {
+                  setBusyAction(null);
+                }
+              }}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <form
+        className="participant-create-form"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (!value.trim() || busyAction) return;
+          setBusyAction("create");
+          setError(null);
+          try {
+            await props.onCreate(props.partyId, {
+              type,
+              label: label.trim() || null,
+              value: value.trim(),
+              isPreferred,
+              ...contactPointCapabilities(type)
+            });
+            setType("email");
+            setLabel("");
+            setValue("");
+            setIsPreferred(false);
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Kontaktweg konnte nicht gespeichert werden.");
+          } finally {
+            setBusyAction(null);
+          }
+        }}
+      >
+        <select value={type} onChange={(event) => setType(event.target.value as PartyContactPoint["type"])}>
+          {contactPointTypeOptions.map((entry) => (
+            <option key={entry.value} value={entry.value}>{entry.label}</option>
+          ))}
+        </select>
+        <input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Label" />
+        <input type={selectedType.inputType} value={value} onChange={(event) => setValue(event.target.value)} placeholder={selectedType.placeholder} />
+        <label className="inline-checkbox">
+          <input type="checkbox" checked={isPreferred} onChange={(event) => setIsPreferred(event.target.checked)} />
+          Bevorzugt
+        </label>
+        <button type="submit" className="primary-button" disabled={!value.trim() || busyAction !== null}>
+          <Plus size={15} />
+          Kontakt
+        </button>
+      </form>
+      {error ? <p className="inline-error">{error}</p> : null}
+    </Panel>
+  );
+}
+
+function PartyRelationshipsPanel(props: { partyId: number; relationships: PersonDetail["relationships"] }) {
+  return (
+    <Panel title="Beziehungen">
+      <div className="relationship-list">
+        {props.relationships.length === 0 ? <p className="muted-text">Noch keine Beziehungen.</p> : null}
+        {props.relationships.map((relationship) => {
+          const otherParty = relationship.fromPartyId === props.partyId ? relationship.toParty : relationship.fromParty;
+          const label =
+            relationship.relationshipType.directionality === "symmetric"
+              ? relationship.relationshipType.label
+              : relationship.fromPartyId === props.partyId
+                ? relationship.relationshipType.label
+                : relationship.relationshipType.inverseLabel ?? relationship.relationshipType.label;
+          return (
+            <div className="relationship-row" key={relationship.id}>
+              <div className="entity-icon">{otherParty.type === "person" ? <Users size={16} /> : <Building2 size={16} />}</div>
+              <div>
+                <strong>{otherParty.displayName}</strong>
+                <p>{label}{relationship.roleLabel ? ` · ${relationship.roleLabel}` : ""}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+function PartyParticipationsPanel(props: {
+  participants: EntityParticipant[];
+  initiatives: Initiative[];
+  tasks: Task[];
+  onOpenInitiative: (initiativeId: number) => void;
+  onOpenTask: (taskId: number) => void;
+}) {
+  const initiativeById = new Map(props.initiatives.map((initiative) => [initiative.id, initiative]));
+  const taskById = new Map(props.tasks.map((task) => [task.id, task]));
+
+  return (
+    <Panel title="DMAX-Kontexte">
+      <div className="relationship-list">
+        {props.participants.length === 0 ? <p className="muted-text">Noch keine Beteiligungen.</p> : null}
+        {props.participants.map((participant) => {
+          const title =
+            participant.entityType === "initiative"
+              ? initiativeById.get(participant.entityId)?.name
+              : participant.entityType === "task"
+                ? taskById.get(participant.entityId)?.title
+                : null;
+          return (
+            <button
+              type="button"
+              className="relationship-row relationship-button"
+              key={participant.id}
+              onClick={() => {
+                if (participant.entityType === "initiative") props.onOpenInitiative(participant.entityId);
+                if (participant.entityType === "task") props.onOpenTask(participant.entityId);
+              }}
+            >
+              <div className="entity-icon">{participant.entityType === "task" ? <ClipboardList size={16} /> : <Blocks size={16} />}</div>
+              <div>
+                <strong>{title ?? `${entityTypeLabel(participant.entityType)} #${participant.entityId}`}</strong>
+                <p>{entityTypeLabel(participant.entityType)} · {participantRoleSummary(participant)}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+function entityTypeLabel(entityType: EntityParticipant["entityType"]): string {
+  if (entityType === "task") return "Massnahme";
+  if (entityType === "calendar_entry") return "Kalendereintrag";
+  return "Initiative";
+}
+
+function participantRoleSummary(participant: EntityParticipant): string {
+  const parts = [participant.roleType?.label, participant.roleLabel].filter((part): part is string => Boolean(part));
+  const uniqueParts = [...new Set(parts)];
+  if (participant.isPrimary) {
+    uniqueParts.push("primär");
+  }
+  return uniqueParts.length > 0 ? uniqueParts.join(" · ") : "Rolle offen";
+}
+
+function salutationLabel(salutation: Person["salutation"]): string {
+  if (salutation === "mr") return "Herr";
+  if (salutation === "mrs") return "Frau";
+  return "Anrede unbekannt";
+}
+
 function sortTasksByCompletionAndRank(tasks: Task[]): Task[] {
   return [...tasks].sort((a, b) => {
     const statusCompare = taskCompletionRank(a.status) - taskCompletionRank(b.status);
@@ -8067,6 +9202,10 @@ function titleForView(view: View): string {
     ideas: "Ideen",
     projects: "Projekte",
     habits: "Gewohnheiten",
+    people: "Personen",
+    person: "Person",
+    organizations: "Organisationen",
+    organization: "Organisation",
     initiative: "Eintrag",
     task: "Massnahme",
     prompts: "Prompt Inspector",
@@ -8087,6 +9226,10 @@ function subtitleForView(view: View): string {
     ideas: "",
     projects: "",
     habits: "",
+    people: "Personen, Anreden und spaetere Kontaktkontexte.",
+    person: "Kontaktwege, Beziehungen und Beteiligungen.",
+    organizations: "Organisationen als Container und Akteure.",
+    organization: "Kontaktwege, Beziehungen und Beteiligungen.",
     initiative: "Memory, Massnahmen und Kontext.",
     task: "Status, Prioritaet, Notizen und Kontext.",
     prompts: "Debug view for d-max prompts sent to OpenClaw.",

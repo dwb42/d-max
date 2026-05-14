@@ -1080,6 +1080,15 @@ textarea {
   min-width: 0;
 }
 
+.party-detail-layout {
+  grid-template-columns: minmax(480px, 0.95fr) minmax(360px, 1.4fr);
+}
+
+.party-detail-layout .panel,
+.party-detail-layout .detail-pane {
+  min-width: 0;
+}
+
 .section-heading {
   display: grid;
   gap: 5px;
@@ -3573,6 +3582,179 @@ button.initiative-markdown-panel:hover {
   align-items: center;
 }
 
+.stacked-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.compact-form {
+  align-items: end;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.form-grid label {
+  display: grid;
+  gap: 5px;
+  color: #66726b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.form-grid input,
+.form-grid select {
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.detail-edit-form {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-edit-form input,
+.detail-edit-form select,
+.detail-edit-form textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+.relationship-list {
+  display: grid;
+  gap: 8px;
+}
+
+.relationship-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  border: 1px solid #e4ebe6;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fbfcfa;
+  color: #17211c;
+  text-align: left;
+}
+
+.relationship-row strong,
+.relationship-row p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.relationship-row p {
+  margin: 2px 0 0;
+  color: #66726b;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.relationship-button {
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.relationship-button:hover {
+  border-color: #b9c8bf;
+  box-shadow: 0 8px 18px rgba(31, 44, 38, 0.07);
+  transform: translateY(-1px);
+}
+
+.participant-create-form {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(150px, 1fr) minmax(130px, 0.8fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  border-top: 1px solid #edf1eb;
+  padding-top: 10px;
+}
+
+.participant-create-form input,
+.participant-create-form select {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 9px;
+}
+
+.contact-point-create-form {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(130px, 1fr) minmax(170px, 1.25fr);
+  gap: 8px;
+  align-items: center;
+  border-top: 1px solid #edf1eb;
+  padding-top: 10px;
+}
+
+.contact-point-create-form input,
+.contact-point-create-form select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 9px;
+}
+
+.contact-point-create-form .inline-checkbox,
+.contact-point-create-form .primary-button {
+  justify-self: start;
+}
+
+.inline-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  color: #66726b;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.inline-checkbox input {
+  width: 16px;
+  height: 16px;
+}
+
+.entity-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 8px;
+  background: #eef4f1;
+  color: #27806f;
+}
+
+.primary-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #27806f;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #27806f;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.primary-button:disabled {
+  border-color: #cbd5cf;
+  background: #e8ede9;
+  color: #7b8780;
+}
+
 .task-due-pill {
   display: inline-flex;
   align-items: center;
@@ -4972,8 +5154,11 @@ button.task-notes-panel:hover {
   .drive-layout,
   .chat-layout,
   .entry-create,
+  .form-grid,
   .life-area-type-grid,
   .initiative-relations-grid,
+  .contact-point-create-form,
+  .participant-create-form,
   .timeline-toolbar,
   .split-view,
   .prompt-inspector-layout,

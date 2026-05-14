@@ -25,7 +25,7 @@ Code is authoritative when Markdown disagrees.
 
 ## Product Boundaries
 
-d-max is Dietrich's agentic project, task, and project-memory system:
+d-max is Dietrich's agentic initiative, task, relationship, and initiative-memory system:
 
 ```text
 Telegram d-max-dev -> local OpenClaw -> d-max tools -> local SQLite
@@ -40,12 +40,18 @@ for a provider experiment.
 
 ## Data Rules
 
-- Project: major initiative, goal, exploration, or workstream.
-- Project hierarchy: `projects.parent_id`; no separate subprojects table.
+- Initiative: umbrella object for ideas, projects, habits, goals,
+  explorations, or workstreams.
+- Project: initiative with `type = project`.
+- Project/initiative hierarchy: `initiatives.parent_id`; no separate
+  subprojects table.
 - Category: dynamic life/business area.
-- Task: deterministic actionable unit connected to a project.
-- Project memory: durable markdown stored in `projects.markdown`.
-- `projects.markdown` is required project memory.
+- Task: deterministic actionable unit connected to an initiative.
+- Initiative memory: durable markdown stored in `initiatives.markdown`.
+- `initiatives.markdown` is required initiative memory.
+- Who dimension: people and organizations are first-class parties. People and
+  organizations may participate in initiatives/tasks/calendar entries via
+  `entity_participants`, and categories are not participant targets.
 - Do not add exploratory memory tables or session-summary tables unless product
   direction changes.
 - Context resolver synchronization is mandatory: whenever data structure,

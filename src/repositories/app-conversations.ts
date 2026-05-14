@@ -9,12 +9,16 @@ export type ConversationContextType =
   | "habits"
   | "tasks"
   | "initiatives"
+  | "people"
+  | "organizations"
   | "category"
   | "idea"
   | "project"
   | "habit"
   | "initiative"
-  | "task";
+  | "task"
+  | "person"
+  | "organization";
 
 export type AppConversation = {
   id: number;
@@ -108,7 +112,7 @@ export class AppConversationRepository {
 }
 
 function normalizedEntityId(contextType: ConversationContextType, entityId?: number | null): number | null {
-  if (["global", "categories", "ideas", "projects", "habits", "tasks", "initiatives"].includes(contextType)) {
+  if (["global", "categories", "ideas", "projects", "habits", "tasks", "initiatives", "people", "organizations"].includes(contextType)) {
     return null;
   }
 

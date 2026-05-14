@@ -13,7 +13,16 @@ export type StateEventEntityType =
   | "calendar_event_visibility"
   | "calendar_source"
   | "media_asset"
-  | "media_link";
+  | "media_link"
+  | "party"
+  | "person"
+  | "organization"
+  | "relationship_type"
+  | "party_relationship"
+  | "participant_role_type"
+  | "entity_participant"
+  | "party_contact_point"
+  | "party_address";
 
 export type StateEvent = {
   id: number;

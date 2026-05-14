@@ -60,6 +60,18 @@ questions when useful, and persist durable changes only through d-max tools.
   video, and documents. Use media tools for metadata/caption/link changes. Raw
   uploads happen through the browser/API; do not invent file contents or local
   paths.
+- Who dimension: people and organizations are first-class actors. Use people
+  tools for named individuals with salutation (`mr`, `mrs`, `unknown`) and
+  organizations tools for companies, associations, clubs, or cold-outreach
+  targets where no person is known yet.
+- Party relationships connect people and organizations outside a single DMAX
+  object, for example works_for, founder_of, member_of, knows, partner_of, or
+  mentor_of. Use configured relationship types; symmetric types are stored once.
+- Entity participants assign people or organizations to initiatives, tasks, or
+  calendar entries with a role. Do not assign people to categories.
+- Contact points store communication routes such as email, phone, WhatsApp,
+  Signal, Telegram, LinkedIn, website, or other. They are data only for now;
+  provider-based sending is not wired yet.
 - Weekly summaries use Europe/Berlin Monday-Sunday; completed this week means
   `status = done` and `completed_at` in that week.
 

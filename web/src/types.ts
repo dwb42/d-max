@@ -164,6 +164,138 @@ export type MediaAttachment = {
   asset: MediaAsset;
 };
 
+export type PartyType = "person" | "organization";
+export type PersonSalutation = "mr" | "mrs" | "unknown";
+export type ContactPointType = "email" | "phone" | "whatsapp" | "signal" | "telegram" | "linkedin" | "website" | "other";
+export type ParticipantEntityType = "initiative" | "task" | "calendar_entry";
+
+export type Party = {
+  id: number;
+  type: PartyType;
+  displayName: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Person = Party & {
+  type: "person";
+  firstName: string | null;
+  lastName: string | null;
+  salutation: PersonSalutation;
+  academicTitle: string | null;
+  nameSuffix: string | null;
+};
+
+export type Organization = Party & {
+  type: "organization";
+  name: string;
+  legalName: string | null;
+  organizationType: string | null;
+};
+
+export type RelationshipType = {
+  id: number;
+  key: string;
+  label: string;
+  inverseLabel: string | null;
+  directionality: "directed" | "symmetric";
+  isSystem: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ParticipantRoleType = {
+  id: number;
+  key: string;
+  label: string;
+  appliesToEntityType: ParticipantEntityType | null;
+  isSystem: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EntityParticipant = {
+  id: number;
+  partyId: number;
+  entityType: ParticipantEntityType;
+  entityId: number;
+  roleTypeId: number | null;
+  roleLabel: string | null;
+  isPrimary: boolean;
+  createdAt: string;
+  updatedAt: string;
+  party: Party;
+  roleType: ParticipantRoleType | null;
+};
+
+export type PartyRelationship = {
+  id: number;
+  fromPartyId: number;
+  toPartyId: number;
+  relationshipTypeId: number;
+  roleLabel: string | null;
+  startedOn: string | null;
+  endedOn: string | null;
+  status: "active" | "inactive";
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PartyRelationshipWithParties = PartyRelationship & {
+  fromParty: Party;
+  toParty: Party;
+  relationshipType: RelationshipType;
+};
+
+export type PartyContactPoint = {
+  id: number;
+  partyId: number;
+  type: ContactPointType;
+  label: string | null;
+  value: string;
+  normalizedValue: string | null;
+  isPrimary: boolean;
+  isPreferred: boolean;
+  canSend: boolean;
+  canReceive: boolean;
+  provider: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PartyAddress = {
+  id: number;
+  partyId: number;
+  label: string | null;
+  line1: string;
+  line2: string | null;
+  postalCode: string | null;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  isPrimary: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PersonDetail = {
+  person: Person;
+  relationships: PartyRelationshipWithParties[];
+  participants: EntityParticipant[];
+  contactPoints: PartyContactPoint[];
+  addresses: PartyAddress[];
+};
+
+export type OrganizationDetail = {
+  organization: Organization;
+  relationships: PartyRelationshipWithParties[];
+  participants: EntityParticipant[];
+  contactPoints: PartyContactPoint[];
+  addresses: PartyAddress[];
+};
+
 export type CalendarEntryType = "initiative_focus" | "task_work" | "standalone";
 export type CalendarEntryStatus = "open" | "done";
 
@@ -343,6 +475,7 @@ export type InitiativeDetail = {
   predecessors?: InitiativeRelationWithInitiatives[];
   successors?: InitiativeRelationWithInitiatives[];
   tasks: Task[];
+  participants?: EntityParticipant[];
   mediaAttachments?: MediaAttachment[];
   projectCalendarBinding?: (CalendarEventBindingView & {
     calendarSource: CalendarSource | null;
@@ -354,6 +487,7 @@ export type TaskDetail = {
   checklistItems?: TaskChecklistItem[];
   initiative: Initiative | null;
   category: Category | null;
+  participants?: EntityParticipant[];
   mediaAttachments?: MediaAttachment[];
 };
 
@@ -365,12 +499,16 @@ export type ConversationContext =
   | { type: "habits" }
   | { type: "tasks" }
   | { type: "initiatives" }
+  | { type: "people" }
+  | { type: "organizations" }
   | { type: "category"; categoryId: number }
   | { type: "idea"; initiativeId: number }
   | { type: "project"; initiativeId: number }
   | { type: "habit"; initiativeId: number }
   | { type: "initiative"; initiativeId: number }
-  | { type: "task"; taskId: number };
+  | { type: "task"; taskId: number }
+  | { type: "person"; partyId: number }
+  | { type: "organization"; partyId: number };
 
 export type AppOverview = {
   categories: Category[];

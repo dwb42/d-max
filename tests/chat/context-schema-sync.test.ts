@@ -13,13 +13,22 @@ const CONTEXT_RELEVANT_TABLES = [
   "task_checklist_items",
   "media_assets",
   "media_links",
+  "parties",
+  "people",
+  "organizations",
+  "relationship_types",
+  "party_relationships",
+  "participant_role_types",
+  "entity_participants",
+  "party_contact_points",
+  "party_addresses",
   "calendar_entries",
   "calendar_sources",
   "calendar_event_bindings",
   "calendar_event_visibility"
 ];
 
-const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "61841803291570c9dac40e1566c8a87cdef8655ecada4c81b0241228afb79b08";
+const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "78437ca6d80f904c1134a61540269a22304d01ca392b73c9dc8bc5c19d73f154";
 
 describe("context resolver schema synchronization", () => {
   let db: Database.Database;

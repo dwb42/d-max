@@ -22,6 +22,12 @@ import type {
   MediaEntityType,
   OpenClawStatus,
   PersistedChatMessage,
+  Organization,
+  OrganizationDetail,
+  ParticipantRoleType,
+  Person,
+  PersonDetail,
+  EntityParticipant,
   Initiative,
   InitiativeDetail,
   InitiativeGraph,
@@ -34,11 +40,167 @@ import type {
   StateEvent,
   Task,
   TaskChecklistItem,
-  TaskDetail
+  TaskDetail,
+  ContactPointType,
+  PartyContactPoint
 } from "./types.js";
 
 export async function fetchOverview(): Promise<AppOverview> {
   return request<AppOverview>("/api/app/overview");
+}
+
+export async function fetchPeople(): Promise<Person[]> {
+  const response = await request<{ people: Person[] }>("/api/people");
+  return response.people;
+}
+
+export async function fetchPersonDetail(id: number): Promise<PersonDetail> {
+  return request<PersonDetail>(`/api/people/${id}`);
+}
+
+export async function createPerson(input: {
+  displayName?: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  salutation?: Person["salutation"];
+  academicTitle?: string | null;
+  nameSuffix?: string | null;
+}): Promise<Person> {
+  const response = await request<{ person: Person }>("/api/people", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.person;
+}
+
+export async function updatePerson(
+  id: number,
+  input: {
+    displayName?: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    salutation?: Person["salutation"];
+    academicTitle?: string | null;
+    nameSuffix?: string | null;
+  }
+): Promise<Person> {
+  const response = await request<{ person: Person }>(`/api/people/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.person;
+}
+
+export async function fetchOrganizations(): Promise<Organization[]> {
+  const response = await request<{ organizations: Organization[] }>("/api/organizations");
+  return response.organizations;
+}
+
+export async function fetchOrganizationDetail(id: number): Promise<OrganizationDetail> {
+  return request<OrganizationDetail>(`/api/organizations/${id}`);
+}
+
+export async function createOrganization(input: {
+  name: string;
+  displayName?: string;
+  legalName?: string | null;
+  organizationType?: string | null;
+}): Promise<Organization> {
+  const response = await request<{ organization: Organization }>("/api/organizations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.organization;
+}
+
+export async function updateOrganization(
+  id: number,
+  input: {
+    name?: string;
+    displayName?: string;
+    legalName?: string | null;
+    organizationType?: string | null;
+  }
+): Promise<Organization> {
+  const response = await request<{ organization: Organization }>(`/api/organizations/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.organization;
+}
+
+export async function fetchParticipantRoleTypes(appliesToEntityType?: "initiative" | "task" | "calendar_entry"): Promise<ParticipantRoleType[]> {
+  const query = appliesToEntityType ? `?appliesToEntityType=${encodeURIComponent(appliesToEntityType)}` : "";
+  const response = await request<{ participantRoleTypes: ParticipantRoleType[] }>(`/api/config/participant-role-types${query}`);
+  return response.participantRoleTypes;
+}
+
+export async function createEntityParticipant(input: {
+  partyId: number;
+  entityType: "initiative" | "task" | "calendar_entry";
+  entityId: number;
+  roleTypeId?: number | null;
+  roleLabel?: string | null;
+  isPrimary?: boolean;
+}): Promise<EntityParticipant> {
+  const response = await request<{ participant: EntityParticipant }>("/api/entity-participants", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.participant;
+}
+
+export async function deleteEntityParticipant(id: number): Promise<void> {
+  await request(`/api/entity-participants/${id}`, { method: "DELETE" });
+}
+
+export async function createPartyContactPoint(input: {
+  partyId: number;
+  type: ContactPointType;
+  label?: string | null;
+  value: string;
+  isPrimary?: boolean;
+  isPreferred?: boolean;
+  canSend?: boolean;
+  canReceive?: boolean;
+  provider?: string | null;
+}): Promise<PartyContactPoint> {
+  const response = await request<{ contactPoint: PartyContactPoint }>("/api/party-contact-points", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.contactPoint;
+}
+
+export async function updatePartyContactPoint(
+  id: number,
+  input: {
+    type?: ContactPointType;
+    label?: string | null;
+    value?: string;
+    isPrimary?: boolean;
+    isPreferred?: boolean;
+    canSend?: boolean;
+    canReceive?: boolean;
+    provider?: string | null;
+  }
+): Promise<PartyContactPoint> {
+  const response = await request<{ contactPoint: PartyContactPoint }>(`/api/party-contact-points/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.contactPoint;
+}
+
+export async function deletePartyContactPoint(id: number): Promise<void> {
+  await request(`/api/party-contact-points/${id}`, { method: "DELETE" });
 }
 
 export async function fetchOpenClawStatus(): Promise<OpenClawStatus> {

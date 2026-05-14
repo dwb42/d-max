@@ -29,7 +29,26 @@ export type ToolName =
   | "attachMediaToEntity"
   | "updateMediaAttachment"
   | "deleteMediaAttachment"
-  | "reorderMediaAttachments";
+  | "reorderMediaAttachments"
+  | "listPeople"
+  | "getPerson"
+  | "createPerson"
+  | "updatePerson"
+  | "listOrganizations"
+  | "getOrganization"
+  | "createOrganization"
+  | "updateOrganization"
+  | "listRelationshipTypes"
+  | "listPartyRelationships"
+  | "createPartyRelationship"
+  | "deletePartyRelationship"
+  | "listParticipantRoleTypes"
+  | "listEntityParticipants"
+  | "createEntityParticipant"
+  | "deleteEntityParticipant"
+  | "listPartyContactPoints"
+  | "createPartyContactPoint"
+  | "updatePartyContactPoint";
 
 export type ToolContext = {
   db?: Database.Database;

@@ -7,6 +7,14 @@ import { InitiativeRepository } from "../repositories/initiatives.js";
 import type { Initiative } from "../repositories/initiatives.js";
 import { MediaLinkRepository } from "../repositories/media-links.js";
 import type { MediaAttachment } from "../repositories/media-links.js";
+import {
+  EntityParticipantRepository,
+  OrganizationRepository,
+  PartyContactPointRepository,
+  PartyRelationshipRepository,
+  PersonRepository
+} from "../repositories/parties.js";
+import type { EntityParticipantWithParty, PartyContactPoint, PartyRelationshipWithParties } from "../repositories/parties.js";
 import { TaskChecklistItemRepository } from "../repositories/task-checklist-items.js";
 import type { TaskChecklistItem } from "../repositories/task-checklist-items.js";
 import { TaskRepository } from "../repositories/tasks.js";
@@ -21,12 +29,16 @@ export const conversationContextSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("habits") }),
   z.object({ type: z.literal("tasks") }),
   z.object({ type: z.literal("initiatives") }),
+  z.object({ type: z.literal("people") }),
+  z.object({ type: z.literal("organizations") }),
   z.object({ type: z.literal("category"), categoryId: z.number().int().positive() }),
   z.object({ type: z.literal("idea"), initiativeId: z.number().int().positive() }),
   z.object({ type: z.literal("project"), initiativeId: z.number().int().positive() }),
   z.object({ type: z.literal("habit"), initiativeId: z.number().int().positive() }),
   z.object({ type: z.literal("initiative"), initiativeId: z.number().int().positive() }),
-  z.object({ type: z.literal("task"), taskId: z.number().int().positive() })
+  z.object({ type: z.literal("task"), taskId: z.number().int().positive() }),
+  z.object({ type: z.literal("person"), partyId: z.number().int().positive() }),
+  z.object({ type: z.literal("organization"), partyId: z.number().int().positive() })
 ]);
 
 export type ConversationContext = z.infer<typeof conversationContextSchema>;
@@ -297,6 +309,8 @@ export function conversationContextFromStorage(contextType: ConversationContextT
     case "habits":
     case "tasks":
     case "initiatives":
+    case "people":
+    case "organizations":
       return { type: contextType };
   }
 
@@ -306,7 +320,8 @@ export function conversationContextFromStorage(contextType: ConversationContextT
     return { type: contextType, initiativeId: contextEntityId };
   }
   if (contextType === "initiative") return { type: "initiative", initiativeId: contextEntityId };
-  return { type: "task", taskId: contextEntityId };
+  if (contextType === "task") return { type: "task", taskId: contextEntityId };
+  return { type: contextType, partyId: contextEntityId } as { type: "person"; partyId: number } | { type: "organization"; partyId: number };
 }
 
 export function storageForConversationContext(context: ConversationContext): {
@@ -321,6 +336,8 @@ export function storageForConversationContext(context: ConversationContext): {
     case "habits":
     case "tasks":
     case "initiatives":
+    case "people":
+    case "organizations":
       return { contextType: context.type, contextEntityId: null };
     case "category":
       return { contextType: "category", contextEntityId: context.categoryId };
@@ -332,6 +349,9 @@ export function storageForConversationContext(context: ConversationContext): {
       return { contextType: "initiative", contextEntityId: context.initiativeId };
     case "task":
       return { contextType: "task", contextEntityId: context.taskId };
+    case "person":
+    case "organization":
+      return { contextType: context.type, contextEntityId: context.partyId };
   }
 }
 
@@ -342,6 +362,11 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   const initiatives = new InitiativeRepository(db);
   const initiativeRelations = new InitiativeRelationRepository(db);
   const mediaLinks = new MediaLinkRepository(db);
+  const people = new PersonRepository(db);
+  const organizations = new OrganizationRepository(db);
+  const partyRelationships = new PartyRelationshipRepository(db);
+  const entityParticipants = new EntityParticipantRepository(db);
+  const partyContactPoints = new PartyContactPointRepository(db);
   const tasks = new TaskRepository(db);
   const taskChecklistItems = new TaskChecklistItemRepository(db);
 
@@ -464,6 +489,34 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     };
   }
 
+  if (context.type === "people" || context.type === "organizations") {
+    const personList = people.list();
+    const organizationList = organizations.list();
+    const lines =
+      context.type === "people"
+        ? [
+            `People (${personList.length}):`,
+            ...personList.slice(0, 60).map((person) => {
+              const contacts = formatContactSummary(partyContactPoints.list({ partyId: person.id }));
+              return `- #${person.id} ${person.displayName}; salutation: ${person.salutation}; first: ${person.firstName ?? "none"}; last: ${person.lastName ?? "none"}${contacts}`;
+            })
+          ]
+        : [
+            `Organizations (${organizationList.length}):`,
+            ...organizationList.slice(0, 60).map((organization) => {
+              const contacts = formatContactSummary(partyContactPoints.list({ partyId: organization.id }));
+              return `- #${organization.id} ${organization.displayName}; type: ${organization.organizationType ?? "none"}${contacts}`;
+            })
+          ];
+
+    return {
+      context,
+      ...storage,
+      title: context.type === "people" ? "People" : "Organizations",
+      ...buildPromptSections(context.type, `Focused on d-max ${context.type} and the Who dimension.`, lines)
+    };
+  }
+
   if (context.type === "category") {
     const category = categories.findById(context.categoryId);
     if (!category) {
@@ -506,6 +559,39 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     };
   }
 
+  if (context.type === "person" || context.type === "organization") {
+    const person = context.type === "person" ? people.findById(context.partyId) : null;
+    const organization = context.type === "organization" ? organizations.findById(context.partyId) : null;
+    const party = person ?? organization;
+    if (!party) {
+      throw new Error(`${context.type === "person" ? "Person" : "Organization"} not found: ${context.partyId}`);
+    }
+
+    const relationships = partyRelationships.list({ partyId: party.id });
+    const participants = entityParticipants.list({ partyId: party.id });
+    const contacts = partyContactPoints.list({ partyId: party.id });
+    const header =
+      person !== null
+        ? `Person: #${person.id} ${person.displayName}; salutation: ${person.salutation}; first: ${person.firstName ?? "none"}; last: ${person.lastName ?? "none"}; title: ${person.academicTitle ?? "none"}`
+        : `Organization: #${organization!.id} ${organization!.displayName}; name: ${organization!.name}; legal name: ${organization!.legalName ?? "none"}; type: ${organization!.organizationType ?? "none"}`;
+    const lines = [
+      header,
+      `Contact points (${contacts.length}):`,
+      ...contacts.slice(0, 20).map(formatContactPoint),
+      `Relationships (${relationships.length}):`,
+      ...relationships.slice(0, 30).map((relationship) => formatPartyRelationship(relationship, party.id)),
+      `DMAX participations (${participants.length}):`,
+      ...participants.slice(0, 30).map(formatEntityParticipant)
+    ];
+
+    return {
+      context,
+      ...storage,
+      title: party.displayName,
+      ...buildPromptSections(context.type, `Focused on one ${context.type} in the Who dimension.`, lines)
+    };
+  }
+
   if (context.type === "idea" || context.type === "project" || context.type === "habit" || context.type === "initiative") {
     const initiative = initiatives.findById(context.initiativeId);
     if (!initiative) {
@@ -515,6 +601,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     const category = categories.findById(initiative.categoryId);
     const initiativeTasks = tasks.list({ initiativeId: initiative.id });
     const initiativeMedia = mediaLinks.listForEntity("initiative", initiative.id);
+    const initiativeParticipants = entityParticipants.list({ entityType: "initiative", entityId: initiative.id });
     const predecessors = initiativeRelations.getInitiativePredecessors(initiative.id);
     const successors = initiativeRelations.getInitiativeSuccessors(initiative.id);
     const lines = [
@@ -527,6 +614,8 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       ...successors.map((relation) => formatInitiativeRelationEndpoint(relation, "successor")),
       `Media attachments (${initiativeMedia.length}):`,
       ...initiativeMedia.slice(0, 20).map(formatMediaAttachment),
+      `People and organizations (${initiativeParticipants.length}):`,
+      ...initiativeParticipants.slice(0, 20).map(formatEntityParticipant),
       `Tasks (${initiativeTasks.length}, open/high-signal first):`,
       ...rankTasks(initiativeTasks).slice(0, 30).map(formatTask)
     ];
@@ -555,6 +644,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   const successors = initiative ? initiativeRelations.getInitiativeSuccessors(initiative.id) : [];
   const checklistItems = taskChecklistItems.listByTask(task.id);
   const taskMedia = mediaLinks.listForEntity("task", task.id);
+  const taskParticipants = entityParticipants.list({ entityType: "task", entityId: task.id });
   const lines = [
     `Task: #${task.id} ${task.title}`,
     `Status: ${task.status}; priority: ${task.priority}; due: ${task.dueAt ?? "none"}; completed: ${task.completedAt ?? "no"}`,
@@ -563,6 +653,8 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     `Notes: ${task.notes ?? "none"}`,
     `Media attachments (${taskMedia.length}):`,
     ...taskMedia.slice(0, 20).map(formatMediaAttachment),
+    `People and organizations (${taskParticipants.length}):`,
+    ...taskParticipants.slice(0, 20).map(formatEntityParticipant),
     initiative ? formatInitiativeHeader(initiative) : `Initiative: #${task.initiativeId} not found`,
     category ? `Category: #${category.id} ${category.name} (${category.color})` : "Category: unknown",
     initiative ? `Initiative memory excerpt:\n${truncate(initiative.markdown || "No initiative markdown yet.", 3500)}` : "",
@@ -815,6 +907,35 @@ function formatChecklistItem(item: TaskChecklistItem): string {
 function formatMediaAttachment(attachment: MediaAttachment): string {
   const derivedText = attachment.asset.summary ?? attachment.asset.textExcerpt ?? attachment.asset.transcript ?? "none";
   return `- #${attachment.asset.id} [${attachment.asset.kind}/${attachment.asset.mimeType}, ${formatBytes(attachment.asset.byteSize)}] ${attachment.asset.originalName}; caption: ${attachment.caption ?? "none"}; summary/excerpt: ${truncate(derivedText, 240)}`;
+}
+
+function formatContactPoint(contactPoint: PartyContactPoint): string {
+  const flags = [contactPoint.isPreferred ? "preferred" : null, contactPoint.isPrimary ? "primary" : null, contactPoint.canSend ? "send" : null, contactPoint.canReceive ? "receive" : null]
+    .filter(Boolean)
+    .join(", ");
+  return `- #${contactPoint.id} ${contactPoint.type}: ${contactPoint.value}; label: ${contactPoint.label ?? "none"}${flags ? `; ${flags}` : ""}`;
+}
+
+function formatContactSummary(contactPoints: PartyContactPoint[]): string {
+  const preferred = contactPoints.find((contactPoint) => contactPoint.isPreferred) ?? contactPoints.find((contactPoint) => contactPoint.isPrimary);
+  return preferred ? `; preferred contact: ${preferred.type} ${preferred.value}` : "";
+}
+
+function formatPartyRelationship(relationship: PartyRelationshipWithParties, focusPartyId: number): string {
+  const otherParty = relationship.fromPartyId === focusPartyId ? relationship.toParty : relationship.fromParty;
+  const direction =
+    relationship.relationshipType.directionality === "symmetric"
+      ? relationship.relationshipType.label
+      : relationship.fromPartyId === focusPartyId
+        ? relationship.relationshipType.label
+        : relationship.relationshipType.inverseLabel ?? relationship.relationshipType.label;
+  const dateRange =
+    relationship.startedOn || relationship.endedOn ? `; time: ${relationship.startedOn ?? "unknown"} to ${relationship.endedOn ?? "open"}` : "";
+  return `- #${relationship.id} ${direction} #${otherParty.id} ${otherParty.displayName} [${otherParty.type}]; status: ${relationship.status}; role: ${relationship.roleLabel ?? "none"}${dateRange}`;
+}
+
+function formatEntityParticipant(participant: EntityParticipantWithParty): string {
+  return `- #${participant.id} ${participant.party.type} #${participant.partyId} ${participant.party.displayName}; entity: ${participant.entityType} #${participant.entityId}; role: ${participant.roleType?.label ?? participant.roleLabel ?? "none"}; primary: ${participant.isPrimary ? "yes" : "no"}`;
 }
 
 function formatInitiativeRelation(relation: InitiativeRelationWithInitiatives): string {

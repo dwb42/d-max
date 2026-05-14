@@ -1,6 +1,6 @@
 # d-max Current State
 
-Date: 2026-05-12
+Date: 2026-05-14
 
 Short handoff for fresh Codex/OpenClaw sessions. This file describes the
 implemented repository state; older plans are historical unless this file or
@@ -16,7 +16,9 @@ Active interfaces:
 - Browser app for `/drive`, `/categories`, `/categories/:categoryName`,
   `/calendar`, `/calendar/timeline`, `/config`, `/ideas`, `/ideas/:categoryName`, `/projects`,
   `/projects/:categoryName`, `/habits`, `/habits/:categoryName`,
-  `/initiatives/:id`, `/tasks`, `/tasks/:id`, `/prompt-vorlagen`, and `/prompts`.
+  `/initiatives/:id`, `/tasks`, `/tasks/:id`, `/people`, `/people/:id`,
+  `/organizations`, `/organizations/:id`,
+  `/prompt-vorlagen`, and `/prompts`.
 - Browser/WebRTC realtime voice prototype using LiveKit and xAI realtime voice.
 
 SQLite is the source of truth. Durable state changes go through tools/API
@@ -33,8 +35,40 @@ tasks,
 task_checklist_items,
 calendar_entries, calendar_sources, calendar_event_bindings, calendar_event_visibility,
 media_assets, media_links,
+parties, people, organizations, relationship_types, party_relationships,
+participant_role_types, entity_participants, party_contact_points, party_addresses,
 app_chat_messages, app_conversations, app_prompt_logs, app_state_events
 ```
+
+The Who dimension is implemented as a party identity layer. `parties` stores
+the shared `person` or `organization` identity and display name; `people`
+stores person fields including `first_name`, `last_name`, `salutation`
+(`mr`, `mrs`, `unknown`), `academic_title`, and `name_suffix`;
+`organizations` stores organization name, legal name, and organization type.
+There is no person or organization Markdown memory yet. `relationship_types`
+stores configured directed or symmetric relationship kinds such as `works_for`,
+`founder_of`, `member_of`, `knows`, `partner_of`, and `mentor_of`.
+`party_relationships` connects people and organizations with optional role
+label, start/end dates, and active/inactive status; symmetric relationships are
+canonicalized by the repository so A-B and B-A do not create duplicate edges.
+`participant_role_types` stores configured roles, and `entity_participants`
+assigns a party to an `initiative`, `task`, or `calendar_entry`; categories are
+not participant targets. Because `entity_participants.entity_id` is polymorphic,
+the repository validates target existence instead of relying on one database FK.
+`party_contact_points` stores email, phone, WhatsApp, Signal, Telegram,
+LinkedIn, website, and other contact routes with primary/preferred and future
+send/receive flags. These flags are already modeled because contact points are
+intended to become executable communication channels later, but provider-based
+sending is not wired yet. `party_addresses` stores multiple physical addresses
+per party. The browser surfaces `/people` and `/organizations` list/create
+screens plus `/people/:id` and `/organizations/:id` detail pages. Detail pages
+can edit core person/organization fields, add/delete/prefer contact points,
+show party relationships, and show DMAX contexts where that party participates.
+Initiative and task detail pages include a `Beteiligte` panel to add/remove
+people or organizations with configured participant roles plus optional
+free-text role labels. Relationship-type editing, party-relationship creation,
+postal-address editing, and calendar-entry participant editing are available
+through API/tools or schema but are not first-class browser workflows yet.
 
 `initiatives.markdown` is required initiative memory. `initiatives.type` segments
 the current technical Initiative object into `idea`, `project`, and `habit`;

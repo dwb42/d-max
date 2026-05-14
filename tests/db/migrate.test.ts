@@ -7,7 +7,7 @@ import { migrate } from "../../src/db/migrate.js";
 import { openDatabase } from "../../src/db/connection.js";
 
 describe("migrate", () => {
-  it("adds category colors, project type, date range columns, media tables, and promotes Inbox category on existing databases", () => {
+  it("adds category colors, project type, date range columns, media tables, who tables, and promotes Inbox category on existing databases", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "d-max-migrate-test-"));
     const databasePath = path.join(dir, "legacy.sqlite");
     const legacy = new Database(databasePath);
@@ -72,6 +72,10 @@ describe("migrate", () => {
       const categoryColumns = db.prepare("pragma table_info(categories)").all() as Array<{ name: string }>;
       const mediaAssetColumns = db.prepare("pragma table_info(media_assets)").all() as Array<{ name: string }>;
       const mediaLinkColumns = db.prepare("pragma table_info(media_links)").all() as Array<{ name: string }>;
+      const partyColumns = db.prepare("pragma table_info(parties)").all() as Array<{ name: string }>;
+      const peopleColumns = db.prepare("pragma table_info(people)").all() as Array<{ name: string }>;
+      const relationshipTypeCount = db.prepare("select count(*) as count from relationship_types where is_system = 1").get() as { count: number };
+      const participantRoleTypeCount = db.prepare("select count(*) as count from participant_role_types where is_system = 1").get() as { count: number };
       const legacyTask = db.prepare("select status, completed_at from tasks where id = 1").get() as {
         status: string;
         completed_at: string | null;
@@ -95,6 +99,10 @@ describe("migrate", () => {
       expect(mediaAssetColumns.some((column) => column.name === "sha256")).toBe(true);
       expect(mediaLinkColumns.some((column) => column.name === "entity_type")).toBe(true);
       expect(mediaLinkColumns.some((column) => column.name === "caption")).toBe(true);
+      expect(partyColumns.some((column) => column.name === "display_name")).toBe(true);
+      expect(peopleColumns.some((column) => column.name === "salutation")).toBe(true);
+      expect(relationshipTypeCount.count).toBeGreaterThanOrEqual(10);
+      expect(participantRoleTypeCount.count).toBeGreaterThanOrEqual(12);
       expect(initiative.type).toBe("project");
       expect(initiative.start_date).toBeNull();
       expect(initiative.end_date).toBeNull();
@@ -122,6 +130,13 @@ describe("migrate", () => {
         db
           .prepare(
             "insert into app_conversations (context_type, context_entity_id, created_at, updated_at) values ('project', 1, '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z')"
+          )
+          .run()
+      ).not.toThrow();
+      expect(() =>
+        db
+          .prepare(
+            "insert into app_conversations (context_type, context_entity_id, created_at, updated_at) values ('person', 1, '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z')"
           )
           .run()
       ).not.toThrow();

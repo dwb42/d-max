@@ -48,7 +48,26 @@ describe("OpenClaw web config tools", () => {
       "d-max__attachMediaToEntity",
       "d-max__updateMediaAttachment",
       "d-max__deleteMediaAttachment",
-      "d-max__reorderMediaAttachments"
+      "d-max__reorderMediaAttachments",
+      "d-max__listPeople",
+      "d-max__getPerson",
+      "d-max__createPerson",
+      "d-max__updatePerson",
+      "d-max__listOrganizations",
+      "d-max__getOrganization",
+      "d-max__createOrganization",
+      "d-max__updateOrganization",
+      "d-max__listRelationshipTypes",
+      "d-max__listPartyRelationships",
+      "d-max__createPartyRelationship",
+      "d-max__deletePartyRelationship",
+      "d-max__listParticipantRoleTypes",
+      "d-max__listEntityParticipants",
+      "d-max__createEntityParticipant",
+      "d-max__deleteEntityParticipant",
+      "d-max__listPartyContactPoints",
+      "d-max__createPartyContactPoint",
+      "d-max__updatePartyContactPoint"
     ]);
     expect([...allowedTools].filter((tool) => tool.startsWith("d-max__")).sort()).toEqual([...expectedTools].sort());
   });

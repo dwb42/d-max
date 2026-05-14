@@ -90,7 +90,7 @@ openclaw agent --local \
 
 ## Verification
 
-Last context-sync verification: 2026-05-12. The commands below passed locally.
+Last context-sync verification: 2026-05-14. The commands below passed locally.
 
 ```bash
 npm run typecheck

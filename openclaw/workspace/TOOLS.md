@@ -91,6 +91,27 @@ Use `listMediaAttachments` to inspect metadata and derived text. Use
 `updateMediaAttachment` for captions/roles. `deleteMediaAttachment` removes a
 link and requires confirmation. Do not expose or invent filesystem paths.
 
+## Who Dimension
+
+Use `createPerson` for named individuals. A person needs a display name or
+enough name fields to derive one. Use `salutation=mr`, `mrs`, or `unknown` for
+address-form purposes.
+
+Use `createOrganization` for companies, associations, clubs, institutions, or
+cold-outreach targets where no concrete person is known yet.
+
+Use `createPartyRelationship` for general relationships between people and
+organizations, such as works_for, founder_of, member_of, knows, partner_of, or
+mentor_of. Inspect available types with `listRelationshipTypes`.
+
+Use `createEntityParticipant` to assign a person or organization to an
+initiative, task, or calendar entry. Inspect available roles with
+`listParticipantRoleTypes`. Categories are not valid participant targets.
+
+Use `createPartyContactPoint` and `updatePartyContactPoint` for contact routes.
+These contact points prepare future executable communication, but sending
+messages through providers is not implemented yet.
+
 ## Silent Replies
 
 When you have nothing to say, respond with ONLY: NO_REPLY

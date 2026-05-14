@@ -11,6 +11,7 @@ export function migrate(databasePath?: string): void {
   const db = openDatabase(databasePath);
 
   try {
+    recoverScratchMigrationTables(db);
     migrateInitiativeStorage(db);
     migrateExistingAppChatMessages(db);
     migrateRemovedThinkingDomain(db);
@@ -27,13 +28,30 @@ export function migrate(databasePath?: string): void {
     migrateCalendarEventVisibility(db);
     migrateTaskChecklistItems(db);
     migrateMediaDomain(db);
+    migrateWhoDomain(db);
     db.exec(schema);
     ensureInboxCategory(db);
     migratePromptLogs(db);
     migrateStateEvents(db);
+    migrateWhoContextTypes(db);
     backfillConversationTitles(db);
   } finally {
     db.close();
+  }
+}
+
+function recoverScratchMigrationTables(db: ReturnType<typeof openDatabase>): void {
+  for (const table of ["app_conversations", "app_prompt_logs", "app_state_events", "tasks"]) {
+    const scratch = `${table}_next`;
+    if (!tableExists(db, scratch)) {
+      continue;
+    }
+
+    if (tableExists(db, table)) {
+      db.exec(`drop table ${scratch}`);
+    } else {
+      db.exec(`alter table ${scratch} rename to ${table}`);
+    }
   }
 }
 
@@ -554,6 +572,194 @@ function migrateMediaDomain(db: ReturnType<typeof openDatabase>): void {
   `);
 }
 
+function migrateWhoDomain(db: ReturnType<typeof openDatabase>): void {
+  db.exec(`
+    create table if not exists parties (
+      id integer primary key,
+      type text not null check (type in ('person', 'organization')),
+      display_name text not null,
+      created_at text not null,
+      updated_at text not null
+    );
+
+    create table if not exists people (
+      party_id integer primary key references parties(id) on delete cascade,
+      first_name text,
+      last_name text,
+      salutation text not null default 'unknown' check (salutation in ('mr', 'mrs', 'unknown')),
+      academic_title text,
+      name_suffix text,
+      created_at text not null,
+      updated_at text not null
+    );
+
+    create table if not exists organizations (
+      party_id integer primary key references parties(id) on delete cascade,
+      name text not null,
+      legal_name text,
+      organization_type text,
+      created_at text not null,
+      updated_at text not null
+    );
+
+    create table if not exists relationship_types (
+      id integer primary key,
+      key text not null unique,
+      label text not null,
+      inverse_label text,
+      directionality text not null check (directionality in ('directed', 'symmetric')),
+      is_system integer not null default 0 check (is_system in (0, 1)),
+      sort_order integer not null default 0,
+      created_at text not null,
+      updated_at text not null
+    );
+
+    create table if not exists party_relationships (
+      id integer primary key,
+      from_party_id integer not null references parties(id) on delete cascade,
+      to_party_id integer not null references parties(id) on delete cascade,
+      relationship_type_id integer not null references relationship_types(id),
+      role_label text,
+      started_on text,
+      ended_on text,
+      status text not null default 'active' check (status in ('active', 'inactive')),
+      created_at text not null,
+      updated_at text not null,
+      check (from_party_id <> to_party_id),
+      unique(from_party_id, to_party_id, relationship_type_id, role_label, started_on)
+    );
+
+    create table if not exists participant_role_types (
+      id integer primary key,
+      key text not null unique,
+      label text not null,
+      applies_to_entity_type text check (applies_to_entity_type in ('initiative', 'task', 'calendar_entry')),
+      is_system integer not null default 0 check (is_system in (0, 1)),
+      sort_order integer not null default 0,
+      created_at text not null,
+      updated_at text not null
+    );
+
+    create table if not exists entity_participants (
+      id integer primary key,
+      party_id integer not null references parties(id) on delete cascade,
+      entity_type text not null check (entity_type in ('initiative', 'task', 'calendar_entry')),
+      entity_id integer not null,
+      role_type_id integer references participant_role_types(id),
+      role_label text,
+      is_primary integer not null default 0 check (is_primary in (0, 1)),
+      created_at text not null,
+      updated_at text not null,
+      unique(party_id, entity_type, entity_id, role_type_id, role_label)
+    );
+
+    create table if not exists party_contact_points (
+      id integer primary key,
+      party_id integer not null references parties(id) on delete cascade,
+      type text not null check (type in ('email', 'phone', 'whatsapp', 'signal', 'telegram', 'linkedin', 'website', 'other')),
+      label text,
+      value text not null,
+      normalized_value text,
+      is_primary integer not null default 0 check (is_primary in (0, 1)),
+      is_preferred integer not null default 0 check (is_preferred in (0, 1)),
+      can_send integer not null default 0 check (can_send in (0, 1)),
+      can_receive integer not null default 0 check (can_receive in (0, 1)),
+      provider text,
+      created_at text not null,
+      updated_at text not null
+    );
+
+    create table if not exists party_addresses (
+      id integer primary key,
+      party_id integer not null references parties(id) on delete cascade,
+      label text,
+      line1 text not null,
+      line2 text,
+      postal_code text,
+      city text,
+      region text,
+      country text,
+      is_primary integer not null default 0 check (is_primary in (0, 1)),
+      created_at text not null,
+      updated_at text not null
+    );
+
+    create index if not exists idx_parties_type_display_name on parties(type, lower(display_name), id);
+    create index if not exists idx_people_last_first on people(lower(last_name), lower(first_name), party_id);
+    create index if not exists idx_organizations_name on organizations(lower(name), party_id);
+    create index if not exists idx_relationship_types_sort on relationship_types(sort_order, lower(label), id);
+    create index if not exists idx_party_relationships_from on party_relationships(from_party_id, status, relationship_type_id, to_party_id);
+    create index if not exists idx_party_relationships_to on party_relationships(to_party_id, status, relationship_type_id, from_party_id);
+    create index if not exists idx_party_relationships_type_status on party_relationships(relationship_type_id, status, id);
+    create index if not exists idx_participant_role_types_sort on participant_role_types(sort_order, lower(label), id);
+    create index if not exists idx_entity_participants_entity on entity_participants(entity_type, entity_id, is_primary desc, id);
+    create index if not exists idx_entity_participants_party on entity_participants(party_id, entity_type, entity_id);
+    create index if not exists idx_party_contact_points_party_type on party_contact_points(party_id, type, is_preferred desc, is_primary desc, id);
+    create index if not exists idx_party_addresses_party on party_addresses(party_id, is_primary desc, id);
+  `);
+
+  ensureWhoSystemTypes(db);
+}
+
+function ensureWhoSystemTypes(db: ReturnType<typeof openDatabase>): void {
+  const now = nowIso();
+  const relationshipTypes = [
+    ["works_for", "works for", "employs", "directed", 1000],
+    ["founder_of", "founder of", "founded by", "directed", 2000],
+    ["member_of", "member of", "has member", "directed", 3000],
+    ["advisor_to", "advisor to", "advised by", "directed", 4000],
+    ["knows", "knows", "knows", "symmetric", 5000],
+    ["family_related_to", "family related to", "family related to", "symmetric", 6000],
+    ["partner_of", "partner of", "partner of", "symmetric", 7000],
+    ["customer_of", "customer of", "has customer", "directed", 8000],
+    ["supplier_of", "supplier of", "has supplier", "directed", 9000],
+    ["mentor_of", "mentor of", "mentored by", "directed", 10000]
+  ] as const;
+  const participantRoles = [
+    ["responsible", "Responsible", null, 1000],
+    ["participant", "Participant", null, 2000],
+    ["customer", "Customer", null, 3000],
+    ["contact_person", "Contact person", null, 4000],
+    ["supplier", "Supplier", null, 5000],
+    ["partner", "Partner", null, 6000],
+    ["stakeholder", "Stakeholder", null, 7000],
+    ["decision_maker", "Decision maker", null, 8000],
+    ["observer", "Observer", null, 9000],
+    ["coach", "Coach", null, 10000],
+    ["assistant", "Assistant", null, 11000],
+    ["accountability_partner", "Accountability partner", "initiative", 12000]
+  ] as const;
+
+  const upsertRelationship = db.prepare(
+    `insert into relationship_types (key, label, inverse_label, directionality, is_system, sort_order, created_at, updated_at)
+     values (?, ?, ?, ?, 1, ?, ?, ?)
+     on conflict(key) do update set
+      label = excluded.label,
+      inverse_label = excluded.inverse_label,
+      directionality = excluded.directionality,
+      is_system = 1,
+      sort_order = excluded.sort_order,
+      updated_at = excluded.updated_at`
+  );
+  const upsertRole = db.prepare(
+    `insert into participant_role_types (key, label, applies_to_entity_type, is_system, sort_order, created_at, updated_at)
+     values (?, ?, ?, 1, ?, ?, ?)
+     on conflict(key) do update set
+      label = excluded.label,
+      applies_to_entity_type = excluded.applies_to_entity_type,
+      is_system = 1,
+      sort_order = excluded.sort_order,
+      updated_at = excluded.updated_at`
+  );
+  const transaction = db.transaction(() => {
+    relationshipTypes.forEach(([key, label, inverseLabel, directionality, sortOrder]) =>
+      upsertRelationship.run(key, label, inverseLabel, directionality, sortOrder, now, now)
+    );
+    participantRoles.forEach(([key, label, appliesToEntityType, sortOrder]) => upsertRole.run(key, label, appliesToEntityType, sortOrder, now, now));
+  });
+  transaction();
+}
+
 function ensureInboxCategory(db: ReturnType<typeof openDatabase>): void {
   const now = nowIso();
   const existing = db.prepare("select id, is_system from categories where lower(name) = lower('Inbox')").get() as
@@ -971,6 +1177,152 @@ function rebuildStateEventsForPlanningCanvasDomain(db: ReturnType<typeof openDat
       select id, source, operation, entity_type, entity_id, category_id, initiative_id, task_id, created_at
       from app_state_events
       where entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'task', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link');
+    drop table app_state_events;
+    alter table app_state_events_next rename to app_state_events;
+    create index if not exists idx_app_state_events_id on app_state_events(id);
+    create index if not exists idx_app_state_events_created_at on app_state_events(created_at, id);
+    create index if not exists idx_app_state_events_scope on app_state_events(entity_type, entity_id, initiative_id, task_id, category_id);
+  `);
+}
+
+function migrateWhoContextTypes(db: ReturnType<typeof openDatabase>): void {
+  db.pragma("foreign_keys = OFF");
+  try {
+    rebuildAppConversationsForWhoContext(db);
+    rebuildAppPromptLogsForWhoContext(db);
+    rebuildStateEventsForWhoDomain(db);
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
+
+function rebuildAppConversationsForWhoContext(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "app_conversations")) {
+    return;
+  }
+
+  const sql = db.prepare("select sql from sqlite_master where type = 'table' and name = 'app_conversations'").get() as
+    | { sql: string }
+    | undefined;
+  if (sql?.sql.includes("'person'") && sql.sql.includes("'organizations'")) {
+    return;
+  }
+
+  db.exec(`
+    create table app_conversations_next (
+      id integer primary key,
+      title text,
+      context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations', 'category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization')),
+      context_entity_id integer,
+      created_at text not null,
+      updated_at text not null,
+      check (
+        (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations') and context_entity_id is null)
+        or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization') and context_entity_id is not null)
+      )
+    );
+    insert into app_conversations_next (id, title, context_type, context_entity_id, created_at, updated_at)
+      select id, title, context_type, context_entity_id, created_at, updated_at
+      from app_conversations
+      where context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations', 'category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization');
+    drop table app_conversations;
+    alter table app_conversations_next rename to app_conversations;
+    create index if not exists idx_app_conversations_context on app_conversations(context_type, context_entity_id, updated_at);
+  `);
+}
+
+function rebuildAppPromptLogsForWhoContext(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "app_prompt_logs")) {
+    return;
+  }
+
+  const sql = db.prepare("select sql from sqlite_master where type = 'table' and name = 'app_prompt_logs'").get() as
+    | { sql: string }
+    | undefined;
+  if (sql?.sql.includes("'person'") && sql.sql.includes("'organizations'")) {
+    return;
+  }
+
+  const hasTurnTrace = tableColumns(db, "app_prompt_logs").some((column) => column.name === "turn_trace");
+  const turnTraceSelect = hasTurnTrace ? "turn_trace" : "null as turn_trace";
+  db.exec(`
+    create table app_prompt_logs_next (
+      id integer primary key,
+      conversation_id integer references app_conversations(id),
+      user_message_id integer references app_chat_messages(id),
+      openclaw_session_id text not null,
+      context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations', 'category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization')),
+      context_entity_id integer,
+      user_input text not null,
+      system_instructions text not null,
+      context_data text not null,
+      memory_history text not null,
+      tools text not null,
+      final_prompt text not null,
+      turn_trace text,
+      created_at text not null,
+      check (
+        (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations') and context_entity_id is null)
+        or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization') and context_entity_id is not null)
+      )
+    );
+    insert into app_prompt_logs_next (
+      id, conversation_id, user_message_id, openclaw_session_id, context_type, context_entity_id,
+      user_input, system_instructions, context_data, memory_history, tools, final_prompt, turn_trace, created_at
+    )
+      select
+        id,
+        conversation_id,
+        user_message_id,
+        openclaw_session_id,
+        context_type,
+        context_entity_id,
+        user_input,
+        system_instructions,
+        context_data,
+        memory_history,
+        tools,
+        final_prompt,
+        ${turnTraceSelect},
+        created_at
+      from app_prompt_logs
+      where context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations', 'category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization');
+    drop table app_prompt_logs;
+    alter table app_prompt_logs_next rename to app_prompt_logs;
+    create index if not exists idx_app_prompt_logs_created_at on app_prompt_logs(created_at, id);
+    create index if not exists idx_app_prompt_logs_conversation_id on app_prompt_logs(conversation_id, created_at, id);
+    create index if not exists idx_app_prompt_logs_context on app_prompt_logs(context_type, context_entity_id, created_at);
+  `);
+}
+
+function rebuildStateEventsForWhoDomain(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "app_state_events")) {
+    return;
+  }
+
+  const sql = db.prepare("select sql from sqlite_master where type = 'table' and name = 'app_state_events'").get() as
+    | { sql: string }
+    | undefined;
+  if (sql?.sql.includes("'party_address'") && sql.sql.includes("'entity_participant'")) {
+    return;
+  }
+
+  db.exec(`
+    create table app_state_events_next (
+      id integer primary key,
+      source text not null check (source in ('api', 'tool')),
+      operation text not null,
+      entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'party_contact_point', 'party_address')),
+      entity_id integer,
+      category_id integer,
+      initiative_id integer,
+      task_id integer,
+      created_at text not null
+    );
+    insert into app_state_events_next (id, source, operation, entity_type, entity_id, category_id, initiative_id, task_id, created_at)
+      select id, source, operation, entity_type, entity_id, category_id, initiative_id, task_id, created_at
+      from app_state_events
+      where entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'party_contact_point', 'party_address');
     drop table app_state_events;
     alter table app_state_events_next rename to app_state_events;
     create index if not exists idx_app_state_events_id on app_state_events(id);

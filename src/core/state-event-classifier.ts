@@ -21,7 +21,17 @@ const STATE_MUTATING_TOOLS = new Set<ToolName>([
   "attachMediaToEntity",
   "updateMediaAttachment",
   "deleteMediaAttachment",
-  "reorderMediaAttachments"
+  "reorderMediaAttachments",
+  "createPerson",
+  "updatePerson",
+  "createOrganization",
+  "updateOrganization",
+  "createPartyRelationship",
+  "deletePartyRelationship",
+  "createEntityParticipant",
+  "deleteEntityParticipant",
+  "createPartyContactPoint",
+  "updatePartyContactPoint"
 ]);
 
 export function isStateMutatingTool(name: ToolName): boolean {
@@ -104,6 +114,39 @@ export function stateEventFromToolResult(name: ToolName, input: unknown, result:
       initiativeId: entityType === "initiative" ? entityId : undefined,
       taskId: entityType === "task" ? entityId : undefined
     };
+  }
+
+  if (name === "createPerson" || name === "updatePerson") {
+    const partyId = numberValue(dataRecord?.id) ?? numberValue(inputRecord?.id);
+    return { ...base, entityType: "person", entityId: partyId };
+  }
+
+  if (name === "createOrganization" || name === "updateOrganization") {
+    const partyId = numberValue(dataRecord?.id) ?? numberValue(inputRecord?.id);
+    return { ...base, entityType: "organization", entityId: partyId };
+  }
+
+  if (name === "createPartyRelationship" || name === "deletePartyRelationship") {
+    const relationshipId = numberValue(dataRecord?.id) ?? numberValue(inputRecord?.id);
+    return { ...base, entityType: "party_relationship", entityId: relationshipId };
+  }
+
+  if (name === "createEntityParticipant" || name === "deleteEntityParticipant") {
+    const participantId = numberValue(dataRecord?.id) ?? numberValue(inputRecord?.id);
+    const entityType = stringValue(dataRecord?.entityType) ?? stringValue(inputRecord?.entityType);
+    const entityId = numberValue(dataRecord?.entityId) ?? numberValue(inputRecord?.entityId);
+    return {
+      ...base,
+      entityType: "entity_participant",
+      entityId: participantId,
+      initiativeId: entityType === "initiative" ? entityId : undefined,
+      taskId: entityType === "task" ? entityId : undefined
+    };
+  }
+
+  if (name === "createPartyContactPoint" || name === "updatePartyContactPoint") {
+    const contactPointId = numberValue(dataRecord?.id) ?? numberValue(inputRecord?.id);
+    return { ...base, entityType: "party_contact_point", entityId: contactPointId };
   }
 
   return null;

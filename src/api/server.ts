@@ -22,6 +22,16 @@ import { MediaAssetRepository } from "../repositories/media-assets.js";
 import type { MediaAsset } from "../repositories/media-assets.js";
 import { MediaLinkRepository } from "../repositories/media-links.js";
 import type { MediaAttachment, MediaEntityType, MediaLink } from "../repositories/media-links.js";
+import {
+  EntityParticipantRepository,
+  OrganizationRepository,
+  ParticipantRoleTypeRepository,
+  PartyAddressRepository,
+  PartyContactPointRepository,
+  PartyRelationshipRepository,
+  PersonRepository,
+  RelationshipTypeRepository
+} from "../repositories/parties.js";
 import { analyzeMedia } from "../media/media-analysis.js";
 import { MediaStorage } from "../media/media-storage.js";
 import type { TaskStatus } from "../repositories/tasks.js";
@@ -60,6 +70,14 @@ const planningCanvas = new PlanningCanvasRepository(db);
 const mediaAssets = new MediaAssetRepository(db);
 const mediaLinks = new MediaLinkRepository(db);
 const mediaStorage = new MediaStorage(env.dmaxMediaStorageDir);
+const people = new PersonRepository(db);
+const organizations = new OrganizationRepository(db);
+const relationshipTypes = new RelationshipTypeRepository(db);
+const partyRelationships = new PartyRelationshipRepository(db);
+const participantRoleTypes = new ParticipantRoleTypeRepository(db);
+const entityParticipants = new EntityParticipantRepository(db);
+const partyContactPoints = new PartyContactPointRepository(db);
+const partyAddresses = new PartyAddressRepository(db);
 const tasks = new TaskRepository(db);
 const taskChecklistItems = new TaskChecklistItemRepository(db);
 const stateEvents = new StateEventRepository(db);
@@ -427,6 +445,260 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/people") {
+      sendJson(res, 200, { people: people.list({ search: url.searchParams.get("search") ?? undefined }) });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/people") {
+      const body = createPersonBody.parse(await readJson(req));
+      const person = people.create(body);
+      emitApiStateEvent({ operation: "createPerson", entityType: "person", entityId: person.id });
+      sendJson(res, 200, { person });
+      return;
+    }
+
+    const personMatch = url.pathname.match(/^\/api\/people\/(\d+)$/);
+    if (req.method === "GET" && personMatch) {
+      const person = people.findById(Number(personMatch[1]));
+      if (!person) {
+        sendJson(res, 404, { error: "Person not found" });
+        return;
+      }
+      sendJson(res, 200, {
+        person,
+        relationships: partyRelationships.list({ partyId: person.id }),
+        participants: entityParticipants.list({ partyId: person.id }),
+        contactPoints: partyContactPoints.list({ partyId: person.id }),
+        addresses: partyAddresses.list({ partyId: person.id })
+      });
+      return;
+    }
+
+    if (req.method === "PATCH" && personMatch) {
+      const body = updatePersonBody.parse(await readJson(req));
+      const person = people.update({ id: Number(personMatch[1]), ...body });
+      emitApiStateEvent({ operation: "updatePerson", entityType: "person", entityId: person.id });
+      sendJson(res, 200, { person });
+      return;
+    }
+
+    if (req.method === "DELETE" && personMatch) {
+      const person = people.delete(Number(personMatch[1]));
+      if (!person) {
+        sendJson(res, 404, { error: "Person not found" });
+        return;
+      }
+      emitApiStateEvent({ operation: "deletePerson", entityType: "person", entityId: person.id });
+      sendJson(res, 200, { deleted: true, id: person.id });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/organizations") {
+      sendJson(res, 200, { organizations: organizations.list({ search: url.searchParams.get("search") ?? undefined }) });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/organizations") {
+      const body = createOrganizationBody.parse(await readJson(req));
+      const organization = organizations.create(body);
+      emitApiStateEvent({ operation: "createOrganization", entityType: "organization", entityId: organization.id });
+      sendJson(res, 200, { organization });
+      return;
+    }
+
+    const organizationMatch = url.pathname.match(/^\/api\/organizations\/(\d+)$/);
+    if (req.method === "GET" && organizationMatch) {
+      const organization = organizations.findById(Number(organizationMatch[1]));
+      if (!organization) {
+        sendJson(res, 404, { error: "Organization not found" });
+        return;
+      }
+      sendJson(res, 200, {
+        organization,
+        relationships: partyRelationships.list({ partyId: organization.id }),
+        participants: entityParticipants.list({ partyId: organization.id }),
+        contactPoints: partyContactPoints.list({ partyId: organization.id }),
+        addresses: partyAddresses.list({ partyId: organization.id })
+      });
+      return;
+    }
+
+    if (req.method === "PATCH" && organizationMatch) {
+      const body = updateOrganizationBody.parse(await readJson(req));
+      const organization = organizations.update({ id: Number(organizationMatch[1]), ...body });
+      emitApiStateEvent({ operation: "updateOrganization", entityType: "organization", entityId: organization.id });
+      sendJson(res, 200, { organization });
+      return;
+    }
+
+    if (req.method === "DELETE" && organizationMatch) {
+      const organization = organizations.delete(Number(organizationMatch[1]));
+      if (!organization) {
+        sendJson(res, 404, { error: "Organization not found" });
+        return;
+      }
+      emitApiStateEvent({ operation: "deleteOrganization", entityType: "organization", entityId: organization.id });
+      sendJson(res, 200, { deleted: true, id: organization.id });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/config/relationship-types") {
+      sendJson(res, 200, { relationshipTypes: relationshipTypes.list() });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/config/participant-role-types") {
+      sendJson(res, 200, { participantRoleTypes: participantRoleTypes.list({ appliesToEntityType: parseOptionalParticipantEntityType(url.searchParams.get("appliesToEntityType")) }) });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/party-relationships") {
+      sendJson(res, 200, {
+        relationships: partyRelationships.list({
+          partyId: parseOptionalPositiveInt(url.searchParams.get("partyId")) ?? undefined,
+          relationshipTypeId: parseOptionalPositiveInt(url.searchParams.get("relationshipTypeId")) ?? undefined,
+          status: parseOptionalRelationshipStatus(url.searchParams.get("status"))
+        })
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/party-relationships") {
+      const body = createPartyRelationshipBody.parse(await readJson(req));
+      const relationship = partyRelationships.create(body);
+      emitApiStateEvent({ operation: "createPartyRelationship", entityType: "party_relationship", entityId: relationship.id });
+      sendJson(res, 200, { relationship });
+      return;
+    }
+
+    const partyRelationshipMatch = url.pathname.match(/^\/api\/party-relationships\/(\d+)$/);
+    if (req.method === "DELETE" && partyRelationshipMatch) {
+      const relationship = partyRelationships.delete(Number(partyRelationshipMatch[1]));
+      if (!relationship) {
+        sendJson(res, 404, { error: "Party relationship not found" });
+        return;
+      }
+      emitApiStateEvent({ operation: "deletePartyRelationship", entityType: "party_relationship", entityId: relationship.id });
+      sendJson(res, 200, { deleted: true, id: relationship.id });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/entity-participants") {
+      sendJson(res, 200, {
+        participants: entityParticipants.list({
+          partyId: parseOptionalPositiveInt(url.searchParams.get("partyId")) ?? undefined,
+          entityType: parseOptionalParticipantEntityType(url.searchParams.get("entityType")),
+          entityId: parseOptionalPositiveInt(url.searchParams.get("entityId")) ?? undefined
+        })
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/entity-participants") {
+      const body = createEntityParticipantBody.parse(await readJson(req));
+      const participant = entityParticipants.create(body);
+      emitApiStateEvent(stateEventForEntityParticipant("createEntityParticipant", participant));
+      sendJson(res, 200, { participant });
+      return;
+    }
+
+    const entityParticipantMatch = url.pathname.match(/^\/api\/entity-participants\/(\d+)$/);
+    if (req.method === "PATCH" && entityParticipantMatch) {
+      const body = updateEntityParticipantBody.parse(await readJson(req));
+      const participant = entityParticipants.update({ id: Number(entityParticipantMatch[1]), ...body });
+      emitApiStateEvent(stateEventForEntityParticipant("updateEntityParticipant", participant));
+      sendJson(res, 200, { participant });
+      return;
+    }
+
+    if (req.method === "DELETE" && entityParticipantMatch) {
+      const participant = entityParticipants.delete(Number(entityParticipantMatch[1]));
+      if (!participant) {
+        sendJson(res, 404, { error: "Entity participant not found" });
+        return;
+      }
+      emitApiStateEvent(stateEventForEntityParticipant("deleteEntityParticipant", participant));
+      sendJson(res, 200, { deleted: true, id: participant.id });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/party-contact-points") {
+      const partyId = parseOptionalPositiveInt(url.searchParams.get("partyId"));
+      if (!partyId) {
+        sendJson(res, 400, { error: "partyId is required" });
+        return;
+      }
+      sendJson(res, 200, { contactPoints: partyContactPoints.list({ partyId, type: parseOptionalContactPointType(url.searchParams.get("type")) }) });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/party-contact-points") {
+      const body = createPartyContactPointBody.parse(await readJson(req));
+      const contactPoint = partyContactPoints.create(body);
+      emitApiStateEvent({ operation: "createPartyContactPoint", entityType: "party_contact_point", entityId: contactPoint.id });
+      sendJson(res, 200, { contactPoint });
+      return;
+    }
+
+    const partyContactPointMatch = url.pathname.match(/^\/api\/party-contact-points\/(\d+)$/);
+    if (req.method === "PATCH" && partyContactPointMatch) {
+      const body = updatePartyContactPointBody.parse(await readJson(req));
+      const contactPoint = partyContactPoints.update({ id: Number(partyContactPointMatch[1]), ...body });
+      emitApiStateEvent({ operation: "updatePartyContactPoint", entityType: "party_contact_point", entityId: contactPoint.id });
+      sendJson(res, 200, { contactPoint });
+      return;
+    }
+
+    if (req.method === "DELETE" && partyContactPointMatch) {
+      const contactPoint = partyContactPoints.delete(Number(partyContactPointMatch[1]));
+      if (!contactPoint) {
+        sendJson(res, 404, { error: "Party contact point not found" });
+        return;
+      }
+      emitApiStateEvent({ operation: "deletePartyContactPoint", entityType: "party_contact_point", entityId: contactPoint.id });
+      sendJson(res, 200, { deleted: true, id: contactPoint.id });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/party-addresses") {
+      const partyId = parseOptionalPositiveInt(url.searchParams.get("partyId"));
+      if (!partyId) {
+        sendJson(res, 400, { error: "partyId is required" });
+        return;
+      }
+      sendJson(res, 200, { addresses: partyAddresses.list({ partyId }) });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/party-addresses") {
+      const body = createPartyAddressBody.parse(await readJson(req));
+      const address = partyAddresses.create(body);
+      emitApiStateEvent({ operation: "createPartyAddress", entityType: "party_address", entityId: address.id });
+      sendJson(res, 200, { address });
+      return;
+    }
+
+    const partyAddressMatch = url.pathname.match(/^\/api\/party-addresses\/(\d+)$/);
+    if (req.method === "PATCH" && partyAddressMatch) {
+      const body = updatePartyAddressBody.parse(await readJson(req));
+      const address = partyAddresses.update({ id: Number(partyAddressMatch[1]), ...body });
+      emitApiStateEvent({ operation: "updatePartyAddress", entityType: "party_address", entityId: address.id });
+      sendJson(res, 200, { address });
+      return;
+    }
+
+    if (req.method === "DELETE" && partyAddressMatch) {
+      const address = partyAddresses.delete(Number(partyAddressMatch[1]));
+      if (!address) {
+        sendJson(res, 404, { error: "Party address not found" });
+        return;
+      }
+      emitApiStateEvent({ operation: "deletePartyAddress", entityType: "party_address", entityId: address.id });
+      sendJson(res, 200, { deleted: true, id: address.id });
+      return;
+    }
+
     if (req.method === "GET" && (url.pathname === "/api/initiatives" || url.pathname === "/api/projects")) {
       sendJson(res, 200, {
         initiatives: initiatives.list({
@@ -572,6 +844,7 @@ const server = http.createServer(async (req, res) => {
         predecessors: initiativeRelations.getInitiativePredecessors(initiative.id),
         successors: initiativeRelations.getInitiativeSuccessors(initiative.id),
         tasks: tasks.list({ initiativeId: initiative.id }),
+        participants: entityParticipants.list({ entityType: "initiative", entityId: initiative.id }),
         mediaAttachments: mediaLinks.listForEntity("initiative", initiative.id).map(mediaAttachmentForApi),
         projectCalendarBinding: initiative.type === "project" ? projectCalendarBindingForApi(initiative.id) : null
       });
@@ -629,6 +902,7 @@ const server = http.createServer(async (req, res) => {
         checklistItems: taskChecklistItems.listByTask(task.id),
         initiative,
         category,
+        participants: entityParticipants.list({ entityType: "task", entityId: task.id }),
         mediaAttachments: mediaLinks.listForEntity("task", task.id).map(mediaAttachmentForApi)
       });
       return;
@@ -1247,6 +1521,86 @@ const updateCategoryBody = z.object({
   color: z.string().trim().regex(/^#[0-9a-f]{6}$/i).nullable().optional()
 });
 
+const partySalutationBody = z.enum(["mr", "mrs", "unknown"]);
+const participantEntityTypeBody = z.enum(["initiative", "task", "calendar_entry"]);
+const contactPointTypeBody = z.enum(["email", "phone", "whatsapp", "signal", "telegram", "linkedin", "website", "other"]);
+const relationshipStatusBody = z.enum(["active", "inactive"]);
+const partyDateBody = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable();
+
+const createPersonBody = z.object({
+  displayName: z.string().trim().min(1).optional(),
+  firstName: z.string().trim().min(1).nullable().optional(),
+  lastName: z.string().trim().min(1).nullable().optional(),
+  salutation: partySalutationBody.optional(),
+  academicTitle: z.string().trim().min(1).nullable().optional(),
+  nameSuffix: z.string().trim().min(1).nullable().optional()
+});
+
+const updatePersonBody = createPersonBody.partial();
+
+const createOrganizationBody = z.object({
+  name: z.string().trim().min(1),
+  displayName: z.string().trim().min(1).optional(),
+  legalName: z.string().trim().min(1).nullable().optional(),
+  organizationType: z.string().trim().min(1).nullable().optional()
+});
+
+const updateOrganizationBody = createOrganizationBody.partial();
+
+const createPartyRelationshipBody = z.object({
+  fromPartyId: z.number().int().positive(),
+  toPartyId: z.number().int().positive(),
+  relationshipTypeId: z.number().int().positive(),
+  roleLabel: z.string().trim().min(1).nullable().optional(),
+  startedOn: partyDateBody.optional(),
+  endedOn: partyDateBody.optional(),
+  status: relationshipStatusBody.optional()
+});
+
+const createEntityParticipantBody = z.object({
+  partyId: z.number().int().positive(),
+  entityType: participantEntityTypeBody,
+  entityId: z.number().int().positive(),
+  roleTypeId: z.number().int().positive().nullable().optional(),
+  roleLabel: z.string().trim().min(1).nullable().optional(),
+  isPrimary: z.boolean().optional()
+});
+
+const updateEntityParticipantBody = z.object({
+  roleTypeId: z.number().int().positive().nullable().optional(),
+  roleLabel: z.string().trim().min(1).nullable().optional(),
+  isPrimary: z.boolean().optional()
+});
+
+const createPartyContactPointBody = z.object({
+  partyId: z.number().int().positive(),
+  type: contactPointTypeBody,
+  label: z.string().trim().min(1).nullable().optional(),
+  value: z.string().trim().min(1),
+  normalizedValue: z.string().trim().min(1).nullable().optional(),
+  isPrimary: z.boolean().optional(),
+  isPreferred: z.boolean().optional(),
+  canSend: z.boolean().optional(),
+  canReceive: z.boolean().optional(),
+  provider: z.string().trim().min(1).nullable().optional()
+});
+
+const updatePartyContactPointBody = createPartyContactPointBody.omit({ partyId: true }).partial();
+
+const createPartyAddressBody = z.object({
+  partyId: z.number().int().positive(),
+  label: z.string().trim().min(1).nullable().optional(),
+  line1: z.string().trim().min(1),
+  line2: z.string().trim().min(1).nullable().optional(),
+  postalCode: z.string().trim().min(1).nullable().optional(),
+  city: z.string().trim().min(1).nullable().optional(),
+  region: z.string().trim().min(1).nullable().optional(),
+  country: z.string().trim().min(1).nullable().optional(),
+  isPrimary: z.boolean().optional()
+});
+
+const updatePartyAddressBody = createPartyAddressBody.omit({ partyId: true }).partial();
+
 const initiativeDateBody = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable();
 const projectPhaseBody = z.enum(["planning", "doing"]);
 
@@ -1422,12 +1776,16 @@ function parseConversationContextQuery(url: URL) {
       "habits",
       "tasks",
       "initiatives",
+      "people",
+      "organizations",
       "category",
       "idea",
       "project",
       "habit",
       "initiative",
-      "task"
+      "task",
+      "person",
+      "organization"
     ])
     .parse(url.searchParams.get("contextType"));
   const entityId = parseOptionalPositiveInt(url.searchParams.get("contextEntityId"));
@@ -1436,14 +1794,16 @@ function parseConversationContextQuery(url: URL) {
     return { type: "global" as const };
   }
 
-  if (["categories", "ideas", "projects", "habits", "tasks", "initiatives"].includes(contextType)) {
+  if (["categories", "ideas", "projects", "habits", "tasks", "initiatives", "people", "organizations"].includes(contextType)) {
     return { type: contextType } as
       | { type: "categories" }
       | { type: "ideas" }
       | { type: "projects" }
       | { type: "habits" }
       | { type: "tasks" }
-      | { type: "initiatives" };
+      | { type: "initiatives" }
+      | { type: "people" }
+      | { type: "organizations" };
   }
 
   if (!entityId) {
@@ -1458,7 +1818,8 @@ function parseConversationContextQuery(url: URL) {
       | { type: "habit"; initiativeId: number }
       | { type: "initiative"; initiativeId: number };
   }
-  return { type: "task" as const, taskId: entityId };
+  if (contextType === "task") return { type: "task" as const, taskId: entityId };
+  return { type: contextType, partyId: entityId } as { type: "person"; partyId: number } | { type: "organization"; partyId: number };
 }
 
 function parseOptionalStatus(status: string | null): InitiativeStatus | undefined {
@@ -1479,6 +1840,30 @@ function parseOptionalInitiativeType(type: string | null): InitiativeType | unde
 
 function parseOptionalInitiativeRelationType(type: string | null): "precedes" | undefined {
   return type === "precedes" ? "precedes" : undefined;
+}
+
+function parseOptionalParticipantEntityType(type: string | null): "initiative" | "task" | "calendar_entry" | undefined {
+  return type === "initiative" || type === "task" || type === "calendar_entry" ? type : undefined;
+}
+
+function parseOptionalContactPointType(type: string | null): "email" | "phone" | "whatsapp" | "signal" | "telegram" | "linkedin" | "website" | "other" | undefined {
+  if (
+    type === "email" ||
+    type === "phone" ||
+    type === "whatsapp" ||
+    type === "signal" ||
+    type === "telegram" ||
+    type === "linkedin" ||
+    type === "website" ||
+    type === "other"
+  ) {
+    return type;
+  }
+  return undefined;
+}
+
+function parseOptionalRelationshipStatus(status: string | null): "active" | "inactive" | undefined {
+  return status === "active" || status === "inactive" ? status : undefined;
 }
 
 function parsePlanningCanvasFilters(url: URL) {
@@ -1795,6 +2180,27 @@ function stateEventForMediaLink(operation: string, link: MediaLink | MediaAttach
     entityType: "media_link",
     entityId: link.id,
     ...stateScopeForMediaEntity(link.entityType, link.entityId)
+  };
+}
+
+function stateEventForEntityParticipant(
+  operation: string,
+  participant: { id: number; entityType: "initiative" | "task" | "calendar_entry"; entityId: number }
+): Omit<CreateStateEventInput, "source"> {
+  const scope: Pick<CreateStateEventInput, "initiativeId" | "taskId"> = {};
+  if (participant.entityType === "initiative") {
+    scope.initiativeId = participant.entityId;
+  }
+  if (participant.entityType === "task") {
+    const task = tasks.findById(participant.entityId);
+    scope.taskId = participant.entityId;
+    scope.initiativeId = task?.initiativeId ?? null;
+  }
+  return {
+    operation,
+    entityType: "entity_participant",
+    entityId: participant.id,
+    ...scope
   };
 }
 

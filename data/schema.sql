@@ -191,6 +191,116 @@ create table if not exists media_links (
   unique(asset_id, entity_type, entity_id)
 );
 
+create table if not exists parties (
+  id integer primary key,
+  type text not null check (type in ('person', 'organization')),
+  display_name text not null,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists people (
+  party_id integer primary key references parties(id) on delete cascade,
+  first_name text,
+  last_name text,
+  salutation text not null default 'unknown' check (salutation in ('mr', 'mrs', 'unknown')),
+  academic_title text,
+  name_suffix text,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists organizations (
+  party_id integer primary key references parties(id) on delete cascade,
+  name text not null,
+  legal_name text,
+  organization_type text,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists relationship_types (
+  id integer primary key,
+  key text not null unique,
+  label text not null,
+  inverse_label text,
+  directionality text not null check (directionality in ('directed', 'symmetric')),
+  is_system integer not null default 0 check (is_system in (0, 1)),
+  sort_order integer not null default 0,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists party_relationships (
+  id integer primary key,
+  from_party_id integer not null references parties(id) on delete cascade,
+  to_party_id integer not null references parties(id) on delete cascade,
+  relationship_type_id integer not null references relationship_types(id),
+  role_label text,
+  started_on text,
+  ended_on text,
+  status text not null default 'active' check (status in ('active', 'inactive')),
+  created_at text not null,
+  updated_at text not null,
+  check (from_party_id <> to_party_id),
+  unique(from_party_id, to_party_id, relationship_type_id, role_label, started_on)
+);
+
+create table if not exists participant_role_types (
+  id integer primary key,
+  key text not null unique,
+  label text not null,
+  applies_to_entity_type text check (applies_to_entity_type in ('initiative', 'task', 'calendar_entry')),
+  is_system integer not null default 0 check (is_system in (0, 1)),
+  sort_order integer not null default 0,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists entity_participants (
+  id integer primary key,
+  party_id integer not null references parties(id) on delete cascade,
+  entity_type text not null check (entity_type in ('initiative', 'task', 'calendar_entry')),
+  entity_id integer not null,
+  role_type_id integer references participant_role_types(id),
+  role_label text,
+  is_primary integer not null default 0 check (is_primary in (0, 1)),
+  created_at text not null,
+  updated_at text not null,
+  unique(party_id, entity_type, entity_id, role_type_id, role_label)
+);
+
+create table if not exists party_contact_points (
+  id integer primary key,
+  party_id integer not null references parties(id) on delete cascade,
+  type text not null check (type in ('email', 'phone', 'whatsapp', 'signal', 'telegram', 'linkedin', 'website', 'other')),
+  label text,
+  value text not null,
+  normalized_value text,
+  is_primary integer not null default 0 check (is_primary in (0, 1)),
+  is_preferred integer not null default 0 check (is_preferred in (0, 1)),
+  can_send integer not null default 0 check (can_send in (0, 1)),
+  can_receive integer not null default 0 check (can_receive in (0, 1)),
+  provider text,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists party_addresses (
+  id integer primary key,
+  party_id integer not null references parties(id) on delete cascade,
+  label text,
+  line1 text not null,
+  line2 text,
+  postal_code text,
+  city text,
+  region text,
+  country text,
+  is_primary integer not null default 0 check (is_primary in (0, 1)),
+  created_at text not null,
+  updated_at text not null
+);
+
 create table if not exists app_chat_messages (
   id integer primary key,
   conversation_id integer references app_conversations(id),
@@ -203,13 +313,13 @@ create table if not exists app_chat_messages (
 create table if not exists app_conversations (
   id integer primary key,
   title text,
-  context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'category', 'idea', 'project', 'habit', 'initiative', 'task')),
+  context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations', 'category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization')),
   context_entity_id integer,
   created_at text not null,
   updated_at text not null,
   check (
-    (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives') and context_entity_id is null)
-    or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task') and context_entity_id is not null)
+    (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations') and context_entity_id is null)
+    or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization') and context_entity_id is not null)
   )
 );
 
@@ -218,7 +328,7 @@ create table if not exists app_prompt_logs (
   conversation_id integer references app_conversations(id),
   user_message_id integer references app_chat_messages(id),
   openclaw_session_id text not null,
-  context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'category', 'idea', 'project', 'habit', 'initiative', 'task')),
+  context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations', 'category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization')),
   context_entity_id integer,
   user_input text not null,
   system_instructions text not null,
@@ -229,8 +339,8 @@ create table if not exists app_prompt_logs (
   turn_trace text,
   created_at text not null,
   check (
-    (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives') and context_entity_id is null)
-    or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task') and context_entity_id is not null)
+    (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations') and context_entity_id is null)
+    or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization') and context_entity_id is not null)
   )
 );
 
@@ -238,7 +348,7 @@ create table if not exists app_state_events (
   id integer primary key,
   source text not null check (source in ('api', 'tool')),
   operation text not null,
-  entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link')),
+  entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'party_contact_point', 'party_address')),
   entity_id integer,
   category_id integer,
   initiative_id integer,
@@ -294,6 +404,18 @@ create index if not exists idx_media_assets_kind on media_assets(kind);
 create index if not exists idx_media_assets_sha256 on media_assets(sha256);
 create index if not exists idx_media_links_entity on media_links(entity_type, entity_id, sort_order, id);
 create index if not exists idx_media_links_asset_id on media_links(asset_id);
+create index if not exists idx_parties_type_display_name on parties(type, lower(display_name), id);
+create index if not exists idx_people_last_first on people(lower(last_name), lower(first_name), party_id);
+create index if not exists idx_organizations_name on organizations(lower(name), party_id);
+create index if not exists idx_relationship_types_sort on relationship_types(sort_order, lower(label), id);
+create index if not exists idx_party_relationships_from on party_relationships(from_party_id, status, relationship_type_id, to_party_id);
+create index if not exists idx_party_relationships_to on party_relationships(to_party_id, status, relationship_type_id, from_party_id);
+create index if not exists idx_party_relationships_type_status on party_relationships(relationship_type_id, status, id);
+create index if not exists idx_participant_role_types_sort on participant_role_types(sort_order, lower(label), id);
+create index if not exists idx_entity_participants_entity on entity_participants(entity_type, entity_id, is_primary desc, id);
+create index if not exists idx_entity_participants_party on entity_participants(party_id, entity_type, entity_id);
+create index if not exists idx_party_contact_points_party_type on party_contact_points(party_id, type, is_preferred desc, is_primary desc, id);
+create index if not exists idx_party_addresses_party on party_addresses(party_id, is_primary desc, id);
 create index if not exists idx_app_chat_messages_created_at on app_chat_messages(created_at, id);
 create index if not exists idx_app_chat_messages_conversation_id on app_chat_messages(conversation_id, created_at, id);
 create index if not exists idx_app_conversations_context on app_conversations(context_type, context_entity_id, updated_at);
