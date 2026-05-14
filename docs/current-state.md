@@ -24,8 +24,11 @@ Active interfaces:
 Production deployment is represented in-repo by `Dockerfile` and
 `docker-compose.yml`. The production container runs the built API server, serves
 the Vite build from the same `node:http` server, and starts the OpenClaw
-gateway as a managed subprocess. A host reverse proxy terminates TLS and
-forwards to the localhost-bound compose port.
+gateway as a managed subprocess before running DB migrations and the API. A
+host reverse proxy terminates TLS and forwards to the localhost-bound compose
+port. `DMAX_WEB_DIST_DIR` controls the static build directory; `/assets/*`
+uses immutable one-year cache headers, while `index.html` and SPA fallbacks use
+`Cache-Control: no-cache`.
 
 SQLite is the source of truth. Durable state changes go through tools/API
 services.
@@ -352,8 +355,9 @@ TTS fails.
   not return its final payload reliably.
 - The embedded OpenClaw gateway client loader resolves the installed
   `GatewayClient` export dynamically from global OpenClaw `client-*.js` bundles
-  and supports gateway protocol 3-4. This keeps the app-chat path compatible
-  when OpenClaw changes minified client export names. `OPENCLAW_GATEWAY_CLIENT_MODULE`
+  and supports gateway protocol 3-4. This keeps the app-chat and production
+  startup paths compatible when `openclaw@latest` changes minified client
+  export names or advances the gateway protocol. `OPENCLAW_GATEWAY_CLIENT_MODULE`
   remains available as an explicit override.
 - Local development is started through `npm run dev`. That command warms the
   local OpenClaw gateway first and only then starts the API in watch mode plus
@@ -547,6 +551,12 @@ Implemented behavior:
 
 Implemented in `src/api/server.ts`.
 
+After all explicit API routes, the server handles production static web
+serving. Paths under `/api` remain API-only. Other `GET`/`HEAD` requests first
+try a real file in `DMAX_WEB_DIST_DIR`; missing non-asset paths fall back to
+`index.html` for client-side routing, and missing `/assets/*` paths return
+`404`.
+
 ```text
 GET  /health
 GET  /api/app/overview
@@ -684,6 +694,10 @@ Known issue:
   deeper sync history are still future work.
 - Frontend build uses manual Vite chunks for React, LiveKit, and icons; keep an
   eye on chunk sizes as the browser app grows.
+- Production Docker image size was verified around `1.15GB` on local Docker
+  Desktop after npm/OpenClaw cache cleanup. Most remaining size is
+  `openclaw@latest` and production Node dependencies; treat major image
+  slimming as separate hardening unless VPS disk pressure appears.
 
 ## Environment And Secrets
 
@@ -709,11 +723,20 @@ Last checked on 2026-05-14:
 - `npm run typecheck` passed.
 - `npm test` passed: 28 test files, 115 tests.
 - `npm run web:build` passed without Vite large-chunk warnings.
+- `docker compose build` passed.
+- `docker compose up -d --force-recreate` started the production container.
+- `http://localhost:49415/health` returned `200 {"ok":true}`.
+- `http://localhost:49415/` and an unknown SPA route returned `index.html`.
+- A built `/assets/*.js` response returned immutable long-term cache headers.
 
 ```bash
 npm run typecheck
 npm test
 npm run web:build
+docker compose build
+docker compose up -d --force-recreate
+curl -i http://localhost:49415/health
+curl -I http://localhost:49415/
 OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.local.json" openclaw models status --json
 ```
 

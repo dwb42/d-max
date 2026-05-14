@@ -29,8 +29,8 @@ d-max is Dietrich's agentic initiative, task, relationship, and initiative-memor
 
 ```text
 Telegram d-max-dev -> local OpenClaw -> d-max tools -> local SQLite
-Telegram d-max -> VPS OpenClaw -> d-max tools -> production SQLite
-Browser contextual chat -> d-max API -> OpenClaw local agent -> tools -> SQLite
+Telegram d-max -> VPS d-max Docker container -> OpenClaw subprocess -> d-max tools -> production SQLite
+Browser contextual chat -> d-max API -> OpenClaw subprocess -> tools -> SQLite
 Browser /drive -> LiveKit -> d-max voice agent -> xAI realtime
 ```
 
@@ -76,6 +76,8 @@ for a provider experiment.
 - Browser Drive Mode currently bridges realtime audio only; durable voice tool
   commits are not wired.
 - Add setup/dev/test scripts when needed.
+- Production deploy is single-container Docker Compose behind a reverse proxy:
+  API, static Vite build, and OpenClaw gateway run in one process tree.
 - Never commit secrets, `.env`, provider keys, local SQLite runtime data, or
   OpenClaw auth state.
 

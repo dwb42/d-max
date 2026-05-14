@@ -52,6 +52,7 @@ API, and the embedded OpenClaw gateway process:
 
 ```bash
 cp .env.example .env
+docker compose build
 docker compose up -d
 ```
 
@@ -77,6 +78,19 @@ Persistent runtime data lives in the named volume `dmax-data` mounted at
 `/app/data`. This includes SQLite, uploaded media, Google OAuth token files,
 and OpenClaw runtime state. Database migrations run automatically during
 `npm run start:prod` before the API/web server starts.
+
+Production smoke checks:
+
+```bash
+curl -i http://localhost:${DMAX_HOST_PORT:-49415}/health
+curl -I http://localhost:${DMAX_HOST_PORT:-49415}/
+curl -I http://localhost:${DMAX_HOST_PORT:-49415}/unknown/spa/route
+docker image ls d-max-d-max
+```
+
+The API server serves the Vite build directly. `/assets/*` responses are cached
+with immutable long-term cache headers; `index.html` and SPA fallbacks use
+`Cache-Control: no-cache`.
 
 LiveKit Drive Mode requires `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and
 `LIVEKIT_API_SECRET`. xAI realtime voice requires `XAI_API_KEY`.
@@ -136,6 +150,10 @@ Last context-sync verification: 2026-05-14. The commands below passed locally.
 npm run typecheck
 npm test
 npm run web:build
+docker compose build
+docker compose up -d --force-recreate
+curl -i http://localhost:49415/health
+curl -I http://localhost:49415/
 ```
 
 ## Secrets
