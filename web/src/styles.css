@@ -853,14 +853,14 @@ h1 {
 
 .chat-audio-player {
   display: grid;
-  grid-template-columns: 32px minmax(88px, 1fr) auto;
-  gap: 9px;
+  grid-template-columns: minmax(132px, auto) minmax(96px, 1fr) auto;
+  gap: 12px;
   align-items: center;
   min-width: 240px;
   max-width: 100%;
-  margin-top: 4px;
+  margin-top: 8px;
   border-top: 1px solid rgb(23 33 28 / 10%);
-  padding-top: 8px;
+  padding-top: 10px;
 }
 
 .chat-audio-player.pending,
@@ -875,11 +875,28 @@ h1 {
   display: block;
 }
 
-.chat-audio-player .icon-button {
-  width: 32px;
-  height: 32px;
+.chat-audio-play-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-width: 132px;
+  min-height: 58px;
+  border: 2px solid #101714;
   border-radius: 8px;
-  background: rgb(255 255 255 / 58%);
+  padding: 0 16px;
+  background: #d9f36a;
+  color: #101714;
+  font-size: 14px;
+  font-weight: 900;
+  box-shadow: 0 0 0 4px rgba(217, 243, 106, 0.34), 0 10px 22px rgba(16, 23, 20, 0.14);
+}
+
+.chat-audio-play-button:disabled {
+  border-color: #cfd8d1;
+  background: #eef2ec;
+  color: #7c8781;
+  box-shadow: none;
 }
 
 .chat-audio-player .voice-processing-indicator {
@@ -902,22 +919,53 @@ h1 {
   text-transform: none;
 }
 
-.chat-audio-progress {
-  position: relative;
-  height: 5px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: rgb(23 33 28 / 12%);
+.chat-audio-seek {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  min-width: 96px;
+  height: 36px;
+  margin: 0;
+  accent-color: #27806f;
+  cursor: pointer;
 }
 
-.chat-audio-progress span {
-  position: absolute;
-  inset: 0 auto 0 0;
-  display: block;
-  border-radius: inherit;
-  background: #27806f;
-  opacity: 1;
-  text-transform: none;
+.chat-audio-seek:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.chat-audio-seek::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgb(23 33 28 / 14%);
+}
+
+.chat-audio-seek::-webkit-slider-thumb {
+  width: 28px;
+  height: 28px;
+  margin-top: -10px;
+  border: 2px solid #101714;
+  border-radius: 999px;
+  background: #d9f36a;
+  box-shadow: 0 3px 10px rgba(16, 23, 20, 0.22);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.chat-audio-seek::-moz-range-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgb(23 33 28 / 14%);
+}
+
+.chat-audio-seek::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border: 2px solid #101714;
+  border-radius: 999px;
+  background: #d9f36a;
+  box-shadow: 0 3px 10px rgba(16, 23, 20, 0.22);
 }
 
 .chat-audio-player time {
@@ -1002,16 +1050,16 @@ h1 {
 
 .voice-message-recorder {
   display: flex;
-  gap: 12px;
+  gap: 16px;
   align-items: center;
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  min-height: 58px;
+  min-height: 76px;
   overflow: hidden;
   border: 1px solid #d7ddd5;
   border-radius: 999px;
-  padding: 8px 10px 8px 18px;
+  padding: 9px 14px 9px 20px;
   background: #ffffff;
   box-shadow: 0 8px 24px rgba(16, 23, 20, 0.08);
 }
@@ -1065,13 +1113,31 @@ h1 {
 .voice-message-controls {
   display: flex;
   flex: 0 0 auto;
-  gap: 6px;
+  gap: 24px;
+  align-items: center;
 }
 
 .voice-message-controls .icon-button {
   width: 38px;
   height: 38px;
   border-radius: 12px;
+}
+
+.voice-message-controls .voice-discard-button {
+  width: 48px;
+  height: 48px;
+  border-color: #d9c3c0;
+  background: #fff5f3;
+}
+
+.voice-message-controls .voice-send-button {
+  width: 76px;
+  height: 64px;
+  border: 2px solid #101714;
+  border-radius: 8px;
+  background: #d9f36a;
+  color: #101714;
+  box-shadow: 0 0 0 4px rgba(217, 243, 106, 0.34), 0 10px 22px rgba(16, 23, 20, 0.16);
 }
 
 .voice-processing-indicator {
@@ -1128,6 +1194,23 @@ h1 {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.voice-entry-action {
+  min-height: 56px;
+  border: 2px solid #101714;
+  padding: 0 18px;
+  background: #d9f36a;
+  color: #101714;
+  font-weight: 900;
+  box-shadow: 0 0 0 4px rgba(217, 243, 106, 0.25);
+}
+
+.voice-entry-action:disabled {
+  border-color: #cfd8d1;
+  background: #eef2ec;
+  color: #7c8781;
+  box-shadow: none;
 }
 
 .chat-context {

@@ -728,6 +728,7 @@ export default function App() {
   const [chatBusy, setChatBusy] = useState(false);
   const [chatActivities, setChatActivities] = useState<ChatActivity[]>([]);
   const [chatTurnStartedAt, setChatTurnStartedAt] = useState<number | null>(null);
+  const [chatAutoPlayMessageId, setChatAutoPlayMessageId] = useState<string | null>(null);
   const [activeActivityConversationId, setActiveActivityConversationId] = useState<number | null>(null);
   const [chatVoicePhase, setChatVoicePhase] = useState<ChatVoicePhase>("idle");
   const [chatVoiceLevel, setChatVoiceLevel] = useState(0);
@@ -966,6 +967,9 @@ export default function App() {
     try {
       const updated = chatMessageFromPersisted(await generateChatMessageAudio(messageId));
       setChatMessages((current) => current.map((message) => (message.id === updated.id ? { ...updated, activities: message.activities } : message)));
+      if (updated.audioUrl && updated.audioGenerationStatus === "ready") {
+        setChatAutoPlayMessageId(updated.id);
+      }
     } catch {
       if (!conversationId) {
         setChatMessages((current) =>
@@ -2575,6 +2579,8 @@ export default function App() {
           onConfirmVoiceMessage={() => void confirmChatVoiceMessage()}
           onDiscardVoiceMessage={discardChatVoiceMessage}
           onAbortTurn={abortChatTurn}
+          autoPlayAudioMessageId={chatAutoPlayMessageId}
+          onAutoPlayAudioSettled={() => setChatAutoPlayMessageId(null)}
           onSelectConversation={(conversationId) => void selectContextualConversation(conversationId)}
           onNewChat={() => void startNewContextualConversation()}
           onClose={closeContextualAgent}
@@ -2744,6 +2750,8 @@ function ChatView(props: {
   onConfirmVoiceMessage: () => void;
   onDiscardVoiceMessage: () => void;
   onAbortTurn: () => void;
+  autoPlayAudioMessageId: string | null;
+  onAutoPlayAudioSettled: () => void;
   threadRef: MutableRefObject<HTMLDivElement | null>;
 }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -2770,7 +2778,13 @@ function ChatView(props: {
         {visibleMessages.map((message) => (
           <article key={message.id} className={`chat-message ${message.role}`}>
             <RichText text={message.text} />
-            {message.role === "assistant" && hasChatAudioState(message) ? <ChatAudioPlayer message={message} /> : null}
+            {message.role === "assistant" && hasChatAudioState(message) ? (
+              <ChatAudioPlayer
+                message={message}
+                autoPlay={props.autoPlayAudioMessageId === message.id}
+                onAutoPlaySettled={props.onAutoPlayAudioSettled}
+              />
+            ) : null}
             {message.activities?.length ? <ActivityTrail activities={message.activities} /> : null}
             {message.source ? <span>{message.source === "voice" ? "voice message" : "text"}</span> : null}
           </article>
@@ -2818,11 +2832,11 @@ function ChatView(props: {
           <div className="voice-message-recorder">
             <VoiceMessageWaveform level={props.voiceLevel} active />
             <div className="voice-message-controls">
-              <button type="button" className="icon-button danger" onClick={props.onDiscardVoiceMessage} title="Aufnahme verwerfen">
+              <button type="button" className="icon-button danger voice-discard-button" onClick={props.onDiscardVoiceMessage} title="Aufnahme verwerfen" aria-label="Voice Message Aufnahme abbrechen">
                 <X size={18} />
               </button>
-              <button type="button" className="icon-button confirm" onClick={props.onConfirmVoiceMessage} title="Aufnahme bestätigen">
-                <CheckCircle2 size={18} />
+              <button type="button" className="icon-button confirm voice-send-button" onClick={props.onConfirmVoiceMessage} title="Voice Message abschicken" aria-label="Voice Message abschicken">
+                <CheckCircle2 size={28} />
               </button>
             </div>
           </div>
@@ -2834,8 +2848,8 @@ function ChatView(props: {
         ) : null}
         {!isVoiceActive ? (
           <div className="chat-actions">
-            <button type="button" className="secondary-action compact" onClick={props.onStartVoiceMessage} disabled={props.busy}>
-              <Mic2 size={18} />
+            <button type="button" className="secondary-action compact voice-entry-action" onClick={props.onStartVoiceMessage} disabled={props.busy}>
+              <Mic2 size={22} />
               Voice Message
             </button>
             <button type="submit" className="primary-action compact" disabled={props.busy || !props.draft.trim()}>
@@ -2853,14 +2867,40 @@ function hasChatAudioState(message: ChatMessage): boolean {
   return Boolean(message.audioUrl || message.audioGenerationStatus === "pending" || message.audioGenerationStatus === "failed");
 }
 
-function ChatAudioPlayer(props: { message: ChatMessage }) {
+function ChatAudioPlayer(props: { message: ChatMessage; autoPlay?: boolean; onAutoPlaySettled?: () => void }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const autoPlayAttemptedRef = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState((props.message.audioDurationMs ?? 0) / 1000);
   const status = props.message.audioGenerationStatus ?? "none";
   const canPlay = Boolean(props.message.audioUrl && status === "ready");
-  const progress = duration > 0 ? Math.min(1, currentTime / duration) : 0;
+
+  useEffect(() => {
+    autoPlayAttemptedRef.current = false;
+  }, [props.message.id, props.message.audioUrl]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!props.autoPlay || !audio || !canPlay || autoPlayAttemptedRef.current) {
+      return;
+    }
+
+    autoPlayAttemptedRef.current = true;
+    audio.currentTime = 0;
+    setCurrentTime(0);
+    void audio
+      .play()
+      .then(() => {
+        setPlaying(true);
+      })
+      .catch(() => {
+        setPlaying(false);
+      })
+      .finally(() => {
+        props.onAutoPlaySettled?.();
+      });
+  }, [canPlay, props.autoPlay, props.message.audioUrl, props.onAutoPlaySettled]);
 
   async function togglePlayback() {
     const audio = audioRef.current;
@@ -2882,6 +2922,17 @@ function ChatAudioPlayer(props: { message: ChatMessage }) {
     }
   }
 
+  function seekAudio(nextTime: number) {
+    const audio = audioRef.current;
+    if (!audio || !canPlay || duration <= 0) {
+      return;
+    }
+
+    const boundedTime = Math.min(Math.max(nextTime, 0), duration);
+    audio.currentTime = boundedTime;
+    setCurrentTime(boundedTime);
+  }
+
   if (status === "pending") {
     return (
       <div className="chat-audio-player pending">
@@ -2901,12 +2952,21 @@ function ChatAudioPlayer(props: { message: ChatMessage }) {
 
   return (
     <div className="chat-audio-player">
-      <button type="button" className="icon-button" onClick={() => void togglePlayback()} disabled={!canPlay} title={playing ? "Pause" : "Abspielen"}>
-        {playing ? <Pause size={16} /> : <Play size={16} />}
+      <button type="button" className="chat-audio-play-button" onClick={() => void togglePlayback()} disabled={!canPlay} title={playing ? "Pause" : "Abspielen"} aria-label={playing ? "Sprachantwort pausieren" : "Sprachantwort abspielen"}>
+        {playing ? <Pause size={28} /> : <Play size={28} />}
+        {playing ? "Pause" : "Abspielen"}
       </button>
-      <div className="chat-audio-progress" aria-hidden="true">
-        <span style={{ width: `${progress * 100}%` }} />
-      </div>
+      <input
+        className="chat-audio-seek"
+        type="range"
+        min="0"
+        max={duration > 0 ? duration : 0}
+        step="0.1"
+        value={duration > 0 ? Math.min(currentTime, duration) : 0}
+        disabled={!canPlay || duration <= 0}
+        aria-label="Position der Sprachantwort"
+        onChange={(event) => seekAudio(Number(event.currentTarget.value))}
+      />
       <time>{formatAudioTime(currentTime)}{duration > 0 ? ` / ${formatAudioTime(duration)}` : ""}</time>
       <audio
         ref={audioRef}
@@ -2947,6 +3007,8 @@ function AgentDrawer(props: {
   onConfirmVoiceMessage: () => void;
   onDiscardVoiceMessage: () => void;
   onAbortTurn: () => void;
+  autoPlayAudioMessageId: string | null;
+  onAutoPlayAudioSettled: () => void;
   onSelectConversation: (conversationId: number) => void;
   onNewChat: () => void;
   onClose: () => void;
@@ -3015,6 +3077,8 @@ function AgentDrawer(props: {
         onConfirmVoiceMessage={props.onConfirmVoiceMessage}
         onDiscardVoiceMessage={props.onDiscardVoiceMessage}
         onAbortTurn={props.onAbortTurn}
+        autoPlayAudioMessageId={props.autoPlayAudioMessageId}
+        onAutoPlayAudioSettled={props.onAutoPlayAudioSettled}
         threadRef={props.threadRef}
       />
     </aside>
