@@ -34,6 +34,7 @@ import {
   LayoutGrid,
   Lock,
   LockOpen,
+  Menu,
   Mic,
   Mic2,
   Paperclip,
@@ -394,6 +395,8 @@ const secondaryNavItems: NavItem[] = [
   { id: "drive", label: "Drive", icon: Mic, path: "/drive" }
 ];
 
+const mobileNavItems: NavItem[] = [...primaryNavItems, ...secondaryNavItems];
+
 function routeFromPath(path: string): RouteState {
   const [pathname] = path.split("?");
   const lifeAreaMatch = pathname.match(/^\/categories\/([^/]+)$/) ?? pathname.match(/^\/lebensbereiche\/([^/]+)$/);
@@ -749,6 +752,7 @@ export default function App() {
     return Number.isFinite(parsed) ? Math.min(Math.max(parsed, 420), 820) : 560;
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem("dmax.sidebarCollapsed") === "true");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const chatAudioMeterRef = useRef<AudioMeterHandle | null>(null);
   const chatMediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chatVoiceChunksRef = useRef<BlobPart[]>([]);
@@ -858,6 +862,11 @@ export default function App() {
       window.localStorage.setItem("dmax.sidebarCollapsed", String(next));
       return next;
     });
+  }
+
+  function navigateFromMobileMenu(path: string) {
+    setMobileNavOpen(false);
+    navigate(path);
   }
 
   async function submitChatMessage(text: string, source: "text" | "voice" = "text") {
@@ -1951,12 +1960,27 @@ export default function App() {
             >
               {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
             </button>
+            <button
+              type="button"
+              className="mobile-nav-toggle"
+              aria-label={mobileNavOpen ? "Navigation schließen" : "Navigation öffnen"}
+              title={mobileNavOpen ? "Navigation schließen" : "Navigation öffnen"}
+              aria-expanded={mobileNavOpen}
+              aria-controls="mobile-main-navigation"
+              onClick={() => setMobileNavOpen((current) => !current)}
+            >
+              {mobileNavOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
           </div>
 
           <nav className="nav primary-nav">
             {primaryNavItems.map((item) => renderNavItem(item, view, initiativeDetail, navigate))}
           </nav>
         </div>
+
+        <nav id="mobile-main-navigation" className={`nav mobile-nav ${mobileNavOpen ? "open" : ""}`} aria-label="Hauptnavigation">
+          {mobileNavItems.map((item) => renderNavItem(item, view, initiativeDetail, navigateFromMobileMenu))}
+        </nav>
 
         <nav className="nav secondary-nav">
           {secondaryNavItems.map((item) => renderNavItem(item, view, initiativeDetail, navigate))}
