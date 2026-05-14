@@ -379,7 +379,7 @@ const primaryNavItems: NavItem[] = [
   { id: "ideas", label: "Ideen", icon: Lightbulb, path: "/ideas" },
   { id: "projects", label: "Projekte", icon: Blocks, path: "/projects" },
   { id: "habits", label: "Gewohnheiten", icon: Repeat2, path: "/habits" },
-  { id: "tasks", label: "Massnahmen", icon: ClipboardList, path: "/tasks" },
+  { id: "tasks", label: "Maßnahmen", icon: ClipboardList, path: "/tasks" },
   { id: "people", label: "Personen", icon: Users, path: "/people" },
   { id: "organizations", label: "Organisationen", icon: Building2, path: "/organizations" },
   { id: "calendar", label: "Kalender", icon: CalendarDays, path: "/calendar" },
@@ -530,6 +530,10 @@ function getRouteConversationContext(
 
   if (isCollectionView(route.view)) {
     return { context: { type: route.view }, label: titleForView(route.view) };
+  }
+
+  if (route.view === "tasks") {
+    return { context: { type: "tasks" }, label: titleForView(route.view) };
   }
 
   if (route.view === "lifeAreas") {
@@ -12265,10 +12269,10 @@ function titleForView(view: View): string {
     organizations: "Organisationen",
     organization: "Organisation",
     initiative: "Eintrag",
-    task: "Massnahme",
+    task: "Maßnahme",
     prompts: "Prompt Inspector",
     promptTemplates: "Prompt-Vorlagen",
-    tasks: "Massnahmen"
+    tasks: "Maßnahmen"
   }[view];
 }
 
@@ -12292,7 +12296,7 @@ function subtitleForView(view: View): string {
     task: "Status, Prioritaet, Notizen und Kontext.",
     prompts: "Debug view for d-max prompts sent to OpenClaw.",
     promptTemplates: "Kontextabhängige Vorlagen für DMAX und OpenClaw.",
-    tasks: "Konkrete Massnahmen ueber aktive Eintraege hinweg."
+    tasks: "Konkrete Maßnahmen über aktive Einträge hinweg."
   }[view];
 }
 

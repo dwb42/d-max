@@ -66,7 +66,7 @@ let gatewayAgentWarmupPromise: Promise<void> | null = null;
 let gatewayPrewarmPromise: Promise<void> | null = null;
 let gatewayPrewarmCompletedKey: string | null = null;
 let gatewayPrewarmFailedKey: string | null = null;
-let gatewayClientModulePromise: Promise<OpenClawGatewayClientModule> | null = null;
+let gatewayClientModulePromise: Promise<OpenClawGatewayClientModuleWithPath> | null = null;
 let gatewayConnection: OpenClawGatewayConnection | null = null;
 let gatewayReadyUntil = 0;
 const gatewayProcessExitHandlers = new Set<(exit: OpenClawGatewayProcessExit) => void>();
@@ -107,6 +107,10 @@ export function stopOpenClawGatewayProcess(signal: NodeJS.Signals = "SIGTERM"): 
 
 type OpenClawGatewayClientModule = {
   GatewayClient: new (options: OpenClawGatewayClientOptions) => OpenClawGatewayClient;
+};
+
+type OpenClawGatewayClientModuleWithPath = OpenClawGatewayClientModule & {
+  modulePath: string;
 };
 
 type OpenClawGatewayClientOptions = {
@@ -1761,7 +1765,7 @@ async function getOpenClawGatewayConnection(
     role: "operator",
     scopes: ["operator.admin"],
     minProtocol: 3,
-    maxProtocol: 3,
+    maxProtocol: 4,
     onHelloOk: async () => {
       traceOpenClaw(diagnostics, "openclaw_gateway_ws_hello_ok", { method });
       markOpenClawGatewayReady();
@@ -1820,32 +1824,57 @@ function invalidateOpenClawGatewayConnection(connection: OpenClawGatewayConnecti
 }
 
 async function loadOpenClawGatewayClientModule(): Promise<OpenClawGatewayClientModule> {
-  gatewayClientModulePromise ??= import(pathToFileURL(resolveOpenClawGatewayClientPath()).href).then((module) => ({
-    GatewayClient: module.t as OpenClawGatewayClientModule["GatewayClient"]
-  }));
+  gatewayClientModulePromise ??= (async () => {
+    const candidates = resolveOpenClawGatewayClientCandidates();
+    const errors: string[] = [];
+    for (const candidate of candidates) {
+      try {
+        const module = await import(pathToFileURL(candidate.modulePath).href);
+        const GatewayClient = module[candidate.exportName] as OpenClawGatewayClientModule["GatewayClient"] | undefined;
+        if (typeof GatewayClient === "function") {
+          return {
+            GatewayClient,
+            modulePath: candidate.modulePath
+          };
+        }
+        errors.push(`${candidate.modulePath} export ${candidate.exportName} was not a function`);
+      } catch (error) {
+        errors.push(`${candidate.modulePath}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    throw new Error(`Could not load OpenClaw gateway client module. ${errors.join("; ")}`);
+  })();
   return gatewayClientModulePromise;
 }
 
-function resolveOpenClawGatewayClientPath(): string {
+function resolveOpenClawGatewayClientCandidates(): Array<{ modulePath: string; exportName: string }> {
   const explicitPath = process.env.OPENCLAW_GATEWAY_CLIENT_MODULE;
   if (explicitPath) {
-    return explicitPath;
+    return [
+      { modulePath: explicitPath, exportName: "t" },
+      { modulePath: explicitPath, exportName: "n" },
+      { modulePath: explicitPath, exportName: "GatewayClient" }
+    ];
   }
 
   const globalRoot = execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim();
   const distDir = path.join(globalRoot, "openclaw", "dist");
-  const fileName = readdirSync(distDir).find((name) => {
+  const candidates = readdirSync(distDir).flatMap((name) => {
     if (!/^client-[A-Za-z0-9_-]+\.js$/.test(name)) {
-      return false;
+      return [];
     }
 
-    return readFileSync(path.join(distDir, name), "utf8").includes("GatewayClient as t");
+    const modulePath = path.join(distDir, name);
+    const source = readFileSync(modulePath, "utf8");
+    const exportNames = Array.from(source.matchAll(/GatewayClient as ([A-Za-z_$][A-Za-z0-9_$]*)/g), (match) => match[1]);
+    return exportNames.map((exportName) => ({ modulePath, exportName }));
   });
-  if (!fileName) {
+  if (candidates.length === 0) {
     throw new Error(`Could not locate OpenClaw gateway client module in ${distDir}.`);
   }
 
-  return path.join(distDir, fileName);
+  return candidates;
 }
 
 function runOpenClawJsonProcess(

@@ -18,7 +18,9 @@ Canonical entity detail language is now validated across five entity types:
 
 Core reusable UI primitives have been extracted under `web/src/components/ui`. Party contact/address components have been extracted under `web/src/components/party`.
 
-Phase 20 migrated `/tasks` as the canonical small operational action list reference using `/tasks/:id` plus the project, idea, habit and general list references. The current recommended next step is a **list-page consolidation/review pass** across all canonical list pages before moving into calendar/timeline/planning, utility/debug routes or broad `App.tsx` cleanup.
+Phase 21 consolidated the canonical list-page system across `/categories`, `/people`, `/organizations`, `/projects`, `/ideas`, `/habits` and `/tasks`. The migrated list pages now share a stable scan-first anatomy, compact row model, hidden-by-default create flows, lightweight search where present and drawer-safe behavior.
+
+Phase 22 reviewed worktree hygiene, refactor boundaries, package/Playwright state and next-surface readiness. The current recommended next step is a narrow `App.tsx` decomposition pass for the stabilized canonical list pages before starting a new major UI surface.
 
 Do not start calendar/timeline/planning, utility/debug pages, or broad `App.tsx` cleanup before explicit scope.
 
@@ -53,6 +55,8 @@ Do not start calendar/timeline/planning, utility/debug pages, or broad `App.tsx`
 | Phase 18: idea list migration | complete | Migrated `/ideas` to the canonical list-page pattern as the first exploratory/action list reference. Removed the always-visible create form, added a calm page-level create action and `EditModal`, added simple search, rendered ideas through `EntityListPage`/`EntityList`/`EntityListItem`, showed status/category and short context compactly, and added drawer-safe list behavior. | `web/src/App.tsx`, `web/src/styles.css`, `docs/ui/UI_REFERENCE_REVIEW_IDEA_LIST.md`, `docs/ui/screenshots/reference-idea-list/` | Validation passed: `npm run typecheck`, `npm run web:build`, `npm test` on 2026-05-14. Idea maturity/conversion/scoring are not shown because they are not available in the current list data. |
 | Phase 19: habit list migration | complete | Migrated `/habits` to the canonical list-page pattern as the first routine/action list reference. Removed the always-visible create form, added a calm page-level create action and `EditModal`, added simple search, rendered habits through `EntityListPage`/`EntityList`/`EntityListItem`, showed status/category and short context compactly, kept task counts only when present, and added drawer-safe list behavior. | `web/src/App.tsx`, `web/src/styles.css`, `docs/ui/UI_REFERENCE_REVIEW_HABIT_LIST.md`, `docs/ui/screenshots/reference-habit-list/` | Validation passed: `npm run typecheck`, `npm run web:build`, `npm test` on 2026-05-14. Habit frequency/streak/recurrence semantics were intentionally not invented. |
 | Phase 20: task list migration | complete | Migrated `/tasks` to the canonical list-page pattern as the small operational action list reference. Added a calm page-level create action and `EditModal`, added simple search, rendered tasks through `EntityListPage`/`EntityList`/`EntityListItem`, showed title/status/priority/due date/parent context compactly, preserved status toggle/delete behavior as calm row actions, and added drawer-safe list behavior. | `web/src/App.tsx`, `web/src/styles.css`, `web/src/components/ui/EntityListPage.tsx`, `docs/ui/UI_REFERENCE_REVIEW_TASK_LIST.md`, `docs/ui/screenshots/reference-task-list/` | Validation passed: `npm run typecheck`, `npm run web:build`, `npm test` on 2026-05-14. The overview API provides open tasks only; completed task archive/filtering remains deferred. |
+| Phase 21: list-page consolidation and regression review | complete | Reviewed all migrated canonical list pages as one system. Fixed task list/product label drift from `Massnahmen` to `Maßnahmen`, fixed `/tasks` collection DMAX context so the drawer no longer opens as `Global Chat`, added accessible open labels to openable `EntityListItem` rows without row actions, documented the final list-page system and refreshed consolidated screenshots. | `web/src/App.tsx`, `web/src/components/ui/EntityListPage.tsx`, `docs/ui/UI_REFERENCE_REVIEW_LIST_PAGE_SYSTEM.md`, `docs/ui/UI_REFACTOR_HANDOVER.md`, `docs/ui/UI_COMPONENTS.md`, `docs/ui/UI_PATTERNS.md`, `docs/ui/UI_REVIEW_CHECKLIST.md`, `docs/ui/screenshots/list-page-system-review/` | Validation passed: `npm run typecheck`, `npm run web:build`, `npm test` on 2026-05-14. No new route migration. |
+| Phase 22: worktree hygiene and boundary review | complete | Classified the current worktree, confirmed package/Playwright state, identified unrelated non-UI `src/chat/openclaw-agent.ts` changes, reviewed `App.tsx` extraction risks and documented deferred boundaries before the next major surface. | `docs/ui/UI_PHASE_22_WORKTREE_HYGIENE.md`, `docs/ui/UI_REFACTOR_HANDOVER.md` | Validation passed: `npm run typecheck`, `npm run web:build`, `npm test` on 2026-05-14. No route migration and no app code changes for Phase 22. |
 
 ## 3. Current Canonical UI Principles
 
@@ -93,6 +97,7 @@ Do not start calendar/timeline/planning, utility/debug pages, or broad `App.tsx`
 | `/ideas` | Exploratory/action list page reference | Ready as canonical exploratory/action list reference after Phase 18 migration. |
 | `/habits` | Habit/routine list page reference | Ready as canonical habit/routine list reference after Phase 19 migration. |
 | `/tasks` | Task/action list page reference | Ready as canonical task/action list reference after Phase 20 migration. |
+| Entity list-page system | Cross-route list reference | Ready as canonical list-page system after Phase 21 consolidation. |
 
 ## 5. Extracted Shared Components
 
@@ -143,13 +148,13 @@ Deferred components/helpers:
 | `/people/:id` | migrated | Uses canonical detail and party components; sparse data. | `docs/ui/UI_REFERENCE_REVIEW_PERSON_DETAIL.md` | `docs/ui/screenshots/reference-person-detail/` | Revalidate with populated contact/relation data later. |
 | `/tasks/:id` | migrated/reference | Ready as canonical action-object reference. Notes appear before checklist; header facts are status/priority/due date; parent context stays in lower context/metadata; empty checklist/participant states are lightweight; participant add flow opens in `EditModal`. | `docs/ui/UI_REFERENCE_REVIEW_TASK_DETAIL.md` | `docs/ui/screenshots/reference-task-detail/`, `docs/ui/screenshots/reference-task-detail-hardening/` | No immediate migration work; only fix regressions if shared components change. |
 | `/categories/:name` | migrated/reference | Ready as canonical life-area/category reference. Category name is dominant; description/context is primary; projects, ideas, habits and derived tasks render as lightweight related work; metadata is secondary. | `docs/ui/UI_REFERENCE_REVIEW_CATEGORY_DETAIL.md` | `docs/ui/screenshots/reference-category-detail/` | No immediate migration work; only fix regressions if shared components change. |
-| `/categories` | migrated/reference | First canonical list-page reference. Scan-first category rows; compact counts; create action opens `EditModal`; drawer-safe list behavior. | `docs/ui/UI_REFERENCE_REVIEW_CATEGORY_LIST.md` | `docs/ui/screenshots/reference-category-list/` | Use as first list reference for the next simple list migration. |
-| `/organizations` | migrated/reference | Organization/contact list reference. Scan-first rows; simple search; create action opens `EditModal`; drawer-safe list behavior. | `docs/ui/UI_REFERENCE_REVIEW_ORGANIZATION_LIST.md` | `docs/ui/screenshots/reference-organization-list/` | Use as organization/contact list reference for action/planning list migrations. |
-| `/people` | migrated/reference | Person/contact list reference. Scan-first rows; simple search; create action opens `EditModal`; drawer-safe list behavior. | `docs/ui/UI_REFERENCE_REVIEW_PERSON_LIST.md` | `docs/ui/screenshots/reference-person-list/` | Use as contact/context list reference for `/organizations`. |
-| `/projects` | migrated/reference | Project/action list reference. Scan-first rows; simple search; create action opens `EditModal`; status/phase/category/date and task counts are compact secondary facts. | `docs/ui/UI_REFERENCE_REVIEW_PROJECT_LIST.md` | `docs/ui/screenshots/reference-project-list/` | Use as action/planning list reference for `/tasks`. |
-| `/ideas` | migrated/reference | Exploratory/action list reference. Scan-first rows; simple search; create action opens `EditModal`; status/category and short context are compact secondary facts. | `docs/ui/UI_REFERENCE_REVIEW_IDEA_LIST.md` | `docs/ui/screenshots/reference-idea-list/` | Use as exploratory/action list reference for `/tasks`. |
-| `/habits` | migrated/reference | Habit/routine list reference. Scan-first rows; simple search; create action opens `EditModal`; status/category and short context are compact secondary facts; task count appears only when present. | `docs/ui/UI_REFERENCE_REVIEW_HABIT_LIST.md` | `docs/ui/screenshots/reference-habit-list/` | Use as routine/action list reference for `/tasks`. |
-| `/tasks` | migrated/reference | Task/action list reference. Scan-first rows; simple search; create action opens `EditModal`; status/priority/due date and parent context are compact secondary facts; status toggle/delete remain calm row actions. | `docs/ui/UI_REFERENCE_REVIEW_TASK_LIST.md` | `docs/ui/screenshots/reference-task-list/` | Include in list-page consolidation/review pass. |
+| `/categories` | migrated/reference | First canonical list-page reference. Scan-first category rows; compact counts; create action opens `EditModal`; drawer-safe list behavior. | `docs/ui/UI_REFERENCE_REVIEW_CATEGORY_LIST.md` | `docs/ui/screenshots/reference-category-list/` | Stable; only fix regressions from shared list primitive changes. |
+| `/organizations` | migrated/reference | Organization/contact list reference. Scan-first rows; simple search; create action opens `EditModal`; drawer-safe list behavior. | `docs/ui/UI_REFERENCE_REVIEW_ORGANIZATION_LIST.md` | `docs/ui/screenshots/reference-organization-list/` | Stable; only fix regressions from shared list primitive changes. |
+| `/people` | migrated/reference | Person/contact list reference. Scan-first rows; simple search; create action opens `EditModal`; drawer-safe list behavior. | `docs/ui/UI_REFERENCE_REVIEW_PERSON_LIST.md` | `docs/ui/screenshots/reference-person-list/` | Stable; only fix regressions from shared list primitive changes. |
+| `/projects` | migrated/reference | Project/action list reference. Scan-first rows; simple search; create action opens `EditModal`; status/phase/category/date and task counts are compact secondary facts. | `docs/ui/UI_REFERENCE_REVIEW_PROJECT_LIST.md` | `docs/ui/screenshots/reference-project-list/` | Stable; only fix regressions from shared list primitive changes. |
+| `/ideas` | migrated/reference | Exploratory/action list reference. Scan-first rows; simple search; create action opens `EditModal`; status/category and short context are compact secondary facts. | `docs/ui/UI_REFERENCE_REVIEW_IDEA_LIST.md` | `docs/ui/screenshots/reference-idea-list/` | Stable; only fix regressions from shared list primitive changes. |
+| `/habits` | migrated/reference | Habit/routine list reference. Scan-first rows; simple search; create action opens `EditModal`; status/category and short context are compact secondary facts; task count appears only when present. | `docs/ui/UI_REFERENCE_REVIEW_HABIT_LIST.md` | `docs/ui/screenshots/reference-habit-list/` | Stable; only fix regressions from shared list primitive changes. |
+| `/tasks` | migrated/reference | Task/action list reference. Scan-first rows; simple search; create action opens `EditModal`; status/priority/due date and parent context are compact secondary facts; status toggle/delete remain calm row actions. | `docs/ui/UI_REFERENCE_REVIEW_TASK_LIST.md` | `docs/ui/screenshots/reference-task-list/`, `docs/ui/screenshots/list-page-system-review/` | Stable; only fix regressions from shared list primitive changes. |
 | `/calendar` | deferred | Time surface intentionally not redesigned. | audit/debt docs | current screenshots | Defer to time/calendar/planning phase. |
 | `/calendar/timeline` | deferred | Time surface intentionally not redesigned. | audit/debt docs | current screenshots | Defer to time/calendar/planning phase. |
 | `/planning-canvas` | deferred | Time/planning surface intentionally not redesigned. | audit/debt docs | current screenshots | Defer to time/calendar/planning phase. |
@@ -226,6 +231,8 @@ Important review docs:
 - `docs/ui/UI_REFERENCE_REVIEW_IDEA_LIST.md`
 - `docs/ui/UI_REFERENCE_REVIEW_HABIT_LIST.md`
 - `docs/ui/UI_REFERENCE_REVIEW_TASK_LIST.md`
+- `docs/ui/UI_REFERENCE_REVIEW_LIST_PAGE_SYSTEM.md`
+- `docs/ui/UI_PHASE_22_WORKTREE_HYGIENE.md`
 
 Important screenshot directories:
 
@@ -248,6 +255,7 @@ Important screenshot directories:
 - `docs/ui/screenshots/reference-idea-list/`
 - `docs/ui/screenshots/reference-habit-list/`
 - `docs/ui/screenshots/reference-task-list/`
+- `docs/ui/screenshots/list-page-system-review/`
 
 ## 11. Known Limitations
 
@@ -318,60 +326,21 @@ Current completion status:
 
 Do not start calendar/timeline/planning, utility/debug routes or broad `App.tsx` cleanup before explicit scope.
 
-## 14. Exact Next Prompt / Task Suggestion
+## 14. Recommended Next Phase
 
-```text
-DMAX UI Stabilization — Phase 21: Consolidate Canonical List Pages Before New Surface Classes
+Phase 22 recommends a narrow `App.tsx` decomposition pass for the stabilized canonical list pages before starting a new major UI surface.
 
-Read:
-- AGENTS.md
-- docs/ui/UI_REFACTOR_HANDOVER.md
-- docs/ui/UI_PRINCIPLES.md
-- docs/ui/UI_PATTERNS.md
-- docs/ui/UI_COMPONENTS.md
-- docs/ui/UI_DESIGN_DECISIONS.md
-- docs/ui/UI_REVIEW_CHECKLIST.md
-- docs/ui/UI_ENTITY_DETAIL_CANONICAL_PATTERN.md
-- docs/ui/UI_REFERENCE_REVIEW_CATEGORY_LIST.md
-- docs/ui/UI_REFERENCE_REVIEW_PERSON_LIST.md
-- docs/ui/UI_REFERENCE_REVIEW_ORGANIZATION_LIST.md
-- docs/ui/UI_REFERENCE_REVIEW_PROJECT_LIST.md
-- docs/ui/UI_REFERENCE_REVIEW_IDEA_LIST.md
-- docs/ui/UI_REFERENCE_REVIEW_HABIT_LIST.md
-- docs/ui/UI_REFERENCE_REVIEW_TASK_LIST.md
-- docs/ui/UI_REFERENCE_REVIEW_TASK_DETAIL.md
-- docs/ui/UI_REFERENCE_REVIEW_INITIATIVE_PROJECT_DETAIL.md
+Recommended scope:
 
-Inspect first:
-- git status and current diffs
-- web/src/App.tsx
-- web/src/styles.css
-- web/src/components/ui/EntityListPage.tsx
-- web/src/api.ts
-- web/src/types.ts
-- /categories route implementation
-- /people route implementation
-- /organizations route implementation
-- /projects route implementation
-- /ideas route implementation
-- /habits route implementation
-- /tasks route implementation
+- Extract only migrated list route components and their create modals.
+- Preserve all behavior, APIs, schemas, drawer behavior and routes.
+- Do not extract detail pages in the same phase.
+- Do not introduce new UI primitives.
 
-Continue from the current dirty worktree. Do not revert unrelated or user/session changes.
+Alternative next phases remain valid if product priority changes:
 
-Scope:
-- Review and consolidate the migrated canonical list pages only.
-- Compare header actions, search toolbar behavior, row density, empty states, drawer-safe behavior and documentation consistency.
-- Apply small consistency fixes only where they are clearly shared-list polish.
-- Do not start a new surface class or broad App.tsx cleanup.
-
-Do not change schema, APIs or dependencies.
-Do not redesign calendar, timeline, planning canvas, config, prompts or the app shell.
-
-Run npm run typecheck, npm run web:build, npm test.
-Capture only screenshots needed to document any consolidation changes.
-Update the handover and relevant list review docs.
-```
+- calendar/timeline/planning surfaces;
+- config/prompts/debug containment.
 
 ## 15. Files A New Session Must Read First
 
@@ -387,6 +356,8 @@ Update the handover and relevant list review docs.
 - `docs/ui/UI_REFERENCE_REVIEW_INITIATIVE_PROJECT_DETAIL.md`
 - `docs/ui/UI_REFERENCE_REVIEW_PERSON_DETAIL.md`
 - `docs/ui/UI_REFERENCE_REVIEW_TASK_DETAIL.md`
+- `docs/ui/UI_REFERENCE_REVIEW_LIST_PAGE_SYSTEM.md`
+- `docs/ui/UI_PHASE_22_WORKTREE_HYGIENE.md`
 - `docs/ui/UI_REFACTOR_HANDOVER.md`
 - `web/src/App.tsx`
 - `web/src/styles.css`
@@ -421,9 +392,9 @@ npm test
 
 Latest known validation:
 
-- `npm run typecheck`: passed on 2026-05-14 after Phase 20.
-- `npm run web:build`: passed on 2026-05-14 after Phase 20.
-- `npm test`: passed on 2026-05-14 after Phase 20, 28 test files / 115 tests.
+- `npm run typecheck`: passed on 2026-05-14 after Phase 22.
+- `npm run web:build`: passed on 2026-05-14 after Phase 22.
+- `npm test`: passed on 2026-05-14 after Phase 22, 28 test files / 115 tests.
 
 Screenshot validation expectations:
 
@@ -433,55 +404,35 @@ Screenshot validation expectations:
 
 ## 18. Git Status Summary
 
-Current observed `git status --short` includes tracked modifications and untracked files from multiple UI phases.
+Before Phase 21, Phase 20 had been committed and pushed as `104a78b`. Voice/audio UI work was committed separately as `a9c52d9`.
 
-Tracked modified files observed:
+Current UI-related worktree changes:
 
-- `docs/ui/UI_COMPONENTS.md`
-- `docs/ui/UI_DESIGN_DECISIONS.md`
-- `docs/ui/UI_PATTERNS.md`
-- `docs/ui/UI_PRINCIPLES.md`
-- `docs/ui/UI_REFERENCE_REVIEW_ORGANIZATION_DETAIL.md`
-- `docs/ui/UI_REVIEW_CHECKLIST.md`
-- `package.json`
-- `package-lock.json`
 - `web/src/App.tsx`
-- `web/src/styles.css`
-
-Untracked files/directories observed:
-
-- `docs/ui/UI_COMPONENT_EXTRACTION_PLAN.md`
-- `docs/ui/UI_ENTITY_DETAIL_CANONICAL_PATTERN.md`
+- `web/src/components/ui/EntityListPage.tsx`
+- `docs/ui/UI_COMPONENTS.md`
+- `docs/ui/UI_PATTERNS.md`
+- `docs/ui/UI_REVIEW_CHECKLIST.md`
 - `docs/ui/UI_REFACTOR_HANDOVER.md`
-- `docs/ui/UI_REFERENCE_REVIEW_CATEGORY_LIST.md`
-- `docs/ui/UI_REFERENCE_REVIEW_PERSON_LIST.md`
-- `docs/ui/UI_REFERENCE_REVIEW_ORGANIZATION_LIST.md`
-- `docs/ui/UI_REFERENCE_REVIEW_PROJECT_LIST.md`
-- `docs/ui/UI_REFERENCE_REVIEW_IDEA_LIST.md`
-- `docs/ui/UI_REFERENCE_REVIEW_HABIT_LIST.md`
-- `docs/ui/UI_REFERENCE_REVIEW_TASK_LIST.md`
-- `docs/ui/UI_REFERENCE_REVIEW_CATEGORY_DETAIL.md`
-- `docs/ui/UI_REFERENCE_REVIEW_PERSON_DETAIL.md`
-- `docs/ui/UI_REFERENCE_REVIEW_TASK_DETAIL.md`
-- `docs/ui/screenshots/contact-address-extraction/`
-- `docs/ui/screenshots/entity-component-extraction/`
-- `docs/ui/screenshots/reference-category-list/`
-- `docs/ui/screenshots/reference-person-list/`
-- `docs/ui/screenshots/reference-organization-list/`
-- `docs/ui/screenshots/reference-project-list/`
-- `docs/ui/screenshots/reference-idea-list/`
-- `docs/ui/screenshots/reference-habit-list/`
-- `docs/ui/screenshots/reference-task-list/`
-- `docs/ui/screenshots/reference-category-detail/`
-- `docs/ui/screenshots/reference-person-detail/`
-- `docs/ui/screenshots/reference-task-detail/`
-- `docs/ui/screenshots/reference-task-detail-hardening/`
-- `docs/ui/screenshots/relationship-section-simplification/`
-- `web/src/components/`
+- `docs/ui/UI_REFERENCE_REVIEW_LIST_PAGE_SYSTEM.md`
+- `docs/ui/UI_PHASE_22_WORKTREE_HYGIENE.md`
+- `docs/ui/screenshots/list-page-system-review/`
 
-The handover, list/detail review docs and several screenshot/component paths are still untracked until added.
+Current non-UI / unknown worktree change:
 
-Important: do not assume a clean worktree. Inspect `git diff` and `git status --short` before new edits. Do not revert existing changes unless explicitly requested.
+- `Dockerfile`
+- `README.md`
+- `docs/current-state.md`
+- `docs/ui/UI_ROUTE_INVENTORY.md`
+- `src/chat/openclaw-agent.ts`
+
+Package files:
+
+- `package.json`: no current diff.
+- `package-lock.json`: no current diff.
+- `@playwright/test` is already present from commit `104a78b`.
+
+Important: inspect `git diff` and `git status --short` before new edits. Do not revert existing changes unless explicitly requested.
 
 ## 19. Handoff Summary In 20 Bullets Or Fewer
 
@@ -501,7 +452,7 @@ Important: do not assume a clean worktree. Inspect `git diff` and `git status --
 14. `/ideas` is migrated and ready as the canonical exploratory/action list reference after Phase 18.
 15. `/habits` is migrated and ready as the canonical habit/routine list reference after Phase 19.
 16. `/tasks` is migrated and ready as the canonical task/action list reference after Phase 20.
-17. Task hardening screenshots are under `docs/ui/screenshots/reference-task-detail-hardening/`.
-18. Category/person/organization/project/idea/habit/task list screenshots are under their `docs/ui/screenshots/reference-*-list/` directories.
-19. Next recommended phase is list-page consolidation/review before starting new surface classes.
-20. Worktree is dirty with many UI-phase changes; inspect status before editing.
+17. Phase 21 consolidated `/categories`, `/people`, `/organizations`, `/projects`, `/ideas`, `/habits` and `/tasks` into a ready canonical list-page system.
+18. List system screenshots are under `docs/ui/screenshots/list-page-system-review/`.
+19. Next recommended phase is narrow `App.tsx` decomposition for canonical list pages, unless product priority calls for calendar/planning or utility/debug containment first.
+20. Inspect status before editing and avoid unrelated route or schema work.

@@ -21,7 +21,9 @@ WORKDIR /app
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates lsof \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install -g openclaw@latest
+  && npm install -g openclaw@latest \
+  && npm cache clean --force \
+  && rm -rf /root/.npm /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/man /usr/local/lib/node_modules/openclaw/docs
 
 COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/node_modules ./node_modules

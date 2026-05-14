@@ -156,23 +156,23 @@ Primary purpose: contextual chat with persisted conversations and voice-message 
 
 Primary entity type: route-derived `ConversationContext`.
 
-Main components used: `DmaxAgentButton`, `AgentDrawer`, `ChatView`, `ActivityTrail`, `VoiceMessageWaveform`, `VoiceProcessingIndicator`, `ResizeHandle`.
+Main components used: `DmaxAgentButton`, `AgentDrawer`, `ChatView`, `ActivityTrail`, `ChatAudioPlayer`, `VoiceMessageWaveform`, `VoiceProcessingIndicator`, `ResizeHandle`.
 
 Surface type: drawer/context panel.
 
 Current layout structure: right-side `.agent-drawer` with header/actions, optional old-chat list, `ChatView` thread and composer. Width is resizable via `ResizeHandle`.
 
-Current editing pattern: chat text composer, voice recording/transcribing controls, old conversation selection, new chat action.
+Current editing pattern: chat text composer, voice recording/transcribing controls, assistant audio playback/seeking for TTS replies, old conversation selection, new chat action.
 
 Current relationship display pattern: route context determines conversation context and label; old conversations are listed by title and timestamp.
 
 Current metadata display pattern: chat activity trail shows tool/activity status; OpenClaw status shown in agent button.
 
-Current action placement pattern: drawer header has old chats, new chat and close actions; composer has voice and send actions; pending assistant message has abort button.
+Current action placement pattern: drawer header has old chats, new chat and close actions; composer has voice and send actions; active voice recording separates the large send action from the smaller discard action; pending assistant message has abort button; generated audio replies show a large Play/Pause control plus seek slider inside the assistant message.
 
 Empty state handling: old chat list shows `Keine alten Chats`; chat has a welcome assistant message initialized in state.
 
-Loading state handling: pending assistant message displays loading dots and elapsed time; voice transcribing displays processing indicator.
+Loading state handling: pending assistant message displays loading dots and elapsed time; voice transcribing displays processing indicator; pending TTS audio replies show an inline audio-generation indicator.
 
 Error state handling: stream/transcription errors are represented in chat state or top-level error handling depending on caller.
 

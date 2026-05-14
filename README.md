@@ -103,7 +103,9 @@ Stored analysis text can be edited in the media modal, and media analysis can
 be regenerated with an optional user focus prompt. OpenClaw/app chat receives
 media metadata and derived text, not raw file bytes.
 Chat Drawer voice-input replies can additionally generate stored TTS audio via
-`OPENAI_TTS_MODEL` and `OPENAI_TTS_VOICE`.
+`OPENAI_TTS_MODEL` and `OPENAI_TTS_VOICE`; the drawer keeps the text reply,
+shows a touch-friendly audio player with seeking, and attempts autoplay after
+generation when browser policy allows it.
 
 ## OpenClaw Checks
 

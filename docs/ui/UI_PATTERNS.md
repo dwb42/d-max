@@ -102,6 +102,7 @@ Phase 17 validates the same structure for `/projects` as the first action/planni
 Phase 18 validates the same structure for `/ideas` as the first exploratory/action list page.
 Phase 19 validates the same structure for `/habits` as the first routine/action list page.
 Phase 20 validates the same structure for `/tasks` as the small operational action list page.
+Phase 21 confirms the migrated list pages as a coherent canonical list-page system.
 
 ### Structure
 
@@ -205,6 +206,14 @@ For `/tasks`, the canonical reference adds:
 - no checklist/progress indicators unless the list data already provides them;
 - simple search as a lightweight list toolbar;
 - `EditModal` for creation rather than an always-visible form.
+
+System-level consolidation rules after Phase 21:
+
+- Use the same top-level rhythm across all migrated entity lists: page title, one calm create action where supported, optional lightweight search, then compact rows.
+- Keep create flows hidden behind the page-level action and use `EditModal` for the current compact create forms.
+- Keep row navigation predictable. If row actions are present, the main row content remains the openable area; if no row actions are present, the row itself may be openable.
+- Leading row actions are reserved for small high-frequency state controls such as task completion. Trailing row actions are reserved for calm secondary row commands.
+- Do not extract `SearchFilterRow` until search/filter behavior becomes shared enough to remove real duplication.
 
 ## 3. Editing pattern
 

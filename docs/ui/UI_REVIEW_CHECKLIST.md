@@ -153,6 +153,20 @@ Before marking the task complete, the agent should report:
 5. Any remaining visual uncertainty.
 6. Any intentional deviation from the design system.
 
+## 17. Entity List Consolidation
+
+For migrated list pages, also verify:
+
+- The page title and primary create action use consistent product language.
+- Create forms are not visible by default.
+- Search, when present, is compact and does not become a filter dashboard.
+- Row titles/names carry the row.
+- Secondary facts are limited, ordered and useful.
+- Description previews are contained.
+- Row actions do not break row navigation.
+- Leading/trailing row actions have accessible names.
+- Drawer-open and narrow-viewport states keep the list readable.
+
 ## Fast pass/fail rules
 
 Fail the UI review if any of these are true:

@@ -83,7 +83,12 @@ export function EntityListItem(props: {
 
   if (props.onOpen) {
     return (
-      <button type="button" className="entity-list-item entity-list-item-button" onClick={props.onOpen}>
+      <button
+        type="button"
+        className="entity-list-item entity-list-item-button"
+        onClick={props.onOpen}
+        aria-label={props.openLabel ?? `${props.title} öffnen`}
+      >
         {content}
       </button>
     );

@@ -286,6 +286,11 @@ Assistant messages can now carry optional generated-audio status metadata:
 audio files are stored as normal `media_assets` and linked back to the assistant
 message through `media_links.entity_type = app_chat_message` with role
 `assistant_audio`; the message stores status, not a raw filesystem path.
+`POST /api/chat/messages/:id/audio` is the idempotent assistant-message TTS
+entrypoint. It generates audio only for a final persisted assistant message,
+stores the binary through the media-asset pipeline, returns the normal chat
+message API shape with `audioAttachment`, and leaves the text reply intact if
+TTS fails.
 
 ## Runtime And Provider State
 
@@ -345,6 +350,11 @@ message through `media_links.entity_type = app_chat_message` with role
 - The API server warms the local OpenClaw gateway on startup. App chat also
   watches the OpenClaw session file as a fallback when the gateway request does
   not return its final payload reliably.
+- The embedded OpenClaw gateway client loader resolves the installed
+  `GatewayClient` export dynamically from global OpenClaw `client-*.js` bundles
+  and supports gateway protocol 3-4. This keeps the app-chat path compatible
+  when OpenClaw changes minified client export names. `OPENCLAW_GATEWAY_CLIENT_MODULE`
+  remains available as an explicit override.
 - Local development is started through `npm run dev`. That command warms the
   local OpenClaw gateway first and only then starts the API in watch mode plus
   the Vite web app; it starts the Drive voice agent too when LiveKit env vars
@@ -393,8 +403,11 @@ Implemented behavior:
 - Chat audio replies MVP: when a turn starts from a Chat Drawer voice message,
   the assistant text reply is still shown first, then the browser requests TTS
   for the final persisted assistant message. The audio reply is stored as a
-  media asset linked to that chat message and displayed as a manual Play/Pause
-  player. Autoplay is intentionally not enabled in the MVP.
+  media asset linked to that chat message and displayed with a large
+  touch-friendly Play/Pause control, time display, and seek slider. After TTS
+  generation succeeds, the browser attempts one autoplay of that reply; browser
+  autoplay policy may block it, in which case the manual player remains the
+  fallback.
 - App chat rejects concurrent turns in the same conversation before persisting
   a duplicate user message.
 - App refreshes data after mutations and via polling; normal navigation should
@@ -694,7 +707,7 @@ data.
 Last checked on 2026-05-14:
 
 - `npm run typecheck` passed.
-- `npm test` passed: 27 test files, 112 tests.
+- `npm test` passed: 28 test files, 115 tests.
 - `npm run web:build` passed without Vite large-chunk warnings.
 
 ```bash

@@ -73,6 +73,7 @@ Current implementation status:
 - `EntityList` provides the repeated-item list body.
 - `EntityListItem` provides the first reusable scan row/card shape and is now validated for category rows, sparse person rows, organization rows, project/action rows, idea/exploratory rows, habit/routine rows and task/action rows.
 - `EntityListItem` supports a separate leading row action and trailing actions when a row must remain openable while preserving calm row-level actions, as validated by `/tasks`.
+- Openable `EntityListItem` rows must expose an accessible open label through `openLabel` or the default title-derived label.
 - `PageHeader` and `SearchFilterRow` remain conceptual until a list route needs them as extracted primitives.
 
 ### `SearchFilterRow`
