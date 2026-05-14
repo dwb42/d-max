@@ -12,8 +12,10 @@ This file defines where Markdown-based memory and configuration belongs.
 | `AGENTS.md` | Codex working rules for this repo | Inspection rules, architecture boundaries, engineering constraints | User-facing agent personality, long product docs |
 | `docs/current-state.md` | Implemented-state source of truth | Current runtime, routes, schema, API surface, known hardening | Aspirational plans, historical decisions |
 | `docs/agent/` | Agent context, prompt, budgeting, response-contract, and acceptance docs | Current agent context architecture plus dated research/acceptance records | Raw prompt logs, secrets, runtime session files, or user-specific chat transcripts |
-| `docs/ui/` | Canonical frontend UI governance | UI principles, patterns, copy language, information architecture, component rules, and review checklists | One-off route hacks, transient visual experiments, or implementation notes that belong in code |
-| `docs/app-ui-plan.md` | Active UI notes | Current UI direction and near-term UI work | Implemented-state duplication |
+| `docs/ui/` | Active frontend UI governance | Current UI state, principles, patterns, component rules, and review checklist | Completed UI refactor phase history, screenshot audits, or route inventories |
+| `docs/ui/archive/completed-ui-refactor/` | Historical UI refactor archive | Completed UI phase plans, route reviews, screenshots, inventories, and migration rationale | Default coding-agent context or current UI instructions |
+| `docs/architecture/` | Forward-looking technical architecture plans | Current recommended workstreams, technical sequencing, and implementation phase plans | Implemented-state source of truth or stale phase handoffs |
+| `docs/app-ui-plan.md` | Active UI notes | Concise UI direction and links to current UI/architecture planning | Implemented-state duplication or completed refactor phase history |
 | `docs/archive/` | Historical docs archive | Superseded plans, dated handoffs, old spec packs, and completed implementation plans kept for background context | Active source-of-truth state, current implementation instructions, or runtime rules |
 
 ## OpenClaw Workspace Memory
@@ -30,6 +32,9 @@ This file defines where Markdown-based memory and configuration belongs.
 ## Rules
 
 - `docs/current-state.md` wins over older plans.
+- `docs/architecture/DMAX_NEXT_WORK_PLAN.md` is the current forward-looking
+  technical plan after the completed canonical UI refactor. It is a plan, not
+  implemented-state truth.
 - `docs/agent/DMAX_CONTEXT_PROMPT_RESEARCH.md` is a dated baseline. For the
   current implemented context system, prefer `docs/current-state.md`,
   `docs/agent/DMAX_CONTEXT_BUDGETING.md`, and
@@ -40,6 +45,8 @@ This file defines where Markdown-based memory and configuration belongs.
 - Treat `docs/archive/` as historical background only. Do not rely on archived
   specs or handoffs as current behavior without checking code and
   `docs/current-state.md`.
+- Treat `docs/ui/archive/completed-ui-refactor/` the same way: historical UI
+  evidence only, not default frontend working context.
 - Code wins over Markdown when they disagree; update Markdown after code
   changes that alter routes, schema, tools, or runtime boundaries.
 - Keep OpenClaw workspace files short because they affect runtime behavior.

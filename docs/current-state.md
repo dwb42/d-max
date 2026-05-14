@@ -21,6 +21,15 @@ Active interfaces:
   `/prompt-vorlagen`, and `/prompts`.
 - Browser/WebRTC realtime voice prototype using LiveKit and xAI realtime voice.
 
+The canonical entity UI refactor is complete. Canonical detail pages are
+implemented for organizations, projects/initiatives, people, tasks, and
+categories. Canonical list pages are implemented for categories, people,
+organizations, projects, ideas, habits, and tasks. Route-level list
+compositions live under `web/src/pages/lists/`; route-level detail compositions
+live under `web/src/pages/details/`. Active UI guidance lives in `docs/ui/`.
+Completed UI refactor history, route reviews, and screenshots are archived
+under `docs/ui/archive/completed-ui-refactor/`.
+
 Production deployment is represented in-repo by `Dockerfile` and
 `docker-compose.yml`. The production container runs the built API server, serves
 the Vite build from the same `node:http` server, and starts the OpenClaw
@@ -427,22 +436,30 @@ Implemented behavior:
   not require manual reload.
 - Agent/tool state writes emit `app_state_events`; the browser subscribes via
   SSE and refetches visible state without a manual page reload.
-- `/categories`: first main navigation item. Shows all categories as
-  life areas and groups their initiatives by `idea`, `project`, and `habit`.
-  Category rows show the category emoji instead of the color dot.
-  There is intentionally no category creation UI in this view; new life areas
-  are created through DMAX/agent flows.
-- `/categories/:categoryName`: life-area detail page with category name,
-  editable Markdown description, and grouped initiatives (`idea`, `project`,
-  `habit`).
-- `/ideas`, `/projects`, and `/habits`: separate grouped-by-category pages.
-  Each page shows only its own type, has a compact create row with the type
-  implied by the page, and no type filters. The `/projects` create row supports
-  optional start/end dates; when the end/till picker is empty and start/from is
-  set, opening the end picker primes the native calendar to the start month.
-  The `/projects` page groups predecessor/successor projects next to each other
-  in horizontal rows and renders child projects underneath their parents.
-  Category clicks stay within the current type page.
+- `/categories`: canonical life-area list page. It shows compact scan rows with
+  category name, subtle emoji/color identity, description preview, and related
+  counts. Creating a life area starts from the page action and opens an
+  `EditModal`; the old work-board/reordering behavior is not part of the
+  default list.
+- `/categories/:categoryName`: canonical life-area detail page with category
+  name, editable Markdown description/context, related projects, ideas, habits,
+  and derived tasks as lightweight sections, plus secondary metadata.
+- `/people` and `/organizations`: canonical contact/context list pages with
+  search, compact rows, and create actions hidden behind `EditModal`.
+- `/people/:id` and `/organizations/:id`: canonical party detail pages for core
+  identity, contact points, addresses, relationships, and DMAX participation
+  context. Contact points and postal addresses use modal create/edit flows with
+  explicit delete confirmation.
+- `/ideas`, `/projects`, and `/habits`: canonical action/planning list pages.
+  Each page uses compact scan rows, simple search, page-level create actions
+  behind `EditModal`, and secondary facts appropriate to the type. Ideas remain
+  exploratory, projects show planning/action facts such as status, phase,
+  category, date range and task counts, and habits intentionally do not invent
+  frequency or recurrence semantics.
+- `/tasks`: canonical task/action list page for open tasks from the overview
+  data. Rows show title first, then status, priority, due date, and parent
+  context as secondary facts. Status toggle and delete remain calm row actions.
+  Completed task archives, richer filtering, and task views are deferred.
 - `/calendar/timeline`: active `type=project` initiatives with both
   `start_date` and `end_date`, grouped by category color on a horizontal
   timeline. Defaults to previous month through six months ahead, with controls
@@ -537,11 +554,14 @@ Implemented behavior:
   left completion toggle for open/done, and expose a right-side delete action
   with a confirmation dialog explaining that notes, checklist, and media links
   are removed too.
-- `/tasks/:id`: task detail with an open/done status toggle, priority,
-  due/completed/updated dates, checklist items, notes, media attachments with
-  upload/preview/caption/remove controls and the same media modal, Back to
-  Tasks, and Back to Initiative. Checklist items can be created, renamed,
-  checked off, deleted, and reordered in the task detail view only.
+- `/tasks/:id`: canonical task detail page. The title stands alone without a
+  parent-project subtitle; header facts are ordered status, priority, due date.
+  Due-date editing uses the native date input/picker path as directly as the
+  browser allows. Notes/description appear before checklist. Empty checklist and
+  participant states are lightweight. Participant add/link opens in an
+  `EditModal`. Media attachments support upload/preview/caption/remove controls
+  and the shared media modal. Checklist items can be created, renamed, checked
+  off, deleted, and reordered in the task detail view only.
 - `/drive`: LiveKit room creation, browser mic publishing, audio meter,
   start/end controls.
 - `/prompts`: debug view for prompts sent to OpenClaw. It shows the final
@@ -685,6 +705,18 @@ Known issue:
 
 ## Known Hardening
 
+- Current forward-looking technical plan:
+  `docs/architecture/DMAX_NEXT_WORK_PLAN.md`. Recommended next sequence is
+  DMAX drawer/context extraction, a small `App.tsx` orchestration decomposition,
+  config/prompts/debug containment, then product-specific deferred work.
+- `App.tsx` still owns app shell, route parsing, data loading, mutation
+  callbacks, DMAX drawer/chat behavior, utility/debug surfaces, and
+  calendar/planning surfaces. List and detail route compositions are already
+  extracted.
+- Product-specific deferred UI/domain work includes task filtering/archived
+  tasks, `RelationshipManager`, `TechnicalMetadataDisclosure`, habit
+  frequency/recurrence semantics, category reordering, and richer list-level
+  contact previews.
 - Add repository/API/tool-level cycle protection for `initiatives.parent_id`.
 - Enforce project-only semantics for `project_phase`, `start_date`, and
   `end_date`, or explicitly clear those fields when an initiative becomes an

@@ -1,12 +1,17 @@
 # d-max App UI Notes
 
 Active UI notes. Implemented state belongs in `docs/current-state.md`.
+Canonical UI rules live in `docs/ui/`. The forward-looking post-refactor
+technical roadmap lives in `docs/architecture/DMAX_NEXT_WORK_PLAN.md`.
 
 ## Current Direction
 
-- Focused operational surfaces for initiative memory, tasks, contextual chat,
-  prompt inspection, and Drive Mode.
-- Contextual d-max chat stays in a drawer from initiative/task/category contexts.
+- Focused operational surfaces for initiative memory, tasks, relationships,
+  contextual chat, prompt inspection, calendar/planning, and Drive Mode.
+- Canonical entity detail and list pages are complete. Route-level list
+  compositions live under `web/src/pages/lists/`; canonical detail compositions
+  live under `web/src/pages/details/`.
+- Contextual d-max chat stays in a drawer from list/detail contexts.
 - Direct UI actions use API routes; natural-language turns route through
   OpenClaw and tools.
 - Current primary navigation is organized around life areas, ideas, projects,
@@ -14,12 +19,10 @@ Active UI notes. Implemented state belongs in `docs/current-state.md`.
   config, and debug prompt views. `/projects` is the default product entry
   surface.
 - The Who dimension uses pragmatic operational screens rather than CRM-style
-  dashboards. `/people` and `/organizations` provide list/create/search
-  surfaces. `/people/:id` uses the shared party detail pattern for core data,
-  contact points, relationships, and DMAX contexts. `/organizations/:id` uses a
-  quieter organization-specific layout: the header title opens the core data
-  modal, the Markdown description spans the full page width, contact points
-  and postal addresses sit side by side on desktop, and members appear below.
+  dashboards. `/people` and `/organizations` use canonical list pages with
+  create actions behind modals. `/people/:id` and `/organizations/:id` use the
+  canonical detail pattern for identity, contact points, addresses,
+  relationships, and DMAX contexts.
 - Initiative and task detail pages expose people/organization participation
   through a compact `Beteiligte` panel. Role display should preserve both a
   configured role type and an additional free-text role label when both exist.
@@ -53,13 +56,14 @@ Active UI notes. Implemented state belongs in `docs/current-state.md`.
 
 ## Near-Term UI Work
 
-- Add UI affordances only where they respect existing API/tool confirmation
-  boundaries.
-- Keep hierarchy/relation selectors aligned with repository constraints once
-  parent-cycle protection is added.
-- Improve dense task scanning and filtering without reintroducing extra task
-  statuses beyond `open` and `done`.
-- Continue route/component code-splitting as routes grow. `/calendar` is already
-  split into a lazy route chunk; LiveKit remains in the main startup path until
-  Drive-specific lazy loading is explicitly prioritized.
-- Continue using `/prompts` as a debug-only route.
+- Follow `docs/architecture/DMAX_NEXT_WORK_PLAN.md` for next technical phases.
+- Recommended first technical workstream: DMAX drawer/context extraction, then a
+  narrow `App.tsx` orchestration decomposition.
+- Keep config/prompts/debug containment separate from normal entity/list UI.
+- Treat task filtering/archived tasks, `RelationshipManager`,
+  `TechnicalMetadataDisclosure`, habit recurrence semantics, category
+  reordering, and richer contact previews as product-specific follow-up work
+  requiring discovery before implementation.
+- Continue route/component code-splitting as routes grow. `/calendar` is
+  already split into a lazy route chunk; LiveKit remains in the main startup
+  path until Drive-specific lazy loading is explicitly prioritized.

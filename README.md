@@ -11,6 +11,8 @@ Read [docs/memory-map.md](docs/memory-map.md) for where Markdown memory belongs.
 
 Agent context/prompt architecture notes live in [docs/agent/](docs/agent/).
 Frontend UI governance lives in [docs/ui/](docs/ui/).
+Forward-looking post-UI-refactor technical planning lives in
+[docs/architecture/DMAX_NEXT_WORK_PLAN.md](docs/architecture/DMAX_NEXT_WORK_PLAN.md).
 
 ## Local Setup
 
