@@ -2,9 +2,7 @@
 
 This file defines canonical UI patterns for DMAX. Codex should use these patterns before creating new route-specific layouts.
 
-`UI_DESIGN_DECISIONS.md` is the Phase 4 binding decision record. The patterns below are governed by the specific decision IDs in that file.
-
-For entity detail pages, `UI_ENTITY_DETAIL_CANONICAL_PATTERN.md` is the Phase 8 canonical pattern consolidated from the organization and project/initiative reference implementations.
+These patterns are the active result of the completed canonical UI refactor. Historical route inventories, debt reports, design decisions, phase reviews and screenshot audits are archived under `archive/completed-ui-refactor/`.
 
 ## 1. Canonical entity detail page
 
@@ -493,7 +491,29 @@ Preferred top-level concepts:
 
 Avoid exposing internal umbrella terms if they are not meaningful to the user.
 
-## 15. Organization detail reference pattern
+On narrow/mobile viewports, use the app-shell mobile navigation pattern:
+
+- desktop sidebar navigation collapses behind a burger button;
+- the opened menu is vertical and full-width with icons and text labels;
+- it reuses the same navigation item data and active-state behavior as desktop;
+- the toggle exposes accessible state such as `aria-expanded`;
+- normal route selection closes the menu.
+
+Do not replace this with a wrapped icon grid or horizontal icon rail without updating the active UI docs.
+
+## 15. Copy and terminology pattern
+
+Normal product UI should use concise, calm, user-facing copy.
+
+Rules:
+
+- Use German product labels where the migrated canonical UI has established them, for example `Lebensbereiche`, `Organisationen`, `Personen`, `Projekte`, `Ideen`, `Gewohnheiten`, `Maßnahmen`, `Kontaktwege` and `Anschriften`.
+- Do not mix German and English alternatives inside the same normal workflow.
+- Avoid technical database terms, raw IDs and implementation-shaped labels in normal UI.
+- Use verbs for actions, for example `Person verknüpfen`, `Organisation verknüpfen`, `Maßnahme hinzufügen`.
+- Keep empty and error copy specific and short.
+
+## 16. Organization detail reference pattern
 
 As of Phase 5, `/organizations/:id` is the first implemented reference for the canonical entity detail page.
 

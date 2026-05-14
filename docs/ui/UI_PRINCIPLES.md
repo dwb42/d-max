@@ -1,9 +1,5 @@
 # DMAX UI Principles
 
-## Phase 4 decision status
-
-`UI_DESIGN_DECISIONS.md` is the binding Phase 4 decision record. When this file and `UI_DESIGN_DECISIONS.md` differ in specificity, follow the more specific decision in `UI_DESIGN_DECISIONS.md`.
-
 ## Product character
 
 DMAX is a quiet, precise, high-density but low-noise workspace for a power user.
@@ -153,4 +149,4 @@ When in doubt, show less, structure better and make the next action clearer.
 
 Do not fix a confusing screen by adding more visible information.
 
-For Phase 5, `/organizations/:id` is the first reference implementation route for the entity detail pattern. The organization contextual DMAX drawer bug identified in `UI_SCREENSHOT_AUDIT.md` must be investigated or contained during that implementation phase, not in this decision phase.
+The completed refactor history and screenshot evidence live in `archive/completed-ui-refactor/`. Use the active guidance docs first; consult the archive only when historical evidence is explicitly needed.

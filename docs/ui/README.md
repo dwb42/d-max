@@ -1,6 +1,6 @@
 # DMAX UI Documentation
 
-This folder defines the UI governance layer for DMAX.
+This folder defines the active UI governance layer for DMAX.
 
 DMAX is a quiet, precise, relation-heavy power-user workspace for managing categories, projects, tasks, habits, people, organizations, calendar events, time blocks, notes, communication and contextual relationships.
 
@@ -10,18 +10,13 @@ The purpose of these documents is to stop UI drift. Codex should not invent loca
 
 Before implementing or changing any frontend UI, read these files:
 
-1. `UI_PRINCIPLES.md`
-2. `UI_PATTERNS.md`
-3. `UI_COMPONENTS.md`
-4. `UI_COPY_LANGUAGE.md`
-5. `UI_INFORMATION_ARCHITECTURE.md`
-6. `UI_REVIEW_CHECKLIST.md`
+1. `UI_CURRENT_STATE.md`
+2. `UI_PRINCIPLES.md`
+3. `UI_PATTERNS.md`
+4. `UI_COMPONENTS.md`
+5. `UI_REVIEW_CHECKLIST.md`
 
-For audits, route reviews and larger UI refactors, also use:
-
-- `UI_ROUTE_INVENTORY.md`
-- `UI_DEBT_REPORT.md`
-- `UI_PATTERN_GAPS.md`
+Completed refactor planning, route inventories, review docs and screenshot audits live in `archive/completed-ui-refactor/`. They are historical evidence, not default coding-agent context.
 
 ## Core rule
 
@@ -44,11 +39,10 @@ Add this to the repository-level `AGENTS.md`:
 
 When implementing or modifying frontend UI, follow:
 
+- `docs/ui/UI_CURRENT_STATE.md`
 - `docs/ui/UI_PRINCIPLES.md`
 - `docs/ui/UI_PATTERNS.md`
 - `docs/ui/UI_COMPONENTS.md`
-- `docs/ui/UI_COPY_LANGUAGE.md`
-- `docs/ui/UI_INFORMATION_ARCHITECTURE.md`
 - `docs/ui/UI_REVIEW_CHECKLIST.md`
 
 Do not invent new UI patterns unless explicitly requested.

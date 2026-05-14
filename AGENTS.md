@@ -85,14 +85,15 @@ for a provider experiment.
 
 When working on frontend UI, route layouts, entity pages, list pages, forms, modals, drawers, navigation, visual hierarchy, UX behavior, component structure, spacing, typography, copy labels, or frontend interaction patterns, you must follow the DMAX UI system documented in:
 
+- `docs/ui/UI_CURRENT_STATE.md`
 - `docs/ui/UI_PRINCIPLES.md`
 - `docs/ui/UI_PATTERNS.md`
-- `docs/ui/UI_COPY_LANGUAGE.md`
-- `docs/ui/UI_INFORMATION_ARCHITECTURE.md`
 - `docs/ui/UI_COMPONENTS.md`
 - `docs/ui/UI_REVIEW_CHECKLIST.md`
 
 DMAX frontend work must optimize for a coherent product system, not for locally plausible screens.
+
+Completed UI refactor planning, phase reviews, route inventories and screenshot audits are archived under `docs/ui/archive/completed-ui-refactor/`. Do not load archived UI history into default context unless the task explicitly asks for historical refactor evidence.
 
 Before creating or modifying UI:
 

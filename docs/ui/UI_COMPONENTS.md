@@ -2,11 +2,9 @@
 
 This file defines the canonical component vocabulary for DMAX. Codex should reuse these components before introducing new UI primitives.
 
-`UI_DESIGN_DECISIONS.md` is the Phase 4 binding decision record. Component priorities and first-reference-route participation are defined there.
-
 Component names may be adapted to the actual frontend framework, but the concepts should remain stable.
 
-`UI_ENTITY_DETAIL_CANONICAL_PATTERN.md` and `UI_COMPONENT_EXTRACTION_PLAN.md` are the Phase 8 references for extracting entity detail primitives from the validated organization and project/initiative implementations.
+Completed extraction plans and phase reviews are archived under `archive/completed-ui-refactor/`. This file is the active component vocabulary.
 
 ## Component creation rule
 

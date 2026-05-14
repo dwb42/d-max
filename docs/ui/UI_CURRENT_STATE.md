@@ -1,0 +1,79 @@
+# DMAX UI Current State
+
+Last updated: 2026-05-14
+
+This is the short active handover for frontend UI work. Historical planning, phase reviews, route inventories and screenshot audits are archived under `archive/completed-ui-refactor/`.
+
+## Completed Canonical UI
+
+Canonical detail pages are complete and extracted:
+
+- `/organizations/:id`
+- `/projects/:id` and `/initiatives/:id`
+- `/people/:id`
+- `/tasks/:id`
+- `/categories/:name`
+
+Canonical list pages are complete and extracted:
+
+- `/categories`
+- `/people`
+- `/organizations`
+- `/projects`
+- `/ideas`
+- `/habits`
+- `/tasks`
+
+Route-level UI compositions now live under:
+
+- `web/src/pages/lists/`
+- `web/src/pages/details/`
+
+`web/src/App.tsx` remains responsible for app shell, routing, data loading, mutation callbacks, DMAX drawer/chat behavior and unreworked surfaces.
+
+## Active UI Primitives
+
+Use the shared primitives in `web/src/components/ui/` before creating route-local UI:
+
+- `EntityDetailPage`
+- `EntityHeader`
+- `EntityListPage`, `EntityList`, `EntityListItem`
+- `InlineEditableText`
+- `SectionBlock`, `SectionHeader`
+- `DescriptionBlock`
+- `MetadataGrid`
+- `RelationList`, `RelationGroup`, `RelationItem`
+- `EmptyState`
+- `ErrorState`
+- `EditModal`, `ConfirmModal`
+- `RichText`
+
+Party/contact primitives live under `web/src/components/party/`.
+
+## Active Guidance Docs
+
+Default UI context should stay small:
+
+- `UI_CURRENT_STATE.md`
+- `UI_PRINCIPLES.md`
+- `UI_PATTERNS.md`
+- `UI_COMPONENTS.md`
+- `UI_REVIEW_CHECKLIST.md`
+
+Consult `archive/completed-ui-refactor/` only when a task explicitly needs historical phase evidence, screenshot evidence or old migration rationale.
+
+## Deferred Work
+
+The completed refactor intentionally did not cover:
+
+- calendar, timeline and planning-canvas redesign;
+- config, prompt and debug surface containment;
+- DMAX drawer/context extraction;
+- broader app-shell or `App.tsx` orchestration decomposition;
+- `SearchFilterRow`;
+- `RelationshipManager`;
+- `TechnicalMetadataDisclosure`;
+- category reordering management;
+- richer list-level contact previews;
+- task archive/filtering;
+- habit frequency, recurrence or streak logic.

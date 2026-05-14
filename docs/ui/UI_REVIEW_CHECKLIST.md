@@ -4,9 +4,7 @@ Use this checklist before completing any UI task.
 
 A UI task is not done until this checklist has been applied.
 
-Also check `UI_DESIGN_DECISIONS.md`. Any implementation that conflicts with an accepted decision in that file fails review unless the decision is explicitly changed first.
-
-For entity detail routes, also check `UI_ENTITY_DETAIL_CANONICAL_PATTERN.md`.
+Use this checklist together with `UI_CURRENT_STATE.md`, `UI_PRINCIPLES.md`, `UI_PATTERNS.md` and `UI_COMPONENTS.md`.
 
 ## 1. Product coherence
 
@@ -64,8 +62,8 @@ For entity detail routes, also check `UI_ENTITY_DETAIL_CANONICAL_PATTERN.md`.
 
 ## 7. Copy and terminology
 
-- Are object names consistent with `UI_COPY_LANGUAGE.md`?
-- Is the current language decision in `UI_DESIGN_DECISIONS.md` respected?
+- Are object names consistent with the active product terminology in `UI_PATTERNS.md`?
+- Is German/English terminology mixed unnecessarily in normal user workflows?
 - Are section labels specific and useful?
 - Does each section subtitle add real value, or can it be removed?
 - Does the section explain itself through title and content rather than redundant helper text?
@@ -115,6 +113,8 @@ For entity detail routes, also check `UI_ENTITY_DETAIL_CANONICAL_PATTERN.md`.
 
 - Does the layout work at common desktop widths?
 - Does the layout degrade acceptably at narrower widths?
+- Does mobile navigation remain usable without turning into a dense icon grid?
+- Does the DMAX drawer contain scrolling on narrow/mobile viewports without moving the page behind it?
 - Is information density appropriate for a power-user tool?
 - Is the screen compact without feeling cramped?
 
