@@ -26,6 +26,11 @@ Phase 23 completed a narrow `App.tsx` decomposition pass for the stabilized cano
 
 Phase 24 completed the same narrow decomposition for canonical detail pages. The canonical detail route compositions now live under `web/src/pages/details/`, while `App.tsx` remains responsible for route orchestration, data loading, API mutation callbacks, drawer/chat handling and unreworked surfaces.
 
+App-shell mobile hardening after Phase 24 changed two shell-level behaviors:
+mobile navigation now uses a burger button that opens a vertical icon+label
+menu, and the mobile contextual DMAX drawer locks the background page while
+keeping scroll gestures inside the drawer's chat/old-chat scroll regions.
+
 Do not start calendar/timeline/planning, utility/debug pages, or broad `App.tsx` cleanup before explicit scope.
 
 ## 2. Completed Phases
@@ -85,6 +90,11 @@ Do not start calendar/timeline/planning, utility/debug pages, or broad `App.tsx`
 - Technical/debug metadata belongs in debug surfaces or a future `TechnicalMetadataDisclosure`.
 - DMAX drawer overlays or otherwise avoids squeezing main content into unreadable columns.
 - DMAX drawer should show scoped user-facing context labels.
+- On narrow/mobile viewports, the DMAX drawer is the active full-screen surface:
+  background page scrolling is locked and drawer scrolling is contained.
+- Mobile app-shell navigation uses a burger-triggered vertical menu with icons
+  and labels; do not return to a wrapped icon grid or horizontal icon rail
+  without updating the app-shell decision docs.
 - Technical/chat/API errors must be mapped to user-facing copy in normal UI.
 
 ## 4. Validated Reference Pages

@@ -6513,6 +6513,13 @@ button.task-notes-panel:hover {
     overflow: visible;
   }
 
+  .app-shell.with-agent-drawer,
+  .app-shell.sidebar-collapsed.with-agent-drawer {
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+
   .agent-resize-handle {
     display: none;
   }
@@ -6523,11 +6530,24 @@ button.task-notes-panel:hover {
     inset: 0;
     width: auto;
     max-width: none;
-    height: auto;
-    min-height: 100vh;
+    height: 100dvh;
+    min-height: 0;
     border-top: 0;
     border-left: 0;
+    overflow: hidden;
+    overscroll-behavior: contain;
     box-shadow: none;
+  }
+
+  .agent-drawer .chat-layout {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .agent-drawer .chat-thread,
+  .agent-old-chats {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .sidebar {

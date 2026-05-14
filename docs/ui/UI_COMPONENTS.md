@@ -592,6 +592,15 @@ Should contain:
 
 Should not expose raw context schema errors in normal UI.
 
+Narrow/mobile behavior:
+
+- opens as the active full-screen surface;
+- locks the app-shell background while open;
+- keeps scrolling contained inside drawer-owned scroll regions such as the
+  message thread and old-chat list;
+- must not allow touch or wheel scrolling in the drawer to move the page behind
+  it.
+
 ## Utility/debug components
 
 ### `UtilityPage`

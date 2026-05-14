@@ -160,6 +160,42 @@ This table is the default direction if German is confirmed.
 - Priority: medium.
 - Status: accepted.
 
+### UI-DEC-008A: Mobile app-shell navigation
+
+- Decision: On narrow/mobile viewports, DMAX uses a burger-triggered vertical
+  navigation menu with icons and labels instead of an always-visible wrapped or
+  horizontally scrolling icon rail.
+- Rationale: The full desktop navigation set is too dense for the mobile header.
+  A closed burger keeps the primary object near the top of the viewport, while
+  the opened vertical menu preserves scanability through text labels.
+- Applies to: global app shell, primary navigation, secondary navigation,
+  collapsed-sidebar state on narrow viewports.
+- Implementation implications: The mobile menu reuses the same `NavItem` data
+  and `renderNavItem` behavior as desktop navigation. It must keep accessible
+  button labeling, expose `aria-expanded`, and close after normal route
+  selection. Desktop sidebar behavior remains unchanged.
+- Components involved: `PageShell`, sidebar navigation, mobile navigation
+  toggle.
+- Priority: high.
+- Status: accepted.
+
+### UI-DEC-008B: Mobile DMAX drawer scroll containment
+
+- Decision: When the contextual DMAX drawer is open on narrow/mobile viewports,
+  the app-shell background must not scroll. Scroll gestures inside the drawer
+  stay inside the drawer, primarily in the chat thread or old-chat list.
+- Rationale: A full-screen contextual drawer behaves like the active surface on
+  mobile. Letting the page behind it scroll creates loss of place and makes the
+  drawer feel broken.
+- Applies to: contextual DMAX drawer, chat thread, old-chat list, app shell with
+  `.with-agent-drawer` on narrow viewports.
+- Implementation implications: The mobile drawer uses viewport-height
+  containment (`100dvh`), the app shell is overflow-hidden while the drawer is
+  open, and drawer scrollable regions use contained overscroll behavior.
+- Components involved: `ContextPanel`/`AgentDrawer`, `PageShell`, `ChatView`.
+- Priority: high.
+- Status: accepted.
+
 ## 5. Entity List Page Decisions
 
 ### UI-DEC-009: Canonical entity list anatomy

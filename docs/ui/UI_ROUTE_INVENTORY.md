@@ -74,6 +74,13 @@ Surface type: app-shell surface.
 
 Current layout structure: `.app-shell` with fixed/sidebar navigation, `.main`, `.content-sticky-header`, `.content-scroll-area`, and optional right-side `.agent-drawer`. Shell class changes for collapsed sidebar and open agent drawer.
 
+Current narrow/mobile behavior: the shell collapses to one column. The desktop
+sidebar navigation is hidden behind a burger button in the sidebar header. When
+opened, the mobile navigation renders as a vertical full-width icon+label menu
+using the same navigation item data as desktop. When the contextual DMAX drawer
+is open on narrow viewports, the shell is fixed to the viewport and background
+scroll is suppressed.
+
 Current editing pattern: shell has local UI state for sidebar collapse and agent drawer width persisted in `localStorage`; no domain editing.
 
 Current relationship display pattern: none directly, but route context is resolved into a `ConversationContext` for the agent drawer.
@@ -104,7 +111,7 @@ Main components used: `primaryNavItems`, `secondaryNavItems`, `renderNavItem`.
 
 Surface type: navigation/app-shell surface.
 
-Current layout structure: `.sidebar` with `.sidebar-main`, `.sidebar-header`, `.primary-nav`, `.secondary-nav`, brand button and collapse toggle.
+Current layout structure: `.sidebar` with `.sidebar-main`, `.sidebar-header`, `.primary-nav`, `.secondary-nav`, brand button and collapse toggle. On narrow/mobile viewports, `.primary-nav` and `.secondary-nav` are hidden and `.mobile-nav` is opened from `.mobile-nav-toggle` as a vertical menu with icons and text labels.
 
 Current editing pattern: sidebar collapse is a local toggle persisted to `localStorage`.
 
@@ -115,6 +122,9 @@ Current metadata display pattern: none.
 Current action placement pattern: brand navigates to `/projects`; collapse toggle in sidebar header; primary nav above secondary nav.
 
 State handling: active state and collapsed state only.
+
+Mobile state handling: the mobile menu has local open/closed state, exposes
+`aria-expanded`, and closes after a normal client-side route selection.
 
 Similar routes/surfaces: all routes.
 
@@ -160,7 +170,7 @@ Main components used: `DmaxAgentButton`, `AgentDrawer`, `ChatView`, `ActivityTra
 
 Surface type: drawer/context panel.
 
-Current layout structure: right-side `.agent-drawer` with header/actions, optional old-chat list, `ChatView` thread and composer. Width is resizable via `ResizeHandle`.
+Current layout structure: right-side `.agent-drawer` with header/actions, optional old-chat list, `ChatView` thread and composer. Width is resizable via `ResizeHandle` on desktop. On narrow/mobile viewports, the drawer is a full-screen fixed surface using viewport-height containment; the app-shell background is locked while open, and scroll gestures are contained in the drawer-owned chat thread or old-chat list.
 
 Current editing pattern: chat text composer, voice recording/transcribing controls, assistant audio playback/seeking for TTS replies, old conversation selection, new chat action.
 

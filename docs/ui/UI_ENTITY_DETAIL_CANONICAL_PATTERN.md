@@ -262,6 +262,8 @@ Rules:
 - The drawer must show a user-facing context label, for example `DMAX-Kontext` plus the current entity name.
 - The drawer must not expose raw context terms such as `contextEntityId`.
 - Opening the drawer must not squeeze the entity detail page into unreadable columns.
+- On narrow/mobile viewports, opening the drawer must lock the background page
+  and keep scroll gestures contained inside the drawer's own scroll regions.
 - Gateway or context failures must be shown as calm user-facing errors.
 - Context passing must use the current entity identity and type expected by the chat/conversation system.
 

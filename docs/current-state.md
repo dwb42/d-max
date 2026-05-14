@@ -392,6 +392,11 @@ Implemented behavior:
   `/projects`.
 - Main sidebar navigation items are real links. Normal clicks use client-side
   navigation; Ctrl/Cmd-click and middle-click open the route in a new tab.
+- On narrow/mobile viewports, the desktop sidebar is replaced by a compact app
+  header with a burger button. Opening the burger reveals a vertical full-width
+  navigation menu that uses the same navigation items, icons, labels, active
+  mapping, and link behavior as the desktop sidebar. The menu closes after a
+  normal route selection.
 - A global `DMAX` button is fixed at the top right of the main app area. It
   opens/closes the contextual d-max drawer for the current route context, or
   falls back to Global Chat when no route context is available.
@@ -402,6 +407,10 @@ Implemented behavior:
   separate backend restart endpoint.
 - There is no standalone global chat page; d-max chat UI is the contextual
   drawer used from overview/category/initiative/task contexts.
+- On narrow/mobile viewports, opening the contextual DMAX drawer locks the
+  app-shell background and gives the drawer its own `100dvh` viewport. Drawer
+  scrolling is contained in the chat thread/old-chat list so touch or wheel
+  scrolling inside the drawer does not scroll the page behind it.
 - Chat voice message UX: record full message, show sound bar, transcribe, then
   send the transcript as `app_voice_message`.
 - Chat audio replies MVP: when a turn starts from a Chat Drawer voice message,
