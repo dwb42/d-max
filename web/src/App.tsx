@@ -2619,6 +2619,7 @@ export default function App() {
           label={agentDrawer.label}
           conversations={agentDrawer.conversations}
           conversationId={agentDrawer.conversationId}
+          agentStatus={openClawStatus}
           messages={chatMessages}
           draft={chatDraft}
           setDraft={setChatDraft}
@@ -3047,6 +3048,7 @@ function AgentDrawer(props: {
   label: string;
   conversations: AppConversation[];
   conversationId: number | null;
+  agentStatus: OpenClawStatus | null;
   messages: ChatMessage[];
   draft: string;
   setDraft: (value: string) => void;
@@ -3077,6 +3079,9 @@ function AgentDrawer(props: {
           <strong>{props.label}</strong>
         </div>
         <div className="agent-drawer-actions">
+          <div className="agent-drawer-mobile-toggle">
+            <DmaxAgentButton status={props.agentStatus} active={true} onClick={props.onClose} />
+          </div>
           <button className="small-button" onClick={() => setShowOldChats((current) => !current)} disabled={props.conversations.length === 0}>
             Alte Chats
             {props.conversations.length > 0 ? ` (${props.conversations.length})` : ""}

@@ -654,6 +654,10 @@ h1 {
   flex-shrink: 0;
 }
 
+.agent-drawer-mobile-toggle {
+  display: none;
+}
+
 .agent-old-chats {
   grid-row: 2;
   display: grid;
@@ -6528,7 +6532,7 @@ button.task-notes-panel:hover {
     position: fixed;
     z-index: 80;
     inset: 0;
-    width: auto;
+    width: 100vw;
     max-width: none;
     height: 100dvh;
     min-height: 0;
@@ -6537,6 +6541,48 @@ button.task-notes-panel:hover {
     overflow: hidden;
     overscroll-behavior: contain;
     box-shadow: none;
+  }
+
+  .ideas-route.with-agent-drawer .agent-drawer,
+  .projects-route.with-agent-drawer .agent-drawer,
+  .habits-route.with-agent-drawer .agent-drawer,
+  .tasks-route.with-agent-drawer .agent-drawer,
+  .organizations-route.with-agent-drawer .agent-drawer,
+  .people-route.with-agent-drawer .agent-drawer,
+  .person-route.with-agent-drawer .agent-drawer,
+  .organization-route.with-agent-drawer .agent-drawer,
+  .initiative-route.with-agent-drawer .agent-drawer,
+  .life-area-route.with-agent-drawer .agent-drawer,
+  .life-areas-route.with-agent-drawer .agent-drawer {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    max-width: none;
+    height: 100dvh;
+  }
+
+  .agent-drawer-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  .agent-drawer-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    max-width: min(240px, 62vw);
+  }
+
+  .agent-drawer-mobile-toggle {
+    display: inline-flex;
+  }
+
+  .agent-drawer-mobile-toggle .dmax-agent-button {
+    min-height: 34px;
+    padding: 0 10px;
   }
 
   .agent-drawer .chat-layout {
