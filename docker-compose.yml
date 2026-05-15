@@ -16,7 +16,10 @@ services:
       - "127.0.0.1:${DMAX_HOST_PORT:-49415}:3088"
     volumes:
       - dmax-data:/app/data
+      # Holds Codex ChatGPT OAuth tokens; never bake /root/.codex into the image.
+      - dmax-codex-auth:/root/.codex
     restart: unless-stopped
 
 volumes:
   dmax-data:
+  dmax-codex-auth:
