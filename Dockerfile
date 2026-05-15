@@ -22,6 +22,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates lsof \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g openclaw@2026.4.29 @openai/codex \
+  && install -d -m 700 /root/.codex \
   && npm cache clean --force \
   && rm -rf /root/.npm /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/man
 
