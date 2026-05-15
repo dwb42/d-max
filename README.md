@@ -68,9 +68,11 @@ DMAX_HOST_PORT=49415
 ```
 
 Set the provider secrets the enabled features need, for example
-`OPENAI_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, LiveKit credentials, and
-Google OAuth credentials. `DMAX_WEB_BASE_URL` and
-`GOOGLE_OAUTH_REDIRECT_URI` must point at the public domain.
+`GEMINI_API_KEY`, `XAI_API_KEY`, LiveKit credentials, and Google OAuth
+credentials. `OPENAI_API_KEY` is only required for direct API-key fallback paths
+or media analysis/transcription features that still use OpenAI APIs directly.
+`DMAX_WEB_BASE_URL` and `GOOGLE_OAUTH_REDIRECT_URI` must point at the public
+domain.
 
 Terminate TLS in a reverse proxy such as Caddy or Nginx and proxy the public
 domain to `127.0.0.1:${DMAX_HOST_PORT}`. The container listens internally on
@@ -81,6 +83,67 @@ Persistent runtime data lives in the named volume `dmax-data` mounted at
 and OpenClaw runtime state. Database migrations run automatically during
 `npm run start:prod` before the API/web server starts.
 
+## Production Deployment — Codex/OAuth
+
+Production OpenClaw uses `openai-codex/gpt-5.5` through Codex CLI ChatGPT OAuth.
+The Codex auth store is the named Docker volume `dmax-codex-auth`, mounted at
+`/root/.codex`. Do not copy `auth.json` into the repo, the image, or `.env`.
+
+First-time Codex OAuth login on the VPS:
+
+1. In the ChatGPT account, open `chatgpt.com/#settings`, then Security,
+   Advanced Security, and enable "Autorisierung per Gerätecode für Codex
+   aktivieren".
+2. Start the device login inside the running container:
+
+   ```bash
+   docker exec -d <container> sh -c "nohup codex login --device-auth > /root/.codex/login.log 2>&1 &"
+   ```
+
+3. Read the device URL and code from the volume-backed log:
+
+   ```bash
+   docker exec <container> cat /root/.codex/login.log
+   ```
+
+4. Open the URL in a browser, enter the code, and authorize with the ChatGPT
+   account.
+5. Verify the login:
+
+   ```bash
+   docker exec <container> codex login status
+   ```
+
+   Expected status includes `Logged in using ChatGPT`.
+6. Restart the service:
+
+   ```bash
+   docker compose restart d-max
+   ```
+
+Re-login when tokens are revoked or when switching accounts:
+
+```bash
+docker volume rm <project>_dmax-codex-auth
+docker compose up -d
+```
+
+Then repeat the first-time login steps. The volume is the source of truth for
+Codex OAuth state.
+
+Fallback API key path: if OAuth is blocked, set `OPENAI_API_KEY=<key>` in
+`.env` and change `openclaw/config.production.json` to use:
+
+```json
+{
+  "provider": "openai-codex",
+  "mode": "api-key",
+  "apiKey": "${OPENAI_API_KEY}"
+}
+```
+
+That fallback uses OpenAI API-key billing, not the ChatGPT plan.
+
 Production smoke checks:
 
 ```bash
@@ -88,6 +151,9 @@ curl -i http://localhost:${DMAX_HOST_PORT:-49415}/health
 curl -I http://localhost:${DMAX_HOST_PORT:-49415}/
 curl -I http://localhost:${DMAX_HOST_PORT:-49415}/unknown/spa/route
 docker image ls d-max-d-max
+docker exec <container> codex --version
+docker exec <container> openclaw --version
+docker exec <container> ls /usr/local/lib/node_modules/openclaw/docs/reference/templates/AGENTS.md
 ```
 
 The API server serves the Vite build directly. `/assets/*` responses are cached
