@@ -38,6 +38,13 @@ Local OpenClaw currently uses `openai-codex/gpt-5.5`. Do not switch Telegram or
 app chat back to a direct/plain model API path unless Dietrich explicitly asks
 for a provider experiment.
 
+Production OpenClaw currently uses the Dockerfile pin `openclaw@2026.4.26` plus
+Codex CLI ChatGPT OAuth. The OAuth token store is the `dmax-codex-auth` volume
+mounted at `/root/.codex`; never move it into the repo or image. Do not bump the
+production OpenClaw pin to `latest` or `2026.4.29` without fresh-container
+verification, because `2026.4.29` is known to fail loading the Telegram plugin
+through `jiti` in the production layout.
+
 ## Data Rules
 
 - Initiative: umbrella object for ideas, projects, habits, goals,
@@ -79,7 +86,7 @@ for a provider experiment.
 - Production deploy is single-container Docker Compose behind a reverse proxy:
   API, static Vite build, and OpenClaw gateway run in one process tree.
 - Never commit secrets, `.env`, provider keys, local SQLite runtime data, or
-  OpenClaw auth state.
+  OpenClaw/Codex auth state.
 
 ## DMAX UI Governance
 

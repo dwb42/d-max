@@ -1,6 +1,6 @@
 # DMAX UI Current State
 
-Last updated: 2026-05-14
+Last updated: 2026-05-15
 
 This is the short active handover for frontend UI work. Historical planning, phase reviews, route inventories and screenshot audits are archived under `archive/completed-ui-refactor/`.
 
@@ -30,6 +30,11 @@ Route-level UI compositions now live under:
 - `web/src/pages/details/`
 
 `web/src/App.tsx` remains responsible for app shell, routing, data loading, mutation callbacks, DMAX drawer/chat behavior and unreworked surfaces.
+
+Current mobile DMAX drawer behavior is part of the app-shell contract: on
+narrow/mobile viewports the contextual drawer opens as a full-viewport fixed
+surface, contains its own scrolling, locks the page behind it, and keeps a DMAX
+button visible in the drawer header so the user can close it again.
 
 ## Active UI Primitives
 

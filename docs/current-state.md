@@ -1,6 +1,6 @@
 # d-max Current State
 
-Date: 2026-05-14
+Date: 2026-05-15
 
 Short handoff for fresh Codex/OpenClaw sessions. This file describes the
 implemented repository state; older plans are historical unless this file or
@@ -38,6 +38,13 @@ host reverse proxy terminates TLS and forwards to the localhost-bound compose
 port. `DMAX_WEB_DIST_DIR` controls the static build directory; `/assets/*`
 uses immutable one-year cache headers, while `index.html` and SPA fallbacks use
 `Cache-Control: no-cache`.
+
+Production inference uses OpenClaw plus Codex CLI ChatGPT OAuth. The production
+image pins `openclaw@2026.4.26`, installs `@openai/codex`, and points
+`DMAX_OPENCLAW_CONFIG_PATH` at `openclaw/config.production.json`, which selects
+`openai-codex/gpt-5.5` with the `openai-codex:default` OAuth profile. Codex
+OAuth state lives only in the named volume `dmax-codex-auth` mounted at
+`/root/.codex`; it must never be baked into the image or committed.
 
 SQLite is the source of truth. Durable state changes go through tools/API
 services.
@@ -365,9 +372,9 @@ TTS fails.
 - The embedded OpenClaw gateway client loader resolves the installed
   `GatewayClient` export dynamically from global OpenClaw `client-*.js` bundles
   and supports gateway protocol 3-4. This keeps the app-chat and production
-  startup paths compatible when `openclaw@latest` changes minified client
-  export names or advances the gateway protocol. `OPENCLAW_GATEWAY_CLIENT_MODULE`
-  remains available as an explicit override.
+  startup paths compatible when OpenClaw changes minified client export names or
+  advances the gateway protocol. `OPENCLAW_GATEWAY_CLIENT_MODULE` remains
+  available as an explicit override.
 - Local development is started through `npm run dev`. That command warms the
   local OpenClaw gateway first and only then starts the API in watch mode plus
   the Vite web app; it starts the Drive voice agent too when LiveKit env vars
@@ -381,6 +388,10 @@ TTS fails.
   global `DMAX` agent button, not as a separate sidebar item.
 - Local OpenClaw uses `openai-codex/gpt-5.5`; do not route Telegram/app chat
   back to plain OpenAI API unless explicitly experimenting.
+- Production currently pins `openclaw@2026.4.26`. `openclaw@2026.4.29` is
+  known-bad in the production container because the Telegram plugin can fail
+  during runtime dependency loading with a missing `../dist/babel.cjs` from
+  `jiti`; later pins need fresh-container verification before deployment.
 
 ## Browser App
 
@@ -417,9 +428,11 @@ Implemented behavior:
 - There is no standalone global chat page; d-max chat UI is the contextual
   drawer used from overview/category/initiative/task contexts.
 - On narrow/mobile viewports, opening the contextual DMAX drawer locks the
-  app-shell background and gives the drawer its own `100dvh` viewport. Drawer
-  scrolling is contained in the chat thread/old-chat list so touch or wheel
-  scrolling inside the drawer does not scroll the page behind it.
+  app-shell background and makes the drawer a full-screen fixed surface with its
+  own `100dvh` viewport. The DMAX button stays visible in the drawer header and
+  closes the drawer on tap. Drawer scrolling is contained in the chat
+  thread/old-chat list so touch or wheel scrolling inside the drawer does not
+  scroll the page behind it.
 - Chat voice message UX: record full message, show sound bar, transcribe, then
   send the transcript as `app_voice_message`.
 - Chat audio replies MVP: when a turn starts from a Chat Drawer voice message,
@@ -737,7 +750,7 @@ Known issue:
   eye on chunk sizes as the browser app grows.
 - Production Docker image size was verified around `1.15GB` on local Docker
   Desktop after npm/OpenClaw cache cleanup. Most remaining size is
-  `openclaw@latest` and production Node dependencies; treat major image
+  pinned OpenClaw/Codex CLI plus production Node dependencies; treat major image
   slimming as separate hardening unless VPS disk pressure appears.
 
 ## Environment And Secrets
@@ -752,14 +765,16 @@ Realtime keys: `XAI_API_KEY`, `XAI_REALTIME_MODEL`, `LIVEKIT_URL`,
 `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`.
 
 Telegram/OpenClaw keys: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`;
-provider credentials are handled by local OpenClaw/Codex/Gemini config.
+provider credentials are handled by local OpenClaw/Codex/Gemini config. In
+production, Codex OAuth tokens are stored in the `dmax-codex-auth` volume at
+`/root/.codex`, separate from `dmax-data`.
 
-Never commit `.env`, local OpenClaw auth state, provider keys, or SQLite runtime
-data.
+Never commit `.env`, local OpenClaw/Codex auth state, provider keys, or SQLite
+runtime data.
 
 ## Verification
 
-Last checked on 2026-05-14:
+Last checked on 2026-05-15:
 
 - `npm run typecheck` passed.
 - `npm test` passed: 28 test files, 115 tests.

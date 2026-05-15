@@ -501,6 +501,11 @@ On narrow/mobile viewports, use the app-shell mobile navigation pattern:
 
 Do not replace this with a wrapped icon grid or horizontal icon rail without updating the active UI docs.
 
+On narrow/mobile viewports, the contextual DMAX drawer is a full-screen app-shell
+surface, not a narrow desktop side drawer. It must lock the page behind it,
+contain its own scrolling, and keep the DMAX button visible in the drawer header
+as the close/toggle affordance.
+
 ## 15. Copy and terminology pattern
 
 Normal product UI should use concise, calm, user-facing copy.

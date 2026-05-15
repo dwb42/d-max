@@ -88,6 +88,11 @@ and OpenClaw runtime state. Database migrations run automatically during
 Production OpenClaw uses `openai-codex/gpt-5.5` through Codex CLI ChatGPT OAuth.
 The Codex auth store is the named Docker volume `dmax-codex-auth`, mounted at
 `/root/.codex`. Do not copy `auth.json` into the repo, the image, or `.env`.
+The production image pins `openclaw@2026.4.26` and installs the Codex CLI in the
+runner stage. `openclaw@2026.4.29` is known-bad in the production container
+because the Telegram plugin can fail during runtime dependency loading with a
+missing `../dist/babel.cjs` from `jiti`; verify later OpenClaw pins in a fresh
+container before changing the Dockerfile.
 
 First-time Codex OAuth login on the VPS:
 
@@ -156,6 +161,8 @@ docker exec <container> openclaw --version
 docker exec <container> ls /usr/local/lib/node_modules/openclaw/docs/reference/templates/AGENTS.md
 ```
 
+Expected production OpenClaw version is `OpenClaw 2026.4.26 (be8c246)`.
+
 The API server serves the Vite build directly. `/assets/*` responses are cached
 with immutable long-term cache headers; `index.html` and SPA fallbacks use
 `Cache-Control: no-cache`.
@@ -192,7 +199,7 @@ generation when browser policy allows it.
 ## OpenClaw Checks
 
 ```bash
-npm install -g openclaw@latest
+npm install -g openclaw@2026.4.26
 OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.example.json" openclaw config validate --json
 OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.example.json" openclaw mcp show --json
 ```
@@ -212,7 +219,7 @@ openclaw agent --local \
 
 ## Verification
 
-Last context-sync verification: 2026-05-14. The commands below passed locally.
+Last context-sync verification: 2026-05-15. The commands below passed locally.
 
 ```bash
 npm run typecheck

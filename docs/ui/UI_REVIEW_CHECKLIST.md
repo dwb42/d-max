@@ -114,7 +114,9 @@ Use this checklist together with `UI_CURRENT_STATE.md`, `UI_PRINCIPLES.md`, `UI_
 - Does the layout work at common desktop widths?
 - Does the layout degrade acceptably at narrower widths?
 - Does mobile navigation remain usable without turning into a dense icon grid?
-- Does the DMAX drawer contain scrolling on narrow/mobile viewports without moving the page behind it?
+- Does the DMAX drawer open as a full-screen surface on narrow/mobile viewports,
+  keep a visible DMAX close/toggle button, and contain scrolling without moving
+  the page behind it?
 - Is information density appropriate for a power-user tool?
 - Is the screen compact without feeling cramped?
 

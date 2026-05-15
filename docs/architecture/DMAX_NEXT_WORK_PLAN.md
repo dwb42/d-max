@@ -1,6 +1,6 @@
 # DMAX Next Work Plan
 
-Last updated: 2026-05-14
+Last updated: 2026-05-15
 
 This is the forward-looking technical plan after the completed canonical UI refactor. It is intentionally not a phase history. Future coding-agent sessions should use this file with the active UI docs, not the archived UI refactor planning set.
 
@@ -87,7 +87,8 @@ Extracting it reduces risk before calendar/planning or config/debug work, becaus
 - Move user-facing chat/context error mapping into a focused module.
 - Keep behavior and copy stable unless the extraction requires a small naming cleanup.
 - Keep OpenClaw and chat API contracts unchanged.
-- Preserve mobile drawer scroll containment and DMAX scoped context labels.
+- Preserve mobile full-screen drawer behavior, the visible DMAX close/toggle
+  affordance, drawer scroll containment, and DMAX scoped context labels.
 - Preserve voice-message and audio-reply behavior.
 
 ### Out Of Scope
