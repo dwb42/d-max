@@ -39,7 +39,7 @@ ENV DMAX_API_PORT=3088
 ENV DMAX_WEB_DIST_DIR=/app/dist-web
 ENV DMAX_SCHEMA_PATH=/app/schema.sql
 ENV DMAX_MEDIA_STORAGE_DIR=/app/data/media
-ENV DMAX_OPENCLAW_CONFIG_PATH=/app/openclaw/config.example.json
+ENV DMAX_OPENCLAW_CONFIG_PATH=/app/openclaw/config.production.json
 ENV DMAX_OPENCLAW_STATE_DIR=/app/data/openclaw-web-state
 ENV GOOGLE_CALENDAR_TOKEN_PATH=/app/data/google-calendar-oauth.json
 

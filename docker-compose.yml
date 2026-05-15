@@ -9,7 +9,7 @@ services:
       DMAX_WEB_DIST_DIR: /app/dist-web
       DMAX_SCHEMA_PATH: /app/schema.sql
       DMAX_MEDIA_STORAGE_DIR: /app/data/media
-      DMAX_OPENCLAW_CONFIG_PATH: /app/openclaw/config.example.json
+      DMAX_OPENCLAW_CONFIG_PATH: /app/openclaw/config.production.json
       DMAX_OPENCLAW_STATE_DIR: /app/data/openclaw-web-state
       GOOGLE_CALENDAR_TOKEN_PATH: /app/data/google-calendar-oauth.json
     ports:
