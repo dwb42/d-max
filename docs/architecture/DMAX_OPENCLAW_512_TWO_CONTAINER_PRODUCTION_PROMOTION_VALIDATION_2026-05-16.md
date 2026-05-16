@@ -97,13 +97,14 @@ Focused harness verification:
 npx vitest run --config vitest.config.ts tests/openclaw/prod-topology-validation-harness.test.ts
 ```
 
-Result: 1 file, 9 tests passed. Coverage includes sanitized model-auth status
+Result: 1 file, 10 tests passed. Coverage includes sanitized model-auth status
 reporting, backend pairing request-id redaction, OpenClaw overhead excluding
 model time, nearest-rank P50/P95 for five-run sets, exact
 `d-max__listCategories` activity gating, unexpected simple-turn tool-use
 detection, missing trajectory detection, latency target failures, default
-five-run simple/tool validation sample counts, and rejection of production
-validation sample counts below five without an uncaught CLI stack trace.
+five-run simple/tool validation sample counts, exposed trajectory tool
+definition handling, and rejection of production validation sample counts below
+five without an uncaught CLI stack trace.
 
 Focused production compose verification:
 
@@ -314,6 +315,40 @@ Auth-backed latency/tool metrics:
 | Tool OpenClaw overhead P50/P95 | `1.045s` / `1.143s` | P50 `< 2s`, P95 `< 5s` |
 | Simple actual tool-call activities | `0/0` on all 5 simple samples | no tool calls |
 | Tool actual `d-max__listCategories` activities | `1/1` on all 5 tool samples | required tool call/result |
+
+## Production VPS Follow-Up
+
+After commit `6075bfa` was pushed and deployed, a read-only VPS latency check
+confirmed the two-container topology on the real production host:
+
+- Checkout: `/docker/d-max/repo`
+- Compose project: `repo`
+- Containers: `repo-dmax-api-1`, `repo-dmax-openclaw-1`
+- API binding: `127.0.0.1:49415`
+- Public API base: `https://dmax.b42.io/api/...`
+
+Operational status:
+
+- Both production containers were healthy.
+- `/health` was about `1.5ms`.
+- `/api/openclaw/status` was about `138ms`.
+- OpenClaw model auth was complete with `missingProvidersInUse=[]` and an
+  OpenClaw-managed `openai-codex` OAuth profile.
+
+Observed VPS latency characteristics:
+
+- Warm validation simple turns were about `5-11s`.
+- Warm validation tool turns were about `7-10s`.
+- Slow browser turns around `40-44s` were dominated by `agent.wait`.
+- The slow browser examples had about `8k` prompt characters and either tool
+  activity or a large reused OpenClaw session file. DMAX internal tool calls in
+  those traces completed in `0-1ms`.
+- No evidence pointed to API health, status, SQLite, Docker bridge networking,
+  `sessions.send`, or the internal tool endpoint as the 40s driver.
+
+Interpretation: use `validate:prod-topology` as the simple/tool-call baseline.
+Long browser-chat latency must be evaluated with OpenClaw session size, prompt
+size, model reasoning time, and tool repair/retry behavior in mind.
 
 ## Validation Commands
 

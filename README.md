@@ -187,6 +187,38 @@ The default agent in `openclaw/config.production-512.json` allows only
 `d-max__...` tools. Web/research remains separated in the `dmax-research`
 agent.
 
+Current VPS operational layout:
+
+- Checkout: `/docker/d-max/repo`
+- Compose project: `repo`
+- Containers: `repo-dmax-api-1`, `repo-dmax-openclaw-1`
+- Local API binding on the VPS: `127.0.0.1:49415`
+- Public API base: `https://dmax.b42.io/api/...`
+
+Useful read-only VPS diagnostics:
+
+```bash
+ssh vps 'cd /docker/d-max/repo && git rev-parse --short HEAD'
+ssh vps 'docker ps --format "{{.Names}}\t{{.Status}}\t{{.Ports}}" | grep dmax'
+ssh vps 'docker stats --no-stream repo-dmax-api-1 repo-dmax-openclaw-1'
+ssh vps 'curl -fsS http://127.0.0.1:49415/health'
+ssh vps 'curl -fsS http://127.0.0.1:49415/api/openclaw/status'
+ssh vps 'docker exec repo-dmax-api-1 sh -c "tail -n 500 /app/data/diagnostics/chat-turns/$(date -u +%Y-%m-%d).ndjson"'
+```
+
+Production latency guidance:
+
+- Use `validate:prod-topology` for the simple/tool-call baseline. Browser chats
+  can be much slower when they reuse long OpenClaw sessions or trigger tool
+  repair/retry behavior.
+- On the 2026-05-16 VPS deploy of commit `6075bfa`, `/health` and
+  `/api/openclaw/status` were sub-second, while warm validation simple turns
+  were roughly `5-11s` and validation tool turns roughly `7-10s`.
+- Two long browser turns around the same deploy were about `40-44s`; traces
+  showed almost all of that time inside `agent.wait`, not HTTP, SQLite,
+  Docker bridge networking, or DMAX tool execution. Those turns had about
+  `8k` prompt characters and tool activity or a large reused OpenClaw session.
+
 Rollback to the prior single-container production layout is a git operation,
 not a token-copy operation:
 

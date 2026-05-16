@@ -47,6 +47,12 @@ the repo, image, `.env`, or `/root/.codex`, and do not reintroduce the old
 single-container subprocess production path unless Dietrich explicitly asks
 for a rollback.
 
+The current VPS deployment checkout lives at `/docker/d-max/repo` with Compose
+project name `repo`, so production containers are normally
+`repo-dmax-api-1` and `repo-dmax-openclaw-1`. Treat VPS shell work as
+read-only diagnostics unless Dietrich explicitly approves deploy, restart, or
+volume operations.
+
 ## Data Rules
 
 - Initiative: umbrella object for ideas, projects, habits, goals,

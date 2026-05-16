@@ -799,6 +799,17 @@ from `dmax-data`.
 Never commit `.env`, local OpenClaw/Codex auth state, provider keys, or SQLite
 runtime data.
 
+## Production Operations
+
+The current VPS checkout is `/docker/d-max/repo` and uses Compose project name
+`repo`. The production containers are normally `repo-dmax-api-1` and
+`repo-dmax-openclaw-1`. The API binds to `127.0.0.1:49415` on the VPS and is
+published through the external reverse proxy at `https://dmax.b42.io`.
+
+VPS shell diagnostics should be read-only by default. Do not run
+`docker compose restart`, `up`, `down`, `pull`, destructive volume commands, or
+repo writes on the VPS unless Dietrich explicitly approves that operation.
+
 ## Verification
 
 Last checked on 2026-05-16:
@@ -856,6 +867,24 @@ the active `dmax-openclaw-state` volume:
 - Tool wall P50/P95: `4.693s` / `6.600s`; overhead P50/P95:
   `1.045s` / `1.143s`; all 5 samples showed the required
   `d-max__listCategories` tool call/result activities.
+
+Post-promotion VPS latency analysis on commit `6075bfa`:
+
+- VPS `repo-dmax-api-1` and `repo-dmax-openclaw-1` were healthy.
+- `/health` was about `1.5ms`; `/api/openclaw/status` was about `138ms`.
+- OpenClaw model auth was complete: `missingProvidersInUse=[]`, with an
+  OpenClaw-managed `openai-codex` OAuth profile.
+- Production validation traces after deploy showed warm simple turns around
+  `5-11s` and tool turns around `7-10s`. The dominant segment was
+  `agent.wait`, not `sessions.send`, session creation, HTTP, SQLite, Docker
+  bridge networking, or DMAX internal tool execution.
+- Long browser turns can still reach about `40-44s` when they reuse large
+  OpenClaw sessions or trigger tool repair/retry behavior. In the observed
+  cases, prompts were about `8k` characters and nearly all latency was inside
+  `agent.wait`; DMAX internal tool calls themselves completed in `0-1ms`.
+- Treat the validation harness as the simple/tool-call latency baseline.
+  Browser-turn latency should be interpreted with session size, prompt size,
+  and tool activity in mind.
 
 For implemented behavior, prefer `data/schema.sql`, `src/`, `web/`, and
 `tests/` over older planning documents.
