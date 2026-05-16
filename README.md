@@ -125,6 +125,12 @@ First-time Codex OAuth login on the VPS:
      'OPENCLAW_CONFIG_PATH=/app/openclaw/config.production-512.json OPENCLAW_STATE_DIR=/app/data/openclaw-state openclaw models auth login --provider openai-codex --method device-code'
    ```
 
+   `openclaw models auth login` insists on a real TTY. When running this from a
+   non-interactive shell (e.g. plain `ssh vps "docker exec ..."`), wrap the
+   command with `script -qc '...' /path/inside/container.log` and tail the log
+   file separately to read the URL + device code. `script` is already present
+   in the `dmax-openclaw` image.
+
 3. Complete the browser device authorization shown by that command. Do not
    paste device codes, account emails, or tokens into issue trackers, docs, or
    chat logs.
@@ -143,6 +149,11 @@ First-time Codex OAuth login on the VPS:
    docker compose exec dmax-openclaw sh -lc \
      'OPENCLAW_STATE_DIR=/app/data/openclaw-state openclaw devices approve <requestId>'
    ```
+
+   Expect **two rounds** of approval on first pairing: the initial `new pairing`
+   request, then a second `scope upgrade` request that grants
+   `operator.admin/read/write`. Run `devices list` again after each `approve`
+   until the pending queue is empty.
 
 6. Restart `dmax-openclaw`, then verify `dmax-api` reconnects:
 
@@ -181,6 +192,10 @@ topology latency/tool-call harness from the repo checkout:
 DMAX_HOST_PORT=${DMAX_HOST_PORT:-49415} \
 npm run validate:prod-topology -- --project <compose-project-name>
 ```
+
+The harness uses `tsx`, which is a devDependency and is pruned out of the
+runner image. On the VPS, run `npm ci --no-audit --no-fund` once inside
+`/docker/d-max/repo` before invoking `npm run validate:prod-topology`.
 
 Expected production OpenClaw version is `OpenClaw 2026.5.12 (f066dd2)`.
 The default agent in `openclaw/config.production-512.json` allows only
