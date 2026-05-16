@@ -105,6 +105,15 @@ export function stopOpenClawGatewayProcess(signal: NodeJS.Signals = "SIGTERM"): 
   gatewayProcess.kill(signal);
 }
 
+export function resetOpenClawGatewayConnectionForTests(): void {
+  if (env.nodeEnv !== "test") {
+    throw new Error("resetOpenClawGatewayConnectionForTests is only available in test mode.");
+  }
+
+  invalidateOpenClawGatewayConnection();
+  gatewayReadyUntil = 0;
+}
+
 type OpenClawGatewayClientModule = {
   GatewayClient: new (options: OpenClawGatewayClientOptions) => OpenClawGatewayClient;
 };
@@ -115,13 +124,13 @@ type OpenClawGatewayClientModuleWithPath = OpenClawGatewayClientModule & {
 
 type OpenClawGatewayClientOptions = {
   url: string;
+  token?: string;
   clientName: string;
   clientDisplayName: string;
   clientVersion: string;
   mode: string;
   role: string;
   scopes: string[];
-  deviceIdentity?: null;
   minProtocol: number;
   maxProtocol: number;
   onHelloOk: (hello: unknown) => void | Promise<void>;
@@ -139,6 +148,7 @@ type OpenClawGatewayConnection = {
   client: OpenClawGatewayClient;
   ready: Promise<void>;
   stateDir: string;
+  gatewayUrl: string;
   closed: boolean;
   closeError: Error | null;
 };
@@ -339,7 +349,7 @@ async function createOpenClawSession(
   const prepared = {
     key: extractPreparedSessionKey(parsed) ?? input.key,
     sessionId: extractPreparedSessionId(parsed),
-    sessionFile: extractPreparedSessionFile(parsed),
+    sessionFile: normalizeOpenClawSessionFile(options.stateDir, extractPreparedSessionId(parsed), extractPreparedSessionFile(parsed)),
     raw: parsed
   };
   cachePreparedSession(input.key, options.stateDir, prepared);
@@ -422,7 +432,7 @@ export async function checkOpenClawGatewayStatus(
   const checkedAt = new Date().toISOString();
   const stateDir = options.stateDir ?? env.dmaxOpenClawStateDir;
 
-  if (!isOpenClawGatewayPortBound()) {
+  if (!isExternalOpenClawGatewayConfigured() && !isOpenClawGatewayPortBound()) {
     return {
       state: "unavailable",
       detail: "OpenClaw gateway is not listening on port 18789.",
@@ -461,6 +471,17 @@ async function waitForOpenClawAgentWarmup(): Promise<void> {
 }
 
 async function ensureResponsiveOpenClawGateway(options: { configPath: string; stateDir: string; diagnostics?: ChatTurnDiagnosticContext }): Promise<void> {
+  if (isExternalOpenClawGatewayConfigured()) {
+    try {
+      await callOpenClawGateway("health", {}, { stateDir: options.stateDir, timeoutMs: GATEWAY_HEALTH_TIMEOUT_MS, diagnostics: options.diagnostics });
+      markOpenClawGatewayReady();
+      return;
+    } catch {
+      markOpenClawGatewayNotReady();
+      throw new Error("External OpenClaw gateway is not responsive yet.");
+    }
+  }
+
   if (!isOpenClawGatewayPortBound()) {
     traceOpenClaw(options.diagnostics, "openclaw_gateway_port_unbound");
     await ensureOpenClawGateway({ ...options, readyTimeoutMs: GATEWAY_READY_DEADLINE_MS });
@@ -497,6 +518,14 @@ async function ensureOpenClawGateway(options: { configPath: string; stateDir: st
 }
 
 async function restartOpenClawGateway(options: { configPath: string; stateDir: string; diagnostics?: ChatTurnDiagnosticContext }): Promise<void> {
+  if (isExternalOpenClawGatewayConfigured()) {
+    invalidateOpenClawGatewayConnection();
+    gatewayPrewarmCompletedKey = null;
+    gatewayPrewarmFailedKey = null;
+    await ensureOpenClawGateway({ ...options, readyTimeoutMs: GATEWAY_READY_DEADLINE_MS });
+    return;
+  }
+
   if (gatewayProcess && !gatewayProcess.killed && gatewayProcess.exitCode === null) {
     try {
       traceOpenClaw(options.diagnostics, "openclaw_gateway_process_kill_started");
@@ -513,6 +542,15 @@ async function restartOpenClawGateway(options: { configPath: string; stateDir: s
 }
 
 async function startOpenClawGateway(options: { configPath: string; stateDir: string; readyTimeoutMs: number; diagnostics?: ChatTurnDiagnosticContext }): Promise<void> {
+  if (isExternalOpenClawGatewayConfigured()) {
+    traceOpenClaw(options.diagnostics, "openclaw_external_gateway_wait_ready_started", {
+      gatewayUrl: resolveOpenClawGatewayHttpUrl()
+    });
+    await waitForOpenClawGateway(options);
+    traceOpenClaw(options.diagnostics, "openclaw_external_gateway_wait_ready_finished");
+    return;
+  }
+
   traceOpenClaw(options.diagnostics, "openclaw_gateway_runtime_config_prepare_started");
   const runtimeConfigPath = prepareRuntimeOpenClawConfig(options.configPath, options.stateDir);
   traceOpenClaw(options.diagnostics, "openclaw_gateway_runtime_config_prepare_finished", { runtimeConfigPath });
@@ -575,6 +613,25 @@ function isOpenClawGatewayPortBound(): boolean {
   } catch {
     return false;
   }
+}
+
+function isExternalOpenClawGatewayConfigured(): boolean {
+  return Boolean(env.dmaxOpenClawGatewayUrl?.trim());
+}
+
+function resolveOpenClawGatewayHttpUrl(): string {
+  return env.dmaxOpenClawGatewayUrl?.trim() || "http://127.0.0.1:18789";
+}
+
+function resolveOpenClawGatewayWsUrl(): string {
+  const configured = resolveOpenClawGatewayHttpUrl();
+  if (configured.startsWith("ws://") || configured.startsWith("wss://")) {
+    return configured;
+  }
+
+  const parsed = new URL(configured);
+  parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+  return parsed.toString().replace(/\/$/, "");
 }
 
 function prepareRuntimeOpenClawConfig(configPath: string, stateDir: string): string {
@@ -782,7 +839,7 @@ function readPreparedSessionFromRegistry(stateDir: string, sessionKey: string): 
 
   const sessionId = typeof record.sessionId === "string" && record.sessionId.trim() ? record.sessionId : null;
   const sessionFileFromRegistry = typeof record.sessionFile === "string" && record.sessionFile.trim() ? record.sessionFile : null;
-  const sessionFile = sessionFileFromRegistry ?? (sessionId ? getOpenClawSessionFile(stateDir, sessionId) : null);
+  const sessionFile = normalizeOpenClawSessionFile(stateDir, sessionId, sessionFileFromRegistry);
   if (!sessionId || !sessionFile || !existsSync(sessionFile)) {
     return null;
   }
@@ -1133,6 +1190,10 @@ async function waitForOpenClawRunSessionStarted(options: {
 }
 
 function resolveOpenClawGatewayPrewarmKey(stateDir: string): string {
+  if (isExternalOpenClawGatewayConfigured()) {
+    return `${stateDir}:${resolveOpenClawGatewayWsUrl()}`;
+  }
+
   return `${stateDir}:${readOpenClawGatewayListenerPids().join(",") || "unknown-gateway"}`;
 }
 
@@ -1224,7 +1285,7 @@ async function runOpenClawGatewaySessionTurn(
     hasSessionFile: Boolean(prepared.sessionFile)
   });
 
-  const sessionFile = prepared.sessionFile ?? (prepared.sessionId ? getOpenClawSessionFile(options.stateDir, prepared.sessionId) : null);
+  const sessionFile = normalizeOpenClawSessionFile(options.stateDir, prepared.sessionId, prepared.sessionFile);
   if (!sessionFile) {
     throw new Error(`OpenClaw did not return a transcript file for session ${input.sessionKey}.`);
   }
@@ -1716,7 +1777,8 @@ async function getOpenClawGatewayConnection(
   diagnostics: ChatTurnDiagnosticContext | undefined,
   method: string
 ): Promise<OpenClawGatewayConnection> {
-  if (gatewayConnection && !gatewayConnection.closed && gatewayConnection.stateDir === stateDir) {
+  const gatewayUrl = resolveOpenClawGatewayWsUrl();
+  if (gatewayConnection && !gatewayConnection.closed && gatewayConnection.stateDir === stateDir && gatewayConnection.gatewayUrl === gatewayUrl) {
     traceOpenClaw(diagnostics, "openclaw_gateway_ws_reused", { method });
     await gatewayConnection.ready;
     return gatewayConnection;
@@ -1727,8 +1789,10 @@ async function getOpenClawGatewayConnection(
   }
 
   const { GatewayClient } = await loadOpenClawGatewayClientModule();
+  const clientStateDir = resolveOpenClawGatewayClientStateDir(stateDir);
+  mkdirSync(clientStateDir, { recursive: true });
   const previousOpenClawStateDir = process.env.OPENCLAW_STATE_DIR;
-  process.env.OPENCLAW_STATE_DIR = stateDir;
+  process.env.OPENCLAW_STATE_DIR = clientStateDir;
   let resolveReady!: () => void;
   let rejectReady!: (error: unknown) => void;
   let readySettled = false;
@@ -1753,17 +1817,19 @@ async function getOpenClawGatewayConnection(
     client: null as unknown as OpenClawGatewayClient,
     ready,
     stateDir,
+    gatewayUrl,
     closed: false,
     closeError: null
   };
   const client = new GatewayClient({
-    url: "ws://127.0.0.1:18789",
+    url: gatewayUrl,
+    ...(process.env.OPENCLAW_GATEWAY_TOKEN ? { token: process.env.OPENCLAW_GATEWAY_TOKEN } : {}),
     clientName: "gateway-client",
     clientDisplayName: "d-max web chat",
     clientVersion: "d-max",
     mode: "backend",
     role: "operator",
-    scopes: ["operator.admin"],
+    scopes: ["operator.admin", "operator.read", "operator.write"],
     minProtocol: 3,
     maxProtocol: 4,
     onHelloOk: async () => {
@@ -2022,8 +2088,24 @@ function getOpenClawSessionFile(stateDir: string, sessionId: string): string {
   return path.join(stateDir, "agents", "main", "sessions", `${sessionId}.jsonl`);
 }
 
+function normalizeOpenClawSessionFile(stateDir: string, sessionId: string | null, sessionFile: string | null): string | null {
+  if (sessionFile && existsSync(sessionFile)) {
+    return sessionFile;
+  }
+
+  if (!sessionId) {
+    return sessionFile;
+  }
+
+  return getOpenClawSessionFile(stateDir, sessionId);
+}
+
 function getOpenClawTrajectoryFile(stateDir: string, sessionId: string): string {
   return path.join(stateDir, "agents", "main", "sessions", `${sessionId}.trajectory.jsonl`);
+}
+
+function resolveOpenClawGatewayClientStateDir(stateDir: string): string {
+  return env.dmaxOpenClawClientStateDir ?? stateDir;
 }
 
 function clearStaleOpenClawRuntimeLocks(stateDir: string): void {

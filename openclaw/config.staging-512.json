@@ -2,7 +2,7 @@
   "gateway": {
     "mode": "local",
     "auth": {
-      "mode": "token"
+      "mode": "none"
     }
   },
   "agents": {

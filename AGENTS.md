@@ -29,8 +29,8 @@ d-max is Dietrich's agentic initiative, task, relationship, and initiative-memor
 
 ```text
 Telegram d-max-dev -> local OpenClaw -> d-max tools -> local SQLite
-Telegram d-max -> VPS d-max Docker container -> OpenClaw subprocess -> d-max tools -> production SQLite
-Browser contextual chat -> d-max API -> OpenClaw subprocess -> tools -> SQLite
+Telegram d-max -> VPS dmax-api container -> dmax-openclaw gateway -> d-max tools -> production SQLite
+Browser contextual chat -> d-max API -> dmax-openclaw gateway -> tools -> SQLite
 Browser /drive -> LiveKit -> d-max voice agent -> xAI realtime
 ```
 
@@ -38,12 +38,14 @@ Local OpenClaw currently uses `openai-codex/gpt-5.5`. Do not switch Telegram or
 app chat back to a direct/plain model API path unless Dietrich explicitly asks
 for a provider experiment.
 
-Production OpenClaw currently uses the Dockerfile pin `openclaw@2026.4.26` plus
-Codex CLI ChatGPT OAuth. The OAuth token store is the `dmax-codex-auth` volume
-mounted at `/root/.codex`; never move it into the repo or image. Do not bump the
-production OpenClaw pin to `latest` or `2026.4.29` without fresh-container
-verification, because `2026.4.29` is known to fail loading the Telegram plugin
-through `jiti` in the production layout.
+Production OpenClaw uses the Dockerfile pin `openclaw@2026.5.12` plus
+OpenClaw-managed Codex OAuth. Production is a two-container Docker Compose
+topology: `dmax-api` owns SQLite/media/Google OAuth/static web/API/Telegram,
+and `dmax-openclaw` owns OpenClaw Gateway, `OPENCLAW_STATE_DIR`, and Codex
+OAuth state in the `dmax-openclaw-state` volume. Never copy OAuth tokens into
+the repo, image, `.env`, or `/root/.codex`, and do not reintroduce the old
+single-container subprocess production path unless Dietrich explicitly asks
+for a rollback.
 
 ## Data Rules
 
@@ -83,8 +85,9 @@ through `jiti` in the production layout.
 - Browser Drive Mode currently bridges realtime audio only; durable voice tool
   commits are not wired.
 - Add setup/dev/test scripts when needed.
-- Production deploy is single-container Docker Compose behind a reverse proxy:
-  API, static Vite build, and OpenClaw gateway run in one process tree.
+- Production deploy is two-container Docker Compose behind a reverse proxy:
+  `dmax-api` serves API/static web/Telegram and talks to the internal
+  `dmax-openclaw` gateway over Docker networking.
 - Never commit secrets, `.env`, provider keys, local SQLite runtime data, or
   OpenClaw/Codex auth state.
 

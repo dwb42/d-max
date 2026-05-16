@@ -1,6 +1,6 @@
 # d-max Current State
 
-Date: 2026-05-15
+Date: 2026-05-16
 
 Short handoff for fresh Codex/OpenClaw sessions. This file describes the
 implemented repository state; older plans are historical unless this file or
@@ -31,20 +31,41 @@ Completed UI refactor history, route reviews, and screenshots are archived
 under `docs/ui/archive/completed-ui-refactor/`.
 
 Production deployment is represented in-repo by `Dockerfile` and
-`docker-compose.yml`. The production container runs the built API server, serves
-the Vite build from the same `node:http` server, and starts the OpenClaw
-gateway as a managed subprocess before running DB migrations and the API. A
-host reverse proxy terminates TLS and forwards to the localhost-bound compose
-port. `DMAX_WEB_DIST_DIR` controls the static build directory; `/assets/*`
-uses immutable one-year cache headers, while `index.html` and SPA fallbacks use
-`Cache-Control: no-cache`.
+`docker-compose.yml`. Production is a two-container topology. `dmax-api` runs
+the built API server, serves the Vite build from the same `node:http` server,
+owns SQLite/media/Google OAuth token files/Telegram/API/static web routes, and
+connects to `dmax-openclaw` over the internal Docker network.
+`dmax-openclaw` runs OpenClaw Gateway 2026.5.12, owns `OPENCLAW_STATE_DIR`, and
+loads OpenClaw-managed Codex OAuth from the `dmax-openclaw-state` volume. A host
+reverse proxy terminates TLS and forwards to the localhost-bound `dmax-api`
+compose port. `DMAX_WEB_DIST_DIR` controls the static build directory;
+`/assets/*` uses immutable one-year cache headers, while `index.html` and SPA
+fallbacks use `Cache-Control: no-cache`.
+Telegram is API-owned in production: when `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_ALLOWED_USER_IDS` are configured, `dmax-api` starts an allowlisted
+Telegram long-polling bridge that routes authorized text messages through the
+existing app-chat/OpenClaw tool path. `dmax-openclaw` keeps its Telegram channel
+disabled.
 
-Production inference uses OpenClaw plus Codex CLI ChatGPT OAuth. The production
-image pins `openclaw@2026.4.26`, installs `@openai/codex`, and points
-`DMAX_OPENCLAW_CONFIG_PATH` at `openclaw/config.production.json`, which selects
-`openai-codex/gpt-5.5` with the `openai-codex:default` OAuth profile. Codex
-OAuth state lives only in the named volume `dmax-codex-auth` mounted at
-`/root/.codex`; it must never be baked into the image or committed.
+Production inference uses `openai/gpt-5.5` with `agentRuntime.id = "codex"` in
+`openclaw/config.production-512.json`. `openclaw/config.production.json` mirrors
+that same 2026.5.12 production topology so there is no stale production config
+left on the old `openai-codex/gpt-5.5` route. The production OpenClaw config
+and compose command both use token-protected gateway auth. `dmax-openclaw` seeds
+and loads `@openclaw/codex@2026.5.12` from its active `OPENCLAW_STATE_DIR`. The
+OpenClaw state-dir bootstrap also links the globally installed `@openai/codex`
+CLI package into the active state-dir `node_modules` tree so Codex plugin
+dependency resolution is explicit. The default `main` agent exposes only
+`d-max__...` tools through the
+`dmax-dynamic-tools` HTTP adapter, which calls the authenticated internal
+`dmax-api` tool endpoint.
+Browser, canvas, media, TTS, sandbox, web/research, memory, provider/plugin
+sprawl, and unrelated dynamic tools are excluded from the default DMAX turn;
+research/web remains separated in `dmax-research`. Codex/OpenClaw OAuth state
+must never be baked into the image, copied into `/root/.codex`, or committed.
+The shared image still contains API defaults for the `dmax-api` command, so the
+`dmax-openclaw` service command explicitly unsets API data-path environment
+variables before starting the gateway.
 
 SQLite is the source of truth. Durable state changes go through tools/API
 services.
@@ -366,9 +387,13 @@ TTS fails.
 - Risky tool calls return `requiresConfirmation` unless the ToolRunner is
   invoked with an explicit trusted confirmation context. Normal MCP/OpenClaw
   tool calls cannot self-confirm by setting `confirmed: true`.
-- The API server warms the local OpenClaw gateway on startup. App chat also
-  watches the OpenClaw session file as a fallback when the gateway request does
-  not return its final payload reliably.
+- In production, `NODE_ENV=production` requires `DMAX_OPENCLAW_GATEWAY_URL`.
+  The API process does not spawn OpenClaw as a subprocess; it talks to the
+  external gateway at `http://dmax-openclaw:18789`. The legacy `start:prod`
+  subprocess launcher and stale `start:container` gateway launcher have been
+  removed. Local development can still use the local gateway fallback.
+- App chat watches the OpenClaw session file as a fallback when the gateway
+  request does not return its final payload reliably.
 - The embedded OpenClaw gateway client loader resolves the installed
   `GatewayClient` export dynamically from global OpenClaw `client-*.js` bundles
   and supports gateway protocol 3-4. This keeps the app-chat and production
@@ -386,12 +411,11 @@ TTS fails.
   startup in progress and does not repeatedly restart the gateway.
 - The browser polls `/api/openclaw/status` every 15s. The status is shown in the
   global `DMAX` agent button, not as a separate sidebar item.
-- Local OpenClaw uses `openai-codex/gpt-5.5`; do not route Telegram/app chat
-  back to plain OpenAI API unless explicitly experimenting.
-- Production currently pins `openclaw@2026.4.26`. `openclaw@2026.4.29` is
-  known-bad in the production container because the Telegram plugin can fail
-  during runtime dependency loading with a missing `../dist/babel.cjs` from
-  `jiti`; later pins need fresh-container verification before deployment.
+- Local OpenClaw still uses `openai-codex/gpt-5.5`; do not route Telegram/app
+  chat back to plain OpenAI API unless explicitly experimenting.
+- Production pins OpenClaw 2026.5.12 and loads `@openclaw/codex@2026.5.12`
+  from the `dmax-openclaw` state volume. Earlier notes about the old
+  single-container `openclaw@2026.4.26` production path are historical.
 
 ## Browser App
 
@@ -758,43 +782,80 @@ Known issue:
 See `.env.example`.
 
 Core keys: `DATABASE_PATH`, `DMAX_API_PORT`, `DMAX_OPENCLAW_CONFIG_PATH`,
-`DMAX_OPENCLAW_STATE_DIR`, `DMAX_OPENCLAW_MODEL`,
-`DMAX_OPENCLAW_SESSION_ID`.
+`DMAX_OPENCLAW_STATE_DIR`, `DMAX_OPENCLAW_CLIENT_STATE_DIR`,
+`DMAX_OPENCLAW_MODEL`, `DMAX_OPENCLAW_GATEWAY_URL`,
+`DMAX_OPENCLAW_SESSION_ID`. In production, `DMAX_OPENCLAW_GATEWAY_URL` must be
+set and normally points at `http://dmax-openclaw:18789`.
 
 Realtime keys: `XAI_API_KEY`, `XAI_REALTIME_MODEL`, `LIVEKIT_URL`,
 `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`.
 
-Telegram/OpenClaw keys: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`;
-provider credentials are handled by local OpenClaw/Codex/Gemini config. In
-production, Codex OAuth tokens are stored in the `dmax-codex-auth` volume at
-`/root/.codex`, separate from `dmax-data`.
+Telegram/OpenClaw keys: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`,
+`DMAX_INTERNAL_TOOL_TOKEN`, and `OPENCLAW_GATEWAY_TOKEN`; provider credentials
+are handled by local OpenClaw/Codex/Gemini config. In production, Codex OAuth
+tokens are OpenClaw-managed inside the `dmax-openclaw-state` volume, separate
+from `dmax-data`.
 
 Never commit `.env`, local OpenClaw/Codex auth state, provider keys, or SQLite
 runtime data.
 
 ## Verification
 
-Last checked on 2026-05-15:
+Last checked on 2026-05-16:
 
 - `npm run typecheck` passed.
-- `npm test` passed: 28 test files, 115 tests.
-- `npm run web:build` passed without Vite large-chunk warnings.
-- `docker compose build` passed.
-- `docker compose up -d --force-recreate` started the production container.
-- `http://localhost:49415/health` returned `200 {"ok":true}`.
-- `http://localhost:49415/` and an unknown SPA route returned `index.html`.
-- A built `/assets/*.js` response returned immutable long-term cache headers.
+- `npm test` passed: 36 test files, 163 tests.
+- `npm run web:build` passed.
+- `npm run build` passed.
+- A one-off `dmax-config-audit` production image run with OpenClaw 2026.5.12
+  returned `{"valid":true,"path":"/app/openclaw/config.production-512.json"}`.
+- A second one-off `dmax-config-audit` run returned
+  `{"valid":true,"path":"/app/openclaw/config.production.json"}`.
+- Focused OpenClaw production-topology tests passed:
+  `tests/api/internal-openclaw-tools.test.ts`,
+  `tests/openclaw/config-web-tools.test.ts`,
+  `tests/openclaw/dmax-dynamic-tools-plugin.test.ts`,
+  `tests/openclaw/dmax-dynamic-tools-http-adapter.test.ts`,
+  `tests/openclaw/prod-topology-validation-harness.test.ts`,
+  `tests/openclaw/production-compose.test.ts`,
+  `tests/openclaw/production-rollback-docs.test.ts`, and
+  `tests/chat/openclaw-external-gateway.test.ts`.
+- Focused Telegram bridge tests passed: `tests/telegram/bot.test.ts`.
+- Fresh local two-container production-topology validation is documented in
+  `docs/architecture/DMAX_OPENCLAW_512_TWO_CONTAINER_PRODUCTION_PROMOTION_VALIDATION_2026-05-16.md`.
 
 ```bash
 npm run typecheck
 npm test
 npm run web:build
-docker compose build
-docker compose up -d --force-recreate
-curl -i http://localhost:49415/health
-curl -I http://localhost:49415/
-OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.local.json" openclaw models status --json
+npm run build
+DMAX_INTERNAL_TOOL_TOKEN="$(openssl rand -hex 24)" \
+OPENCLAW_GATEWAY_TOKEN="$(openssl rand -hex 24)" \
+DMAX_HOST_PORT=49443 \
+docker compose -p dmax-two-container-prodtopology up -d --build
+curl -i http://localhost:49443/health
+curl -I http://localhost:49443/
+npm run validate:prod-topology -- --project dmax-two-container-prodtopology --api-url http://127.0.0.1:49443
 ```
+
+`validate:prod-topology` requires completed OpenClaw provider auth and backend
+device approval in the active `dmax-openclaw-state` volume. Before sending chat
+turns, it runs `openclaw models status --json` inside `dmax-openclaw` and keeps
+only sanitized `missingProvidersInUse` provider names. It gates the first
+warmup, five simple turns, five exact `d-max__listCategories` tool-call turns,
+and P50/P95 OpenClaw overhead and wall-time targets. It also redacts backend
+device pairing request IDs from validation failures.
+
+Auth-backed production-topology validation on 2026-05-16 passed after
+OpenClaw-managed Codex OAuth re-authentication and backend device approval in
+the active `dmax-openclaw-state` volume:
+
+- Warmup wall/overhead: `3.602s` / `1.305s`.
+- Simple wall P50/P95: `3.322s` / `4.912s`; overhead P50/P95:
+  `1.027s` / `1.185s`; no tool-call activities in all 5 samples.
+- Tool wall P50/P95: `4.693s` / `6.600s`; overhead P50/P95:
+  `1.045s` / `1.143s`; all 5 samples showed the required
+  `d-max__listCategories` tool call/result activities.
 
 For implemented behavior, prefer `data/schema.sql`, `src/`, `web/`, and
 `tests/` over older planning documents.

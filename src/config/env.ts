@@ -5,44 +5,59 @@ import { z } from "zod";
 
 loadDotenv();
 
-const envSchema = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  DATABASE_PATH: z.string().default("./data/dmax.dev.sqlite"),
-  TZ: z.string().default("Europe/Berlin"),
-  OPENAI_API_KEY: z.string().optional(),
-  OPENAI_TRANSCRIBE_MODEL: z.string().default("gpt-4o-mini-transcribe"),
-  OPENAI_MEDIA_ANALYSIS_MODEL: z.string().default("gpt-4.1-mini"),
-  OPENAI_TTS_MODEL: z.string().default("gpt-4o-mini-tts"),
-  OPENAI_TTS_VOICE: z.string().default("alloy"),
-  XAI_API_KEY: z.string().optional(),
-  XAI_REALTIME_MODEL: z.string().default("grok-voice-think-fast-1.0"),
-  DMAX_OPENCLAW_CONFIG_PATH: z.string().default("./openclaw/config.web.json"),
-  DMAX_OPENCLAW_STATE_DIR: z.string().default("./data/openclaw-web-state"),
-  DMAX_OPENCLAW_MODEL: z.string().default("openai-codex/gpt-5.5"),
-  DMAX_OPENCLAW_SESSION_ID: z.string().default("dmax-web-app-chat"),
-  DMAX_OPENCLAW_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(240),
-  DMAX_OPENCLAW_PREWARM: z.string().default("0"),
-  DMAX_OPENCLAW_PREWARM_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
-  DMAX_OPENCLAW_PREWARM_WAIT_FOR_COMPLETION: z.string().default("0"),
-  DMAX_API_PORT: z.coerce.number().int().positive().default(3088),
-  DMAX_WEB_BASE_URL: z.string().default("http://localhost:5173"),
-  DMAX_WEB_DIST_DIR: z.string().default("./dist-web"),
-  DMAX_MEDIA_STORAGE_DIR: z.string().default("./data/media"),
-  DMAX_MEDIA_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(52_428_800),
-  GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
-  GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
-  GOOGLE_OAUTH_REDIRECT_URI: z.string().optional(),
-  GOOGLE_CALENDAR_TOKEN_PATH: z.string().default("./data/google-calendar-oauth.json"),
-  DMAX_VOICE_ALLOWED_CALLERS: z.string().default(""),
-  DMAX_VOICE_PUBLIC_BASE_URL: z.string().default(""),
-  DMAX_VOICE_PORT: z.coerce.number().int().positive().default(3099),
-  TWILIO_ACCOUNT_SID: z.string().optional(),
-  TWILIO_AUTH_TOKEN: z.string().optional(),
-  TWILIO_VOICE_NUMBER: z.string().optional(),
-  LIVEKIT_URL: z.string().optional(),
-  LIVEKIT_API_KEY: z.string().optional(),
-  LIVEKIT_API_SECRET: z.string().optional()
-});
+const envSchema = z
+  .object({
+    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    DATABASE_PATH: z.string().default("./data/dmax.dev.sqlite"),
+    TZ: z.string().default("Europe/Berlin"),
+    OPENAI_API_KEY: z.string().optional(),
+    OPENAI_TRANSCRIBE_MODEL: z.string().default("gpt-4o-mini-transcribe"),
+    OPENAI_MEDIA_ANALYSIS_MODEL: z.string().default("gpt-4.1-mini"),
+    OPENAI_TTS_MODEL: z.string().default("gpt-4o-mini-tts"),
+    OPENAI_TTS_VOICE: z.string().default("alloy"),
+    XAI_API_KEY: z.string().optional(),
+    XAI_REALTIME_MODEL: z.string().default("grok-voice-think-fast-1.0"),
+    DMAX_OPENCLAW_CONFIG_PATH: z.string().default("./openclaw/config.web.json"),
+    DMAX_OPENCLAW_STATE_DIR: z.string().default("./data/openclaw-web-state"),
+    DMAX_OPENCLAW_CLIENT_STATE_DIR: z.string().optional(),
+    DMAX_OPENCLAW_MODEL: z.string().default("openai-codex/gpt-5.5"),
+    DMAX_OPENCLAW_GATEWAY_URL: z.string().optional(),
+    DMAX_OPENCLAW_SESSION_ID: z.string().default("dmax-web-app-chat"),
+    DMAX_OPENCLAW_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(240),
+    DMAX_OPENCLAW_PREWARM: z.string().default("0"),
+    DMAX_OPENCLAW_PREWARM_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+    DMAX_OPENCLAW_PREWARM_WAIT_FOR_COMPLETION: z.string().default("0"),
+    DMAX_API_PORT: z.coerce.number().int().positive().default(3088),
+    DMAX_WEB_BASE_URL: z.string().default("http://localhost:5173"),
+    DMAX_WEB_DIST_DIR: z.string().default("./dist-web"),
+    DMAX_MEDIA_STORAGE_DIR: z.string().default("./data/media"),
+    DMAX_MEDIA_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(52_428_800),
+    DMAX_INTERNAL_TOOL_TOKEN: z.string().optional(),
+    TELEGRAM_BOT_TOKEN: z.string().optional(),
+    TELEGRAM_ALLOWED_USER_IDS: z.string().default(""),
+    GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
+    GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
+    GOOGLE_OAUTH_REDIRECT_URI: z.string().optional(),
+    GOOGLE_CALENDAR_TOKEN_PATH: z.string().default("./data/google-calendar-oauth.json"),
+    DMAX_VOICE_ALLOWED_CALLERS: z.string().default(""),
+    DMAX_VOICE_PUBLIC_BASE_URL: z.string().default(""),
+    DMAX_VOICE_PORT: z.coerce.number().int().positive().default(3099),
+    TWILIO_ACCOUNT_SID: z.string().optional(),
+    TWILIO_AUTH_TOKEN: z.string().optional(),
+    TWILIO_VOICE_NUMBER: z.string().optional(),
+    LIVEKIT_URL: z.string().optional(),
+    LIVEKIT_API_KEY: z.string().optional(),
+    LIVEKIT_API_SECRET: z.string().optional()
+  })
+  .superRefine((input, context) => {
+    if (input.NODE_ENV === "production" && !input.DMAX_OPENCLAW_GATEWAY_URL?.trim()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["DMAX_OPENCLAW_GATEWAY_URL"],
+        message: "DMAX_OPENCLAW_GATEWAY_URL is required when NODE_ENV=production."
+      });
+    }
+  });
 
 const parsedEnv = envSchema.parse(process.env);
 
@@ -59,7 +74,9 @@ export const env = {
   xaiRealtimeModel: parsedEnv.XAI_REALTIME_MODEL,
   dmaxOpenClawConfigPath: path.resolve(parsedEnv.DMAX_OPENCLAW_CONFIG_PATH),
   dmaxOpenClawStateDir: path.resolve(parsedEnv.DMAX_OPENCLAW_STATE_DIR),
+  dmaxOpenClawClientStateDir: parsedEnv.DMAX_OPENCLAW_CLIENT_STATE_DIR ? path.resolve(parsedEnv.DMAX_OPENCLAW_CLIENT_STATE_DIR) : undefined,
   dmaxOpenClawModel: parsedEnv.DMAX_OPENCLAW_MODEL,
+  dmaxOpenClawGatewayUrl: parsedEnv.DMAX_OPENCLAW_GATEWAY_URL,
   dmaxOpenClawSessionId: parsedEnv.DMAX_OPENCLAW_SESSION_ID,
   dmaxOpenClawTimeoutSeconds: parsedEnv.DMAX_OPENCLAW_TIMEOUT_SECONDS,
   dmaxOpenClawPrewarm: parsedEnv.DMAX_OPENCLAW_PREWARM === "1",
@@ -70,6 +87,9 @@ export const env = {
   dmaxWebDistDir: path.resolve(parsedEnv.DMAX_WEB_DIST_DIR),
   dmaxMediaStorageDir: path.resolve(parsedEnv.DMAX_MEDIA_STORAGE_DIR),
   dmaxMediaMaxUploadBytes: parsedEnv.DMAX_MEDIA_MAX_UPLOAD_BYTES,
+  dmaxInternalToolToken: parsedEnv.DMAX_INTERNAL_TOOL_TOKEN,
+  telegramBotToken: parsedEnv.TELEGRAM_BOT_TOKEN,
+  telegramAllowedUserIds: parsedEnv.TELEGRAM_ALLOWED_USER_IDS,
   googleOAuthClientId: parsedEnv.GOOGLE_OAUTH_CLIENT_ID,
   googleOAuthClientSecret: parsedEnv.GOOGLE_OAUTH_CLIENT_SECRET,
   googleOAuthRedirectUri: parsedEnv.GOOGLE_OAUTH_REDIRECT_URI,

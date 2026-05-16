@@ -1,0 +1,15 @@
+{
+  "name": "@dmax/openclaw-dynamic-tools",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "openclaw": {
+    "extensions": [
+      "./index.mjs"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.12",
+      "minGatewayVersion": "2026.5.12"
+    }
+  }
+}

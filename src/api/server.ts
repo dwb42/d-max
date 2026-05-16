@@ -57,6 +57,8 @@ import { synthesizeSpeech } from "../chat/text-to-speech.js";
 import { createLiveKitVoiceSession } from "./livekit.js";
 import { sendStaticWebAsset } from "./static-files.js";
 import { createChatTurnTraceId, recordChatTurnDiagnosticEvent } from "../diagnostics/chat-turns.js";
+import { createToolRunner } from "../mcp/tool-registry.js";
+import { startTelegramBot, type TelegramBotController } from "../telegram/bot.js";
 
 const port = env.dmaxApiPort;
 
@@ -88,6 +90,8 @@ const taskChecklistItems = new TaskChecklistItemRepository(db);
 const stateEvents = new StateEventRepository(db);
 const chat = new AppChatService(db);
 const chatMessages = new AppChatRepository(db);
+const dmaxToolRunner = createToolRunner();
+let telegramBot: TelegramBotController | null = null;
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -100,6 +104,54 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/health") {
       sendJson(res, 200, { ok: true });
+      return;
+    }
+
+    const internalToolMatch = url.pathname.match(/^\/internal\/openclaw\/tools\/([^/]+)$/);
+    if (req.method === "POST" && internalToolMatch) {
+      if (!authorizeInternalToolRequest(req)) {
+        sendJson(res, env.dmaxInternalToolToken ? 401 : 503, {
+          ok: false,
+          error: env.dmaxInternalToolToken ? "Unauthorized internal tool request." : "Internal tool endpoint is not configured."
+        });
+        return;
+      }
+
+      const traceStartedAt = new Date().toISOString();
+      const rawToolName = decodeURIComponent(internalToolMatch[1] ?? "");
+      const toolName = rawToolName.startsWith("d-max__") ? rawToolName.slice("d-max__".length) : rawToolName;
+      const tool = dmaxToolRunner.list().find((candidate) => candidate.name === toolName);
+      const requestTraceId = getRequestTraceId(req);
+      if (!tool) {
+        recordApiDiagnostic(requestTraceId, traceStartedAt, "api_internal_tool_unknown", { toolName });
+        sendJson(res, 404, { ok: false, error: `Unknown tool: ${toolName}` });
+        return;
+      }
+
+      const body = internalToolBody.parse(await readJson(req));
+      const traceId = body.traceId ?? requestTraceId;
+      const startedAt = Date.now();
+      recordApiDiagnostic(traceId, traceStartedAt, "api_internal_tool_started", {
+        toolName,
+        inputKeys: isRecord(body.input) ? Object.keys(body.input) : []
+      });
+
+      try {
+        const result = await dmaxToolRunner.run(tool.name, body.input ?? {}, { db });
+        recordApiDiagnostic(traceId, traceStartedAt, "api_internal_tool_finished", {
+          toolName,
+          ok: result.ok,
+          durationMs: Date.now() - startedAt
+        });
+        sendJson(res, 200, { ok: true, result });
+      } catch (error) {
+        recordApiDiagnostic(traceId, traceStartedAt, "api_internal_tool_failed", {
+          toolName,
+          durationMs: Date.now() - startedAt,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "Unknown tool execution error." });
+      }
       return;
     }
 
@@ -1438,6 +1490,11 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(port, () => {
   console.log(`d-max api server listening on http://localhost:${port}`);
+  telegramBot = startTelegramBot({
+    token: env.telegramBotToken,
+    allowedUserIds: env.telegramAllowedUserIds,
+    chat
+  });
   void warmOpenClawGateway().catch((error: unknown) => {
     console.error(
       `OpenClaw gateway warmup failed: ${error instanceof Error ? error.message : "unknown error"}`
@@ -1449,6 +1506,7 @@ process.on("SIGINT", () => shutdown());
 process.on("SIGTERM", () => shutdown());
 
 function shutdown(): void {
+  telegramBot?.stop();
   server.close(() => {
     db.close();
     process.exit(0);
@@ -1837,6 +1895,11 @@ const chatMessageBody = z.object({
 
 const prewarmOpenClawBody = z.object({
   context: conversationContextSchema.nullable().optional()
+});
+
+const internalToolBody = z.object({
+  input: z.unknown().optional(),
+  traceId: z.string().trim().min(1).max(160).optional()
 });
 
 const browserDiagnosticBody = z.object({
@@ -2365,6 +2428,21 @@ function getRequestTraceId(req: http.IncomingMessage): string {
   return createChatTurnTraceId();
 }
 
+function authorizeInternalToolRequest(req: http.IncomingMessage): boolean {
+  const token = env.dmaxInternalToolToken?.trim();
+  if (!token) {
+    return false;
+  }
+
+  const authorization = req.headers.authorization;
+  const value = Array.isArray(authorization) ? authorization[0] : authorization;
+  return value === `Bearer ${token}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function recordApiDiagnostic(
   traceId: string,
   traceStartedAt: string,
@@ -2505,7 +2583,7 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "http://localhost:5173",
     "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
-    "access-control-allow-headers": "content-type,x-dmax-trace-id,x-file-name",
+    "access-control-allow-headers": "authorization,content-type,x-dmax-trace-id,x-file-name",
     "access-control-expose-headers": "x-dmax-trace-id"
   });
   res.end(JSON.stringify(body));

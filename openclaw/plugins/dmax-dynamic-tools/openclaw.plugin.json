@@ -1,0 +1,70 @@
+{
+  "id": "dmax-dynamic-tools",
+  "name": "DMAX Dynamic Tools",
+  "description": "Expose DMAX deterministic tools as OpenClaw dynamic tools through the dmax-api internal tool endpoint.",
+  "version": "0.1.0",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "d-max__listCategories",
+      "d-max__createCategory",
+      "d-max__updateCategory",
+      "d-max__listInitiatives",
+      "d-max__getInitiative",
+      "d-max__createInitiative",
+      "d-max__updateInitiative",
+      "d-max__archiveInitiative",
+      "d-max__updateInitiativeMarkdown",
+      "d-max__listInitiativeRelations",
+      "d-max__createInitiativeRelation",
+      "d-max__deleteInitiativeRelation",
+      "d-max__getInitiativeGraph",
+      "d-max__listTasks",
+      "d-max__createTask",
+      "d-max__updateTask",
+      "d-max__completeTask",
+      "d-max__deleteTask",
+      "d-max__listTaskChecklistItems",
+      "d-max__createTaskChecklistItem",
+      "d-max__updateTaskChecklistItem",
+      "d-max__deleteTaskChecklistItem",
+      "d-max__reorderTaskChecklistItems",
+      "d-max__listMediaAttachments",
+      "d-max__attachMediaToEntity",
+      "d-max__updateMediaAttachment",
+      "d-max__deleteMediaAttachment",
+      "d-max__reorderMediaAttachments",
+      "d-max__listPeople",
+      "d-max__getPerson",
+      "d-max__createPerson",
+      "d-max__updatePerson",
+      "d-max__listOrganizations",
+      "d-max__getOrganization",
+      "d-max__createOrganization",
+      "d-max__updateOrganization",
+      "d-max__listRelationshipTypes",
+      "d-max__listPartyRelationships",
+      "d-max__createPartyRelationship",
+      "d-max__deletePartyRelationship",
+      "d-max__listParticipantRoleTypes",
+      "d-max__listEntityParticipants",
+      "d-max__createEntityParticipant",
+      "d-max__deleteEntityParticipant",
+      "d-max__listPartyContactPoints",
+      "d-max__createPartyContactPoint",
+      "d-max__updatePartyContactPoint"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "endpointUrl": {
+        "type": "string",
+        "description": "Optional internal dmax-api tool endpoint base URL. The plugin normally reads DMAX_TOOL_ENDPOINT_URL from the container environment."
+      }
+    }
+  }
+}

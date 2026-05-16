@@ -49,8 +49,16 @@ npm run smoke:mcp
 
 ## Production Deployment
 
-The production path is a single container that serves the built React app, the
-API, and the embedded OpenClaw gateway process:
+The production path is a two-container Docker Compose topology:
+
+- `dmax-api`: owns SQLite, media, Google OAuth token files, Telegram/API/static
+  web routes, and the current voice code.
+- `dmax-openclaw`: owns OpenClaw Gateway 2026.5.12, `OPENCLAW_STATE_DIR`, and
+  OpenClaw-managed Codex OAuth state.
+
+`dmax-api` talks to `dmax-openclaw` over the internal Docker network at
+`http://dmax-openclaw:18789`; production fails fast if
+`DMAX_OPENCLAW_GATEWAY_URL` is missing.
 
 ```bash
 cp .env.example .env
@@ -65,89 +73,94 @@ NODE_ENV=production
 DMAX_WEB_BASE_URL=https://dmax.example.com
 GOOGLE_OAUTH_REDIRECT_URI=https://dmax.example.com/api/config/google-calendar/oauth/callback
 DMAX_HOST_PORT=49415
+DMAX_INTERNAL_TOOL_TOKEN=<strong random value>
+OPENCLAW_GATEWAY_TOKEN=<strong random value>
 ```
 
 Set the provider secrets the enabled features need, for example
-`GEMINI_API_KEY`, `XAI_API_KEY`, LiveKit credentials, and Google OAuth
-credentials. `OPENAI_API_KEY` is only required for direct API-key fallback paths
-or media analysis/transcription features that still use OpenAI APIs directly.
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`, `GEMINI_API_KEY`,
+`XAI_API_KEY`, LiveKit credentials, and Google OAuth credentials.
+`OPENAI_API_KEY` is only required for direct API-key fallback paths or media
+analysis/transcription features that still use OpenAI APIs directly.
 `DMAX_WEB_BASE_URL` and `GOOGLE_OAUTH_REDIRECT_URI` must point at the public
 domain.
 
 Terminate TLS in a reverse proxy such as Caddy or Nginx and proxy the public
-domain to `127.0.0.1:${DMAX_HOST_PORT}`. The container listens internally on
-port `3088`; `docker-compose.yml` binds it to localhost only.
+domain to `127.0.0.1:${DMAX_HOST_PORT}`. `docker-compose.yml` binds only
+`dmax-api` to localhost; `dmax-openclaw` is exposed only on the internal Docker
+network.
 
 Persistent runtime data lives in the named volume `dmax-data` mounted at
-`/app/data`. This includes SQLite, uploaded media, Google OAuth token files,
-and OpenClaw runtime state. Database migrations run automatically during
-`npm run start:prod` before the API/web server starts.
+`/app/data` in `dmax-api`. This includes SQLite, uploaded media, and Google
+OAuth token files. OpenClaw runtime state lives separately in
+`dmax-openclaw-state` mounted at `/app/data/openclaw-state` in
+`dmax-openclaw`; `dmax-api` mounts that volume read-only at `/app/openclaw-state`
+only for transcript/trajectory reads. Database migrations run automatically
+when the API server starts.
+
+Telegram is owned by `dmax-api`, not `dmax-openclaw`. When
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_ALLOWED_USER_IDS` are set, `dmax-api` starts
+an allowlisted Telegram long-polling bridge and routes authorized text messages
+through the existing app-chat/OpenClaw tool path. `dmax-openclaw` keeps its
+Telegram channel disabled.
 
 ## Production Deployment — Codex/OAuth
 
-Production OpenClaw uses `openai-codex/gpt-5.5` through Codex CLI ChatGPT OAuth.
-The Codex auth store is the named Docker volume `dmax-codex-auth`, mounted at
-`/root/.codex`. Do not copy `auth.json` into the repo, the image, or `.env`.
-The production image pins `openclaw@2026.4.26` and installs the Codex CLI in the
-runner stage. `openclaw@2026.4.29` is known-bad in the production container
-because the Telegram plugin can fail during runtime dependency loading with a
-missing `../dist/babel.cjs` from `jiti`; verify later OpenClaw pins in a fresh
-container before changing the Dockerfile.
+Production OpenClaw uses `openai/gpt-5.5` with `agentRuntime.id = "codex"`.
+The production image pins OpenClaw 2026.5.12 and `dmax-openclaw` seeds
+`@openclaw/codex@2026.5.12` into its active `OPENCLAW_STATE_DIR` at boot.
+Codex OAuth state belongs only in the `dmax-openclaw-state` volume. Do not copy
+OAuth tokens into the repo, the image, `.env`, or `/root/.codex`.
 
 First-time Codex OAuth login on the VPS:
 
 1. In the ChatGPT account, open `chatgpt.com/#settings`, then Security,
    Advanced Security, and enable "Autorisierung per Gerätecode für Codex
    aktivieren".
-2. Start the device login inside the running container:
+2. Start the OpenClaw-managed ChatGPT device-code login inside
+   `dmax-openclaw`:
 
    ```bash
-   docker exec -d <container> sh -c "nohup codex login --device-auth > /root/.codex/login.log 2>&1 &"
+   docker compose exec dmax-openclaw sh -lc \
+     'OPENCLAW_CONFIG_PATH=/app/openclaw/config.production-512.json OPENCLAW_STATE_DIR=/app/data/openclaw-state openclaw models auth login --provider openai-codex --method device-code'
    ```
 
-3. Read the device URL and code from the volume-backed log:
+3. Complete the browser device authorization shown by that command. Do not
+   paste device codes, account emails, or tokens into issue trackers, docs, or
+   chat logs.
+4. Trigger the first backend connection from `dmax-api`:
 
    ```bash
-   docker exec <container> cat /root/.codex/login.log
+   curl -fsS http://127.0.0.1:${DMAX_HOST_PORT:-49415}/api/openclaw/status
    ```
 
-4. Open the URL in a browser, enter the code, and authorize with the ChatGPT
-   account.
-5. Verify the login:
+5. Approve the backend gateway device request inside `dmax-openclaw`:
 
    ```bash
-   docker exec <container> codex login status
+   docker compose exec dmax-openclaw sh -lc \
+     'OPENCLAW_STATE_DIR=/app/data/openclaw-state openclaw devices list'
+
+   docker compose exec dmax-openclaw sh -lc \
+     'OPENCLAW_STATE_DIR=/app/data/openclaw-state openclaw devices approve <requestId>'
    ```
 
-   Expected status includes `Logged in using ChatGPT`.
-6. Restart the service:
+6. Restart `dmax-openclaw`, then verify `dmax-api` reconnects:
 
    ```bash
-   docker compose restart d-max
+   docker compose restart dmax-openclaw
+   curl -fsS http://127.0.0.1:${DMAX_HOST_PORT:-49415}/api/openclaw/status
    ```
 
 Re-login when tokens are revoked or when switching accounts:
 
 ```bash
-docker volume rm <project>_dmax-codex-auth
+docker compose down
+docker volume rm <project>_dmax-openclaw-state
 docker compose up -d
 ```
 
 Then repeat the first-time login steps. The volume is the source of truth for
 Codex OAuth state.
-
-Fallback API key path: if OAuth is blocked, set `OPENAI_API_KEY=<key>` in
-`.env` and change `openclaw/config.production.json` to use:
-
-```json
-{
-  "provider": "openai-codex",
-  "mode": "api-key",
-  "apiKey": "${OPENAI_API_KEY}"
-}
-```
-
-That fallback uses OpenAI API-key billing, not the ChatGPT plan.
 
 Production smoke checks:
 
@@ -155,13 +168,74 @@ Production smoke checks:
 curl -i http://localhost:${DMAX_HOST_PORT:-49415}/health
 curl -I http://localhost:${DMAX_HOST_PORT:-49415}/
 curl -I http://localhost:${DMAX_HOST_PORT:-49415}/unknown/spa/route
-docker image ls d-max-d-max
-docker exec <container> codex --version
-docker exec <container> openclaw --version
-docker exec <container> ls /usr/local/lib/node_modules/openclaw/docs/reference/templates/AGENTS.md
+curl -fsS http://localhost:${DMAX_HOST_PORT:-49415}/api/openclaw/status
+docker compose exec dmax-openclaw openclaw --version
+docker compose exec dmax-openclaw sh -lc \
+  'OPENCLAW_CONFIG_PATH=/app/openclaw/config.production-512.json OPENCLAW_STATE_DIR=/app/data/openclaw-state openclaw plugins list --json'
 ```
 
-Expected production OpenClaw version is `OpenClaw 2026.4.26 (be8c246)`.
+After Codex OAuth and backend device approval are complete, run the production
+topology latency/tool-call harness from the repo checkout:
+
+```bash
+DMAX_HOST_PORT=${DMAX_HOST_PORT:-49415} \
+npm run validate:prod-topology -- --project <compose-project-name>
+```
+
+Expected production OpenClaw version is `OpenClaw 2026.5.12 (f066dd2)`.
+The default agent in `openclaw/config.production-512.json` allows only
+`d-max__...` tools. Web/research remains separated in the `dmax-research`
+agent.
+
+Rollback to the prior single-container production layout is a git operation,
+not a token-copy operation:
+
+```bash
+docker compose down
+git restore \
+  AGENTS.md \
+  .env.example \
+  Dockerfile \
+  README.md \
+  docker-compose.yml \
+  docs/current-state.md \
+  openclaw/config.production.json \
+  package.json \
+  scripts/start-container.sh \
+  scripts/start-prod.ts \
+  src/api/server.ts \
+  src/chat/openclaw-agent.ts \
+  src/config/env.ts \
+  tests/openclaw/config-web-tools.test.ts
+rm -f \
+  docker-compose.staging-512.yml \
+  docs/architecture/DMAX_OPENCLAW_512_TWO_CONTAINER_PLAN.md \
+  docs/architecture/DMAX_OPENCLAW_512_TWO_CONTAINER_PRODUCTION_PROMOTION_VALIDATION_2026-05-16.md \
+  docs/architecture/DMAX_OPENCLAW_512_TWO_CONTAINER_PROMOTION_PLAN_2026-05-16.md \
+  docs/architecture/DMAX_OPENCLAW_512_TWO_CONTAINER_STAGING_REPORT_2026-05-16.md \
+  docs/archive/session-handoffs/session-handoff-openclaw-512-dmax-dynamic-tools-staging-2026-05-16.md \
+  docs/archive/session-handoffs/session-handoff-openclaw-512-dmax-mcp-staging-2026-05-16.md \
+  docs/archive/session-handoffs/session-handoff-openclaw-512-staging-2026-05-16.md \
+  docs/archive/session-handoffs/session-handoff-openclaw-512-two-container-plan-2026-05-16.md \
+  openclaw/config.production-512.json \
+  openclaw/config.staging-512.json \
+  scripts/validate-prod-topology.ts \
+  src/telegram/bot.ts \
+  tests/api/internal-openclaw-tools.test.ts \
+  tests/chat/openclaw-external-gateway.test.ts \
+  tests/openclaw/dmax-dynamic-tools-http-adapter.test.ts \
+  tests/openclaw/dmax-dynamic-tools-plugin.test.ts \
+  tests/openclaw/prod-topology-validation-harness.test.ts \
+  tests/openclaw/production-compose.test.ts \
+  tests/openclaw/production-rollback-docs.test.ts \
+  tests/telegram/bot.test.ts
+rm -rf openclaw/plugins/dmax-dynamic-tools src/telegram tests/telegram
+docker compose build
+docker compose up -d
+```
+
+Never copy OAuth/device auth state from Docker volumes into the repo or image
+during rollback.
 
 The API server serves the Vite build directly. `/assets/*` responses are cached
 with immutable long-term cache headers; `index.html` and SPA fallbacks use
@@ -199,7 +273,7 @@ generation when browser policy allows it.
 ## OpenClaw Checks
 
 ```bash
-npm install -g openclaw@2026.4.26
+npm install -g openclaw@2026.5.12
 OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.example.json" openclaw config validate --json
 OPENCLAW_CONFIG_PATH="$PWD/openclaw/config.example.json" openclaw mcp show --json
 ```

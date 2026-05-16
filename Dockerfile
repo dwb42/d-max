@@ -18,11 +18,12 @@ FROM node:24-slim AS runner
 
 WORKDIR /app
 
+ARG OPENCLAW_VERSION=2026.5.12
+
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates lsof \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install -g openclaw@2026.4.26 @openai/codex \
-  && install -d -m 700 /root/.codex \
+  && npm install -g openclaw@${OPENCLAW_VERSION} @openai/codex @openclaw/codex@${OPENCLAW_VERSION} \
   && npm cache clean --force \
   && rm -rf /root/.npm /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/man
 
@@ -40,10 +41,8 @@ ENV DMAX_API_PORT=3088
 ENV DMAX_WEB_DIST_DIR=/app/dist-web
 ENV DMAX_SCHEMA_PATH=/app/schema.sql
 ENV DMAX_MEDIA_STORAGE_DIR=/app/data/media
-ENV DMAX_OPENCLAW_CONFIG_PATH=/app/openclaw/config.production.json
-ENV DMAX_OPENCLAW_STATE_DIR=/app/data/openclaw-web-state
+ENV DMAX_OPENCLAW_CONFIG_PATH=/app/openclaw/config.production-512.json
+ENV DMAX_OPENCLAW_STATE_DIR=/app/openclaw-state
 ENV GOOGLE_CALENDAR_TOKEN_PATH=/app/data/google-calendar-oauth.json
 
-VOLUME ["/app/data"]
-
-CMD ["npm", "run", "start:prod"]
+CMD ["npm", "run", "api:prod"]
