@@ -30,11 +30,55 @@ export type OpenClawGatewayProcessExit = {
 
 export type OpenClawActivity = {
   id: string;
-  kind: "tool_call" | "tool_result" | "plan" | "reasoning";
+  kind: "tool_call" | "tool_result" | "plan" | "reasoning" | "research" | "workspace";
   status: "running" | "completed" | "failed";
   title: string;
   detail?: string;
   timestamp?: string;
+  agentId?: string;
+  toolName?: string;
+  query?: string;
+  url?: string;
+  command?: string;
+  service?: string;
+  operation?: string;
+  fileId?: string;
+  spreadsheetId?: string;
+  range?: string;
+};
+
+export type OpenClawResearchPage = {
+  url: string;
+  status?: string | null;
+};
+
+export type OpenClawResearchSummary = {
+  agentId: "dmax-research";
+  status: "running" | "completed" | "failed";
+  startedAt: string | null;
+  completedAt: string | null;
+  searchCount: number;
+  pageCount: number;
+  queries: string[];
+  pages: OpenClawResearchPage[];
+};
+
+export type OpenClawWorkspaceSummary = {
+  agentId: "dmax-google-workspace";
+  status: "running" | "completed" | "failed";
+  startedAt: string | null;
+  completedAt: string | null;
+  operationCount: number;
+  readCount: number;
+  writeCount: number;
+  operations: {
+    service?: string | null;
+    operation: string;
+    fileId?: string | null;
+    spreadsheetId?: string | null;
+    range?: string | null;
+    status?: string | null;
+  }[];
 };
 
 export type OpenClawPreparedSession = {
@@ -47,6 +91,7 @@ export type OpenClawPreparedSession = {
 export type OpenClawActivityCursor = {
   sessionId: string;
   initialFileSize: number;
+  startedAt: string;
 };
 
 export type OpenClawAgentOptions = {
@@ -151,6 +196,11 @@ type OpenClawGatewayConnection = {
   gatewayUrl: string;
   closed: boolean;
   closeError: Error | null;
+};
+
+type RuntimeOpenClawConfigPreparation = {
+  path: string;
+  changed: boolean;
 };
 
 export async function runOpenClawAgentTurn(message: string, options: OpenClawAgentOptions = {}): Promise<OpenClawAgentResult> {
@@ -552,8 +602,19 @@ async function startOpenClawGateway(options: { configPath: string; stateDir: str
   }
 
   traceOpenClaw(options.diagnostics, "openclaw_gateway_runtime_config_prepare_started");
-  const runtimeConfigPath = prepareRuntimeOpenClawConfig(options.configPath, options.stateDir);
-  traceOpenClaw(options.diagnostics, "openclaw_gateway_runtime_config_prepare_finished", { runtimeConfigPath });
+  const runtimeConfig = prepareRuntimeOpenClawConfig(options.configPath, options.stateDir);
+  traceOpenClaw(options.diagnostics, "openclaw_gateway_runtime_config_prepare_finished", {
+    runtimeConfigPath: runtimeConfig.path,
+    runtimeConfigChanged: runtimeConfig.changed
+  });
+  if (isOpenClawGatewayPortBound()) {
+    const shouldRestartBoundGateway = runtimeConfig.changed || !isManagedOpenClawGatewayProcessRunning();
+    if (shouldRestartBoundGateway) {
+      traceOpenClaw(options.diagnostics, "openclaw_gateway_runtime_config_drift_restart_started");
+      await stopOpenClawGatewayListeners(options.diagnostics);
+      traceOpenClaw(options.diagnostics, "openclaw_gateway_runtime_config_drift_restart_finished");
+    }
+  }
   if (isOpenClawGatewayPortBound()) {
     traceOpenClaw(options.diagnostics, "openclaw_gateway_existing_port_wait_started");
     await waitForOpenClawGateway(options);
@@ -570,11 +631,11 @@ async function startOpenClawGateway(options: { configPath: string; stateDir: str
       cwd: process.cwd(),
       env: {
         ...process.env,
-        OPENCLAW_CONFIG_PATH: runtimeConfigPath,
+        OPENCLAW_CONFIG_PATH: runtimeConfig.path,
         OPENCLAW_STATE_DIR: options.stateDir,
         OPENCLAW_DISABLE_BONJOUR: "1",
         OPENCLAW_CODEX_DISCOVERY_LIVE: "0",
-        DMAX_OPENCLAW_AUTO_YIELD_AFTER_SPAWN: "0",
+        DMAX_OPENCLAW_AUTO_YIELD_AFTER_SPAWN: "1",
         DMAX_OPENCLAW_EARLY_PRUNE_LOCAL_TOOLS: "1",
         // OpenClaw 2026.4.26 uses its Vitest/test-runtime guard only to skip the
         // gateway model-pricing refresh unless OPENCLAW_TEST_MINIMAL_GATEWAY is set.
@@ -603,15 +664,57 @@ async function startOpenClawGateway(options: { configPath: string; stateDir: str
 }
 
 function isOpenClawGatewayPortBound(): boolean {
+  return getOpenClawGatewayListenerPids().length > 0;
+}
+
+function getOpenClawGatewayListenerPids(): number[] {
   try {
     const output = execFileSync("lsof", ["-ti", "tcp:18789", "-sTCP:LISTEN"], {
       encoding: "utf8",
       timeout: 1000,
       stdio: ["ignore", "pipe", "ignore"]
     });
-    return output.trim().length > 0;
+    return output
+      .split(/\s+/)
+      .map((value) => Number.parseInt(value, 10))
+      .filter((pid) => Number.isInteger(pid) && pid > 0);
   } catch {
-    return false;
+    return [];
+  }
+}
+
+function isManagedOpenClawGatewayProcessRunning(): boolean {
+  return Boolean(gatewayProcess && !gatewayProcess.killed && gatewayProcess.exitCode === null);
+}
+
+async function stopOpenClawGatewayListeners(diagnostics?: ChatTurnDiagnosticContext): Promise<void> {
+  const pids = new Set(getOpenClawGatewayListenerPids());
+  if (gatewayProcess?.pid) {
+    pids.add(gatewayProcess.pid);
+  }
+
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGKILL");
+      traceOpenClaw(diagnostics, "openclaw_gateway_listener_kill_sent", { pid });
+    } catch (error) {
+      traceOpenClaw(diagnostics, "openclaw_gateway_listener_kill_failed", {
+        pid,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+  gatewayProcess = null;
+  gatewayPrewarmCompletedKey = null;
+  gatewayPrewarmFailedKey = null;
+  markOpenClawGatewayNotReady();
+
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (!isOpenClawGatewayPortBound()) {
+      return;
+    }
+    await delay(100);
   }
 }
 
@@ -634,7 +737,7 @@ function resolveOpenClawGatewayWsUrl(): string {
   return parsed.toString().replace(/\/$/, "");
 }
 
-function prepareRuntimeOpenClawConfig(configPath: string, stateDir: string): string {
+function prepareRuntimeOpenClawConfig(configPath: string, stateDir: string): RuntimeOpenClawConfigPreparation {
   const runtimeConfigPath = path.join(stateDir, "config.web.runtime.json");
   const parsed = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
   seedOpenClawWebModelPricing(parsed);
@@ -658,11 +761,11 @@ function prepareRuntimeOpenClawConfig(configPath: string, stateDir: string): str
 
   mkdirSync(path.dirname(runtimeConfigPath), { recursive: true });
   if (runtimeConfigMatches(runtimeConfigPath, parsed)) {
-    return runtimeConfigPath;
+    return { path: runtimeConfigPath, changed: false };
   }
 
   writeFileSync(runtimeConfigPath, `${JSON.stringify(parsed, null, 2)}\n`, { mode: 0o600 });
-  return runtimeConfigPath;
+  return { path: runtimeConfigPath, changed: true };
 }
 
 function seedOpenClawWebModelPricing(config: Record<string, unknown>): void {
@@ -1223,6 +1326,7 @@ async function runOpenClawGatewayTurn(
 ): Promise<OpenClawAgentResult> {
   const sessionFile = getOpenClawSessionFile(options.stateDir, options.sessionId);
   const initialSessionFileSize = getFileSize(sessionFile);
+  const activityStartedAt = new Date().toISOString();
   traceOpenClaw(options.diagnostics, "openclaw_gateway_agent_call_prepared", {
     sessionFile,
     initialSessionFileSize,
@@ -1248,7 +1352,11 @@ async function runOpenClawGatewayTurn(
   markOpenClawGatewayReady();
 
   const text = extractGatewayReplyText(parsed);
-  const activities = readOpenClawSessionActivities(sessionFile, initialSessionFileSize);
+  const activities = mergeActivities([
+    ...readOpenClawSessionActivities(sessionFile, initialSessionFileSize),
+    ...readSubagentActivities(options.stateDir, "dmax-research", activityStartedAt),
+    ...readSubagentActivities(options.stateDir, "dmax-google-workspace", activityStartedAt)
+  ]);
   traceOpenClaw(options.diagnostics, "openclaw_gateway_agent_call_completed", {
     replyChars: text.length,
     activities: activities.length
@@ -1291,6 +1399,7 @@ async function runOpenClawGatewaySessionTurn(
   }
 
   const initialSessionFileSize = getFileSize(sessionFile);
+  const activityStartedAt = new Date().toISOString();
   const timeoutMs = options.timeoutSeconds * 1000;
   const idempotencyKey = `${input.sessionKey}-${Date.now()}`;
   traceOpenClaw(options.diagnostics, "openclaw_sessions_send_started", {
@@ -1398,14 +1507,33 @@ async function runOpenClawGatewaySessionTurn(
     throw new DOMException("OpenClaw run aborted.", "AbortError");
   }
 
+  const activePrepared = readPreparedSessionFromRegistry(options.stateDir, input.sessionKey);
+  const sessionWasReplaced =
+    Boolean(activePrepared?.sessionFile) &&
+    (activePrepared?.sessionId !== prepared.sessionId || activePrepared?.sessionFile !== sessionFile);
+  const replySessionId = activePrepared?.sessionId ?? prepared.sessionId;
+  const replySessionFile = activePrepared?.sessionFile ?? sessionFile;
+  const replyInitialSessionFileSize = sessionWasReplaced ? 0 : initialSessionFileSize;
+  if (activePrepared && sessionWasReplaced) {
+    cachePreparedSession(input.sessionKey, options.stateDir, activePrepared);
+    traceOpenClaw(options.diagnostics, "openclaw_session_replaced_during_run", {
+      sessionKey: input.sessionKey,
+      previousSessionId: prepared.sessionId,
+      activeSessionId: activePrepared.sessionId,
+      activeSessionFile: activePrepared.sessionFile
+    });
+  }
+
+  const replyWaitTimeoutMs = Math.max(SESSION_REPLY_WAIT_TIMEOUT_MS, timeoutMs);
   traceOpenClaw(options.diagnostics, "openclaw_session_reply_wait_started", {
     runId,
-    timeoutMs: SESSION_REPLY_WAIT_TIMEOUT_MS
+    timeoutMs: replyWaitTimeoutMs,
+    sessionId: replySessionId
   });
   const reply = await raceWithAbort(
-    waitForCompletedSessionReply(sessionFile, initialSessionFileSize, SESSION_REPLY_WAIT_TIMEOUT_MS, options.diagnostics, {
+    waitForCompletedSessionReply(replySessionFile, replyInitialSessionFileSize, replyWaitTimeoutMs, options.diagnostics, {
       sessionKey: input.sessionKey,
-      sessionId: prepared.sessionId,
+      sessionId: replySessionId,
       runId
     }),
     options.signal,
@@ -1416,9 +1544,14 @@ async function runOpenClawGatewaySessionTurn(
   }
   traceOpenClaw(options.diagnostics, "openclaw_session_reply_wait_finished", {
     runId,
-    found: Boolean(reply)
+    found: Boolean(reply),
+    sessionId: replySessionId
   });
-  const activities = readOpenClawSessionActivities(sessionFile, initialSessionFileSize);
+  const activities = mergeActivities([
+    ...readOpenClawSessionActivities(replySessionFile, replyInitialSessionFileSize),
+    ...readSubagentActivities(options.stateDir, "dmax-research", activityStartedAt),
+    ...readSubagentActivities(options.stateDir, "dmax-google-workspace", activityStartedAt)
+  ]);
   if (!reply) {
     const fallbackText = fallbackReplyFromActivities(activities);
     if (!fallbackText) {
@@ -1426,7 +1559,7 @@ async function runOpenClawGatewaySessionTurn(
     }
     traceOpenClaw(options.diagnostics, "openclaw_sessions_turn_completed_without_reply", {
       sessionKey: input.sessionKey,
-      sessionId: prepared.sessionId,
+      sessionId: replySessionId,
       runId,
       activities: activities.length
     });
@@ -1440,14 +1573,14 @@ async function runOpenClawGatewaySessionTurn(
         fallback: "activity_summary"
       },
       activities,
-      sessionId: prepared.sessionId,
-      sessionKey: prepared.key
+      sessionId: replySessionId,
+      sessionKey: activePrepared?.key ?? prepared.key
     };
   }
 
   traceOpenClaw(options.diagnostics, "openclaw_sessions_turn_completed", {
     sessionKey: input.sessionKey,
-    sessionId: prepared.sessionId,
+    sessionId: replySessionId,
     runId,
     replyChars: reply.text.length,
     activities: activities.length
@@ -1461,13 +1594,30 @@ async function runOpenClawGatewaySessionTurn(
       assistantMessageId: reply.messageId ?? null
     },
     activities,
-    sessionId: prepared.sessionId,
-    sessionKey: prepared.key
+    sessionId: replySessionId,
+    sessionKey: activePrepared?.key ?? prepared.key
   };
 }
 
 function fallbackReplyFromActivities(activities: OpenClawActivity[]): string | null {
-  const meaningful = activities.filter((activity) => activity.kind === "tool_result" || activity.kind === "tool_call");
+  const runningExternalAgent = activities.some((activity) =>
+    (activity.kind === "research" || activity.kind === "workspace") && activity.status === "running"
+  );
+  if (runningExternalAgent) {
+    return null;
+  }
+
+  const completedExternalAgent = [...activities]
+    .reverse()
+    .find((activity) => (activity.kind === "research" || activity.kind === "workspace") && activity.status === "completed");
+  if (completedExternalAgent) {
+    return `${completedExternalAgent.title}. Details sind in der Aktivitätsübersicht sichtbar.`;
+  }
+
+  const meaningful = activities.filter((activity) =>
+    (activity.kind === "tool_result" || activity.kind === "tool_call") &&
+    !["exec", "process", "sessions_spawn", "sessions_yield"].includes(activity.toolName ?? "")
+  );
   if (meaningful.length === 0) {
     return null;
   }
@@ -1503,14 +1653,19 @@ function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined, 
 
 export function listOpenClawSessionActivities(sessionId: string, options: Pick<OpenClawAgentOptions, "stateDir"> = {}): OpenClawActivity[] {
   const stateDir = options.stateDir ?? env.dmaxOpenClawStateDir;
-  return readOpenClawSessionActivities(getOpenClawSessionFile(stateDir, sessionId), 0);
+  return mergeActivities([
+    ...readOpenClawSessionActivities(getOpenClawSessionFile(stateDir, sessionId), 0),
+    ...readSubagentActivities(stateDir, "dmax-research", null),
+    ...readSubagentActivities(stateDir, "dmax-google-workspace", null)
+  ]);
 }
 
 export function createOpenClawActivityCursor(sessionId: string, options: Pick<OpenClawAgentOptions, "stateDir"> = {}): OpenClawActivityCursor {
   const stateDir = options.stateDir ?? env.dmaxOpenClawStateDir;
   return {
     sessionId,
-    initialFileSize: getFileSize(getOpenClawSessionFile(stateDir, sessionId))
+    initialFileSize: getFileSize(getOpenClawSessionFile(stateDir, sessionId)),
+    startedAt: new Date().toISOString()
   };
 }
 
@@ -1519,7 +1674,70 @@ export function listOpenClawSessionActivitiesSince(
   options: Pick<OpenClawAgentOptions, "stateDir"> = {}
 ): OpenClawActivity[] {
   const stateDir = options.stateDir ?? env.dmaxOpenClawStateDir;
-  return readOpenClawSessionActivities(getOpenClawSessionFile(stateDir, cursor.sessionId), cursor.initialFileSize);
+  return mergeActivities([
+    ...readOpenClawSessionActivities(getOpenClawSessionFile(stateDir, cursor.sessionId), cursor.initialFileSize),
+    ...readSubagentActivities(stateDir, "dmax-research", cursor.startedAt),
+    ...readSubagentActivities(stateDir, "dmax-google-workspace", cursor.startedAt)
+  ]);
+}
+
+export function summarizeOpenClawResearchActivities(activities: OpenClawActivity[]): OpenClawResearchSummary | null {
+  const researchActivities = activities.filter((activity) => activity.agentId === "dmax-research" || activity.kind === "research");
+  const queries = uniqueStrings(researchActivities.flatMap((activity) => activity.query ? [activity.query] : []));
+  const pageUrls = uniqueStrings(researchActivities.flatMap((activity) => activity.url ? [activity.url] : []));
+  const searchCount = researchActivities.filter((activity) => activity.toolName === "web_search" && activity.kind === "tool_call").length;
+  const pageCount = researchActivities.filter((activity) => activity.toolName === "web_fetch" && activity.kind === "tool_call").length;
+
+  if (researchActivities.length === 0 && queries.length === 0 && pageUrls.length === 0) {
+    return null;
+  }
+
+  const startedAt = researchActivities.find((activity) => activity.kind === "research" && activity.status === "running")?.timestamp
+    ?? firstTimestamp(researchActivities);
+  const completed = [...researchActivities].reverse().find((activity) => activity.kind === "research" && activity.status !== "running");
+  const failed = researchActivities.some((activity) => activity.status === "failed");
+
+  return {
+    agentId: "dmax-research",
+    status: failed ? "failed" : completed ? "completed" : "running",
+    startedAt: startedAt ?? null,
+    completedAt: completed?.timestamp ?? null,
+    searchCount,
+    pageCount,
+    queries,
+    pages: pageUrls.map((url) => ({ url }))
+  };
+}
+
+export function summarizeOpenClawWorkspaceActivities(activities: OpenClawActivity[]): OpenClawWorkspaceSummary | null {
+  const workspaceActivities = activities.filter((activity) => activity.agentId === "dmax-google-workspace" || activity.kind === "workspace");
+  if (workspaceActivities.length === 0) {
+    return null;
+  }
+
+  const operationActivities = workspaceActivities.filter((activity) => activity.operation);
+  const completed = [...workspaceActivities].reverse().find((activity) => activity.kind === "workspace" && activity.status !== "running");
+  const failed = workspaceActivities.some((activity) => activity.status === "failed");
+  const startedAt = workspaceActivities.find((activity) => activity.kind === "workspace" && activity.status === "running")?.timestamp
+    ?? firstTimestamp(workspaceActivities);
+
+  return {
+    agentId: "dmax-google-workspace",
+    status: failed ? "failed" : completed ? "completed" : "running",
+    startedAt: startedAt ?? null,
+    completedAt: completed?.timestamp ?? null,
+    operationCount: operationActivities.length,
+    readCount: operationActivities.filter((activity) => isGogReadOperation(activity.operation)).length,
+    writeCount: operationActivities.filter((activity) => isGogWriteOperation(activity.operation)).length,
+    operations: operationActivities.map((activity) => ({
+      service: activity.service ?? null,
+      operation: activity.operation ?? "gog",
+      fileId: activity.fileId ?? null,
+      spreadsheetId: activity.spreadsheetId ?? null,
+      range: activity.range ?? null,
+      status: activity.status
+    }))
+  };
 }
 
 export function readOpenClawTrajectorySummary(
@@ -2214,28 +2432,121 @@ function readCompletedSessionReply(
     .map(parseJsonLine)
     .filter(isRecord);
 
-  if (!records.some(isAssistantMessageRecord)) {
+  const assistantCandidates = records
+    .map((record, index) => ({ record, index }))
+    .filter(({ record }) => isAssistantMessageRecord(record));
+  if (assistantCandidates.length === 0) {
     return null;
   }
 
-  const assistantRecords = records.filter(isAssistantMessageRecord);
-  const lastAssistant = assistantRecords.at(-1);
-  if (!lastAssistant) {
-    return null;
+  let selectedAssistant: { record: Record<string, unknown>; index: number; text: string } | null = null;
+  for (const candidate of assistantCandidates.slice().reverse()) {
+    const text = extractAssistantRecordText(candidate.record);
+    if (!text) {
+      continue;
+    }
+    if (hasPendingExternalSubagentAt(records, candidate.index)) {
+      continue;
+    }
+    selectedAssistant = { ...candidate, text };
+    break;
   }
 
-  const text = extractAssistantRecordText(lastAssistant);
-  if (!text) {
+  if (!selectedAssistant) {
     return null;
   }
 
   latencyTrace(diagnostics, "dmax.session_file.assistant_found", {
     ...latencyDetails,
     recordCount: records.length,
-    assistantRecords: assistantRecords.length,
-    replyChars: text.length
+    assistantRecords: assistantCandidates.length,
+    replyChars: selectedAssistant.text.length
   }, performance.now() - parseStartedAt);
-  return { text, messageId: typeof lastAssistant.id === "string" ? lastAssistant.id : undefined };
+  return {
+    text: selectedAssistant.text,
+    messageId: typeof selectedAssistant.record.id === "string" ? selectedAssistant.record.id : undefined
+  };
+}
+
+function hasPendingExternalSubagentAt(records: Record<string, unknown>[], candidateIndex: number): boolean {
+  let pendingAnonymousSpawns = 0;
+  const pendingSessionKeys = new Set<string>();
+
+  for (let index = 0; index <= candidateIndex; index += 1) {
+    const record = records[index];
+    if (!record) {
+      continue;
+    }
+
+    pendingAnonymousSpawns += externalSubagentSpawnCount(record);
+
+    for (const childSessionKey of externalChildSessionKeysFromToolResult(record)) {
+      if (pendingAnonymousSpawns > 0) {
+        pendingAnonymousSpawns -= 1;
+      }
+      pendingSessionKeys.add(childSessionKey);
+    }
+
+    for (const completedSessionKey of externalCompletionSessionKeys(record)) {
+      pendingSessionKeys.delete(completedSessionKey);
+    }
+  }
+
+  return pendingAnonymousSpawns > 0 || pendingSessionKeys.size > 0;
+}
+
+function externalSubagentSpawnCount(record: Record<string, unknown>): number {
+  if (!isAssistantMessageRecord(record) || !isRecord(record.message) || !Array.isArray(record.message.content)) {
+    return 0;
+  }
+
+  return record.message.content.filter((part) => {
+    if (!isRecord(part) || part.type !== "toolCall" || part.name !== "sessions_spawn" || !isRecord(part.arguments)) {
+      return false;
+    }
+    return isExternalSubagentId(part.arguments.agentId);
+  }).length;
+}
+
+function externalChildSessionKeysFromToolResult(record: Record<string, unknown>): string[] {
+  if (record.type !== "message" || !isRecord(record.message) || record.message.role !== "toolResult") {
+    return [];
+  }
+
+  return recordTextParts(record)
+    .map((text) => parseJsonLine(text))
+    .filter(isRecord)
+    .map((value) => (typeof value.childSessionKey === "string" ? value.childSessionKey : null))
+    .filter((value): value is string => Boolean(value && isExternalChildSessionKey(value)));
+}
+
+function externalCompletionSessionKeys(record: Record<string, unknown>): string[] {
+  if (record.type !== "message" || !isRecord(record.message) || record.message.role !== "user") {
+    return [];
+  }
+
+  return recordTextParts(record)
+    .filter((text) => text.includes("[Internal task completion event]"))
+    .map((text) => text.match(/session_key:\s*([^\s]+)/)?.[1] ?? null)
+    .filter((value): value is string => Boolean(value && isExternalChildSessionKey(value)));
+}
+
+function recordTextParts(record: Record<string, unknown>): string[] {
+  if (!isRecord(record.message) || !Array.isArray(record.message.content)) {
+    return [];
+  }
+
+  return record.message.content
+    .map((part) => (isRecord(part) && part.type === "text" && typeof part.text === "string" ? part.text : null))
+    .filter((value): value is string => Boolean(value));
+}
+
+function isExternalSubagentId(value: unknown): boolean {
+  return value === "dmax-research" || value === "dmax-google-workspace";
+}
+
+function isExternalChildSessionKey(value: string): boolean {
+  return value.includes("agent:dmax-research:") || value.includes("agent:dmax-google-workspace:");
 }
 
 async function waitForCompletedSessionReply(
@@ -2280,6 +2591,131 @@ function readOpenClawSessionActivities(sessionFile: string, initialFileSize: num
     .slice(-24);
 }
 
+function readSubagentActivities(stateDir: string, agentId: "dmax-research" | "dmax-google-workspace", after: string | null): OpenClawActivity[] {
+  const sessionDir = path.join(stateDir, "agents", agentId, "sessions");
+  if (!existsSync(sessionDir)) {
+    return [];
+  }
+
+  const afterMs = after ? new Date(after).getTime() : null;
+  const kind = agentId === "dmax-research" ? "research" : "workspace";
+  const label = agentId === "dmax-research" ? "Webrecherche-Agent" : "Google-Workspace-Agent";
+  const activities: OpenClawActivity[] = [];
+  for (const fileName of safeReadDir(sessionDir)) {
+    if (!fileName.endsWith(".trajectory.jsonl")) {
+      continue;
+    }
+
+    const trajectoryFile = path.join(sessionDir, fileName);
+    const records = readJsonLines(trajectoryFile);
+    const started = records.find((record) => record.type === "session.started");
+    const sessionId = typeof started?.sessionId === "string" ? started.sessionId : fileName.replace(/\.trajectory\.jsonl$/, "");
+    const startedAt = typeof started?.ts === "string" ? started.ts : null;
+    if (afterMs !== null && (!startedAt || new Date(startedAt).getTime() < afterMs)) {
+      continue;
+    }
+
+    activities.push({
+      id: `${agentId}-${sessionId}-started`,
+      kind,
+      status: "running",
+      title: `${label} gestartet`,
+      detail: agentId,
+      timestamp: startedAt ?? undefined,
+      agentId
+    });
+
+    const sessionFile = subagentSessionFileFromTrajectoryRecord(started, stateDir, agentId, sessionId);
+    activities.push(...readOpenClawSessionActivities(sessionFile, 0).map((activity) => markSubagentActivity(activity, agentId)));
+    activities.push(...readSubagentActivitiesFromTrajectorySnapshots(records, agentId, sessionId));
+
+    const ended = [...records].reverse().find((record) => record.type === "session.ended");
+    if (ended) {
+      const status = isRecord(ended.data) && ended.data.status === "success" ? "completed" : "failed";
+      activities.push({
+        id: `${agentId}-${sessionId}-ended`,
+        kind,
+        status,
+        title: status === "completed" ? `${label} abgeschlossen` : `${label} fehlgeschlagen`,
+        timestamp: typeof ended.ts === "string" ? ended.ts : undefined,
+        agentId
+      });
+    }
+  }
+
+  return mergeActivities(activities).slice(-48);
+}
+
+function readSubagentActivitiesFromTrajectorySnapshots(records: Record<string, unknown>[], agentId: "dmax-research" | "dmax-google-workspace", sessionId: string): OpenClawActivity[] {
+  return records.flatMap((record) => {
+    if (record.type !== "model.completed" || !isRecord(record.data) || !Array.isArray(record.data.messagesSnapshot)) {
+      return [];
+    }
+
+    return record.data.messagesSnapshot
+      .filter(isRecord)
+      .flatMap((messageRecord, messageIndex) =>
+        activityFromSessionRecord({
+          type: "message",
+          id: `${sessionId}-snapshot-${messageIndex}`,
+          timestamp: typeof record.ts === "string" ? record.ts : undefined,
+          message: messageRecord
+        }).map((activity) => markSubagentActivity(activity, agentId))
+      );
+  });
+}
+
+function subagentSessionFileFromTrajectoryRecord(record: Record<string, unknown> | undefined, stateDir: string, agentId: "dmax-research" | "dmax-google-workspace", sessionId: string): string {
+  if (record && isRecord(record.data) && typeof record.data.sessionFile === "string") {
+    const sessionFile = record.data.sessionFile.replace("$OPENCLAW_STATE_DIR", stateDir);
+    return path.isAbsolute(sessionFile) ? sessionFile : path.join(stateDir, sessionFile);
+  }
+  return path.join(stateDir, "agents", agentId, "sessions", `${sessionId}.jsonl`);
+}
+
+function markSubagentActivity(activity: OpenClawActivity, agentId: "dmax-research" | "dmax-google-workspace"): OpenClawActivity {
+  return {
+    ...activity,
+    id: `${agentId}-${activity.id}`,
+    agentId,
+    ...(agentId === "dmax-google-workspace" ? inferGoogleWorkspaceActivity(activity) : {})
+  };
+}
+
+function mergeActivities(activities: OpenClawActivity[]): OpenClawActivity[] {
+  const seen = new Set<string>();
+  return activities
+    .filter((activity) => {
+      if (seen.has(activity.id)) {
+        return false;
+      }
+      seen.add(activity.id);
+      return true;
+    })
+    .sort((left, right) => (left.timestamp ?? "").localeCompare(right.timestamp ?? ""));
+}
+
+function safeReadDir(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+function readJsonLines(filePath: string): Record<string, unknown>[] {
+  try {
+    return readFileSync(filePath, "utf8")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map(parseJsonLine)
+      .filter(isRecord);
+  } catch {
+    return [];
+  }
+}
+
 function activityFromSessionRecord(record: Record<string, unknown>): OpenClawActivity[] {
   if (record.type !== "message" || !isRecord(record.message)) {
     return [];
@@ -2290,7 +2726,8 @@ function activityFromSessionRecord(record: Record<string, unknown>): OpenClawAct
   if (message.role === "toolResult") {
     const toolName = typeof message.toolName === "string" ? message.toolName : "tool";
     const isError = message.isError === true;
-    const detail = summarizeToolResult(toolName, isRecord(message.details) ? message.details : null);
+    const details = isRecord(message.details) ? message.details : null;
+    const detail = summarizeToolResult(toolName, details);
     return [
       {
         id: `result-${String(message.toolCallId ?? record.id ?? cryptoRandomId())}`,
@@ -2298,7 +2735,17 @@ function activityFromSessionRecord(record: Record<string, unknown>): OpenClawAct
         status: isError ? "failed" : "completed",
         title: `${formatToolName(toolName)} ${isError ? "fehlgeschlagen" : "abgeschlossen"}`,
         detail,
-        timestamp
+        timestamp,
+        toolName,
+        command: details ? extractCommand(details) : undefined,
+        query: toolName === "web_search" && details && typeof details.query === "string" ? details.query : undefined,
+        url: toolName === "web_fetch" && details
+          ? typeof details.finalUrl === "string"
+            ? details.finalUrl
+            : typeof details.url === "string"
+              ? details.url
+              : undefined
+          : undefined
       }
     ];
   }
@@ -2312,6 +2759,7 @@ function activityFromSessionRecord(record: Record<string, unknown>): OpenClawAct
     .flatMap((part, index): OpenClawActivity[] => {
       if (part.type === "toolCall" && typeof part.name === "string") {
         const args = isRecord(part.arguments) ? part.arguments : null;
+        const command = args ? extractCommand(args) : undefined;
         return [
           {
             id: `call-${String(part.id ?? record.id ?? cryptoRandomId())}-${index}`,
@@ -2319,7 +2767,11 @@ function activityFromSessionRecord(record: Record<string, unknown>): OpenClawAct
             status: "running",
             title: part.name === "update_plan" ? "Plan aktualisiert" : `${formatToolName(part.name)} gestartet`,
             detail: summarizeToolArguments(part.name, args),
-            timestamp
+            timestamp,
+            toolName: part.name,
+            command,
+            query: part.name === "web_search" && args && typeof args.query === "string" ? args.query : undefined,
+            url: part.name === "web_fetch" && args && typeof args.url === "string" ? args.url : undefined
           } satisfies OpenClawActivity
         ];
       }
@@ -2377,6 +2829,74 @@ function summarizeToolResult(toolName: string, details: Record<string, unknown> 
   }
 
   return tookMs ? tookMs.slice(3) : undefined;
+}
+
+function extractCommand(record: Record<string, unknown>): string | undefined {
+  for (const key of ["command", "cmd", "input", "script"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function inferGoogleWorkspaceActivity(activity: OpenClawActivity): Partial<OpenClawActivity> {
+  const command = activity.command ?? activity.detail;
+  if (!command || !/\bgog\s+(drive|docs|sheets?|slides|forms|sites)\b/.test(command)) {
+    return {};
+  }
+  const parsed = parseGogWorkspaceCommand(command);
+  return parsed
+    ? {
+        command,
+        service: parsed.service,
+        operation: parsed.operation,
+        fileId: parsed.fileId,
+        spreadsheetId: parsed.service === "sheets" ? parsed.fileId : undefined,
+        range: parsed.range
+      }
+    : { command, operation: "workspace" };
+}
+
+function parseGogWorkspaceCommand(command: string): { service: string; operation: string; fileId?: string; range?: string } | null {
+  const tokens = shellLikeTokens(command);
+  const gogIndex = tokens.findIndex((token) => token === "gog");
+  if (gogIndex < 0) {
+    return null;
+  }
+  const rawService = tokens[gogIndex + 1];
+  const service = rawService === "sheet" ? "sheets" : rawService;
+  if (!["drive", "docs", "sheets", "slides", "forms", "sites"].includes(service)) {
+    return null;
+  }
+  const operation = tokens[gogIndex + 2];
+  if (!operation) {
+    return null;
+  }
+  const fileId = tokens[gogIndex + 3]?.startsWith("-") ? undefined : tokens[gogIndex + 3];
+  const range = service === "sheets" && !tokens[gogIndex + 4]?.startsWith("-") ? tokens[gogIndex + 4] : undefined;
+  return { service, operation, fileId, range };
+}
+
+function shellLikeTokens(command: string): string[] {
+  return [...command.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)].map((match) => match[1] ?? match[2] ?? match[3] ?? "");
+}
+
+function isGogReadOperation(operation: string | undefined): boolean {
+  return Boolean(operation && ["get", "read", "show", "metadata", "info", "raw", "export", "download", "dl", "notes", "links", "hyperlinks"].includes(operation));
+}
+
+function isGogWriteOperation(operation: string | undefined): boolean {
+  return Boolean(operation && ["create", "new", "update", "edit", "set", "append", "add", "insert", "clear", "format", "merge", "unmerge", "freeze", "add-tab", "rename-tab", "delete-tab"].includes(operation));
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function firstTimestamp(activities: OpenClawActivity[]): string | undefined {
+  return activities.map((activity) => activity.timestamp).filter((value): value is string => Boolean(value)).sort()[0];
 }
 
 function formatToolName(name: string): string {

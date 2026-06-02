@@ -120,18 +120,21 @@ export class TaskRepository {
 
     const status = input.status ?? existing.status;
     const completedAt = status === "done" && existing.completedAt === null ? now : status === "done" ? existing.completedAt : null;
+    const nextInitiativeId = input.initiativeId ?? existing.initiativeId;
+    const nextSortOrder = nextInitiativeId === existing.initiativeId ? existing.sortOrder : this.nextSortOrder(nextInitiativeId);
 
     this.db
       .prepare(
-        "update tasks set initiative_id = ?, title = ?, status = ?, priority = ?, notes = ?, due_at = ?, updated_at = ?, completed_at = ? where id = ?"
+        "update tasks set initiative_id = ?, title = ?, status = ?, priority = ?, notes = ?, due_at = ?, sort_order = ?, updated_at = ?, completed_at = ? where id = ?"
       )
       .run(
-        input.initiativeId ?? existing.initiativeId,
+        nextInitiativeId,
         input.title ?? existing.title,
         status,
         input.priority ?? existing.priority,
         input.notes === undefined ? existing.notes : input.notes,
         input.dueAt === undefined ? existing.dueAt : input.dueAt,
+        nextSortOrder,
         now,
         completedAt,
         input.id

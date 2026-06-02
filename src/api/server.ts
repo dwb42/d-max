@@ -10,6 +10,7 @@ import { CalendarService } from "../calendar/calendar-service.js";
 import { assertCanLinkExistingProjectSpan } from "../calendar/calendar-linking-rules.js";
 import { GoogleCalendarAuth } from "../calendar/google-calendar-auth.js";
 import { GoogleCalendarProvider } from "../calendar/google-calendar-provider.js";
+import { GoogleWorkspaceGogAuth } from "../google-workspace/gog-auth.js";
 import { CalendarEventBindingRepository } from "../repositories/calendar-event-bindings.js";
 import { CalendarEventVisibilityRepository } from "../repositories/calendar-event-visibility.js";
 import { CalendarEntryRepository } from "../repositories/calendar-entries.js";
@@ -17,6 +18,7 @@ import { CalendarSourceRepository } from "../repositories/calendar-sources.js";
 import { InitiativeRelationRepository } from "../repositories/initiative-relations.js";
 import { InitiativeRepository } from "../repositories/initiatives.js";
 import type { InitiativeStatus, InitiativeType } from "../repositories/initiatives.js";
+import { InitiativeMindmapRepository } from "../repositories/initiative-mindmap.js";
 import { PlanningCanvasRepository } from "../repositories/planning-canvas.js";
 import { MediaAssetRepository } from "../repositories/media-assets.js";
 import type { MediaAsset } from "../repositories/media-assets.js";
@@ -71,8 +73,10 @@ const calendarBindings = new CalendarEventBindingRepository(db);
 const calendarEventVisibility = new CalendarEventVisibilityRepository(db);
 const calendarSources = new CalendarSourceRepository(db);
 const googleCalendarAuth = new GoogleCalendarAuth();
+const googleWorkspaceAuth = new GoogleWorkspaceGogAuth();
 const initiatives = new InitiativeRepository(db);
 const initiativeRelations = new InitiativeRelationRepository(db);
+const initiativeMindmap = new InitiativeMindmapRepository(db);
 const planningCanvas = new PlanningCanvasRepository(db);
 const mediaAssets = new MediaAssetRepository(db);
 const mediaLinks = new MediaLinkRepository(db);
@@ -416,9 +420,27 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/config/google-workspace/status") {
+      sendJson(res, 200, { googleWorkspace: googleWorkspaceAuth.status() });
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/config/google-calendar/auth-url") {
       const body = googleCalendarAuthUrlBody.parse(await readJson(req));
       sendJson(res, 200, { authUrl: googleCalendarAuth.createAuthorizationUrl(body.loginHint ?? null) });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/config/google-workspace/auth-url") {
+      const body = googleCalendarAuthUrlBody.parse(await readJson(req));
+      sendJson(res, 200, { authUrl: googleCalendarAuth.createWorkspaceAuthorizationUrl(body.loginHint ?? null) });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/config/google-workspace/disconnect") {
+      const body = googleCalendarDisconnectBody.parse(await readJson(req));
+      googleWorkspaceAuth.disconnect(body.accountLabel ?? "");
+      sendJson(res, 200, { disconnected: true });
       return;
     }
 
@@ -448,9 +470,13 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const result = await googleCalendarAuth.handleCallback({ code, state });
+      if (result.purpose === "workspace" && result.accountLabel) {
+        googleWorkspaceAuth.importRefreshToken({ accountLabel: result.accountLabel, token: result.token });
+      }
       GoogleCalendarProvider.clearEventListCache();
       const accountQuery = result.accountLabel ? `&account=${encodeURIComponent(result.accountLabel)}` : "";
-      sendHtmlRedirect(res, `/config?google=connected${accountQuery}`);
+      const targetQuery = result.purpose === "workspace" ? "workspace=connected" : "google=connected";
+      sendHtmlRedirect(res, `/config?${targetQuery}${accountQuery}`);
       return;
     }
 
@@ -836,6 +862,65 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    const initiativeMindmapMatch = url.pathname.match(/^\/api\/graph\/initiative\/(\d+)$/);
+    if (req.method === "GET" && initiativeMindmapMatch) {
+      const initiativeId = Number(initiativeMindmapMatch[1]);
+      sendJson(res, 200, { mindmap: initiativeMindmap.getView({ type: "initiative", initiativeId }) });
+      return;
+    }
+
+    const initiativeMindmapFreestyleMatch = url.pathname.match(/^\/api\/graph\/initiative\/(\d+)\/freestyle-nodes$/);
+    if (req.method === "POST" && initiativeMindmapFreestyleMatch) {
+      const initiativeId = Number(initiativeMindmapFreestyleMatch[1]);
+      const body = createMindmapFreestyleNodeBody.parse(await readJson(req));
+      const node = initiativeMindmap.createFreestyleNode({
+        scope: { type: "initiative", initiativeId },
+        ...body
+      });
+      emitApiStateEvent({ operation: "createInitiativeMindmapNode", entityType: "initiative", entityId: initiativeId, initiativeId });
+      sendJson(res, 200, { node, mindmap: initiativeMindmap.getView({ type: "initiative", initiativeId }) });
+      return;
+    }
+
+    if (req.method === "PUT" && initiativeMindmapFreestyleMatch) {
+      const initiativeId = Number(initiativeMindmapFreestyleMatch[1]);
+      const body = replaceMindmapFreestyleNodesBody.parse(await readJson(req));
+      const mindmap = initiativeMindmap.replaceFreestyleNodes({
+        scope: { type: "initiative", initiativeId },
+        nodes: body.nodes
+      });
+      emitApiStateEvent({ operation: "replaceInitiativeMindmapFreestyleNodes", entityType: "initiative", entityId: initiativeId, initiativeId });
+      sendJson(res, 200, { mindmap });
+      return;
+    }
+
+    const initiativeMindmapNodeMatch = url.pathname.match(/^\/api\/graph\/initiative\/(\d+)\/nodes\/([^/]+)$/);
+    if (req.method === "PATCH" && initiativeMindmapNodeMatch) {
+      const initiativeId = Number(initiativeMindmapNodeMatch[1]);
+      const nodeKey = decodeURIComponent(initiativeMindmapNodeMatch[2] ?? "");
+      const body = updateMindmapNodeBody.parse(await readJson(req));
+      const node = initiativeMindmap.updateNode({
+        scope: { type: "initiative", initiativeId },
+        nodeKey,
+        ...body
+      });
+      emitApiStateEvent({ operation: "updateInitiativeMindmapNode", entityType: "initiative", entityId: initiativeId, initiativeId });
+      sendJson(res, 200, { node, mindmap: initiativeMindmap.getView({ type: "initiative", initiativeId }) });
+      return;
+    }
+
+    if (req.method === "DELETE" && initiativeMindmapNodeMatch) {
+      const initiativeId = Number(initiativeMindmapNodeMatch[1]);
+      const nodeKey = decodeURIComponent(initiativeMindmapNodeMatch[2] ?? "");
+      const deletedNodes = initiativeMindmap.deleteFreestyleNode({
+        scope: { type: "initiative", initiativeId },
+        nodeKey
+      });
+      emitApiStateEvent({ operation: "deleteInitiativeMindmapNode", entityType: "initiative", entityId: initiativeId, initiativeId });
+      sendJson(res, 200, { deleted: true, deletedNodeKeys: deletedNodes.map((node) => node.nodeKey), mindmap: initiativeMindmap.getView({ type: "initiative", initiativeId }) });
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/planning-canvas") {
       sendJson(res, 200, {
         view: planningCanvas.getView({
@@ -968,6 +1053,13 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "PATCH" && taskMatch) {
       const body = updateTaskBody.parse(await readJson(req));
+      if (body.initiativeId !== undefined) {
+        const targetInitiative = initiatives.findById(body.initiativeId);
+        if (!targetInitiative || targetInitiative.type !== "project") {
+          sendJson(res, 400, { error: "Target project not found" });
+          return;
+        }
+      }
       const task = tasks.update({ id: Number(taskMatch[1]), ...body });
       emitApiStateEvent({ operation: "updateTask", entityType: "task", entityId: task.id, taskId: task.id, initiativeId: task.initiativeId });
       sendJson(res, 200, { task });
@@ -1514,6 +1606,7 @@ function shutdown(): void {
 }
 
 const updateTaskBody = z.object({
+  initiativeId: z.number().int().positive().optional(),
   title: z.string().trim().min(1).optional(),
   status: z.enum(["open", "done"]).optional(),
   priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
@@ -1798,6 +1891,7 @@ const createInitiativeRelationBody = z.object({
 });
 
 const planningCanvasCoordinate = z.number().finite().min(0).max(100000);
+const mindmapCoordinate = z.number().finite().min(-100000).max(100000);
 
 const createPlanningCanvasNodeBody = z.object({
   canvasId: z.number().int().positive().optional(),
@@ -1815,6 +1909,36 @@ const updatePlanningCanvasNodeBody = z.object({
   width: planningCanvasCoordinate.nullable().optional(),
   height: planningCanvasCoordinate.nullable().optional(),
   collapsed: z.boolean().optional()
+});
+
+const createMindmapFreestyleNodeBody = z.object({
+  parentNodeKey: z.string().trim().min(1).nullable().optional(),
+  label: z.string().trim().min(1).nullable().optional(),
+  x: mindmapCoordinate.optional(),
+  y: mindmapCoordinate.optional()
+});
+
+const updateMindmapNodeBody = z.object({
+  label: z.string().trim().min(1).optional(),
+  x: mindmapCoordinate.optional(),
+  y: mindmapCoordinate.optional(),
+  width: mindmapCoordinate.nonnegative().nullable().optional(),
+  height: mindmapCoordinate.nonnegative().nullable().optional(),
+  collapsed: z.boolean().optional(),
+  parentNodeKey: z.string().trim().min(1).nullable().optional()
+});
+
+const replaceMindmapFreestyleNodesBody = z.object({
+  nodes: z.array(z.object({
+    nodeKey: z.string().trim().min(1),
+    parentNodeKey: z.string().trim().min(1).nullable(),
+    label: z.string().trim().min(1),
+    x: mindmapCoordinate,
+    y: mindmapCoordinate,
+    width: mindmapCoordinate.nonnegative().nullable().optional(),
+    height: mindmapCoordinate.nonnegative().nullable().optional(),
+    collapsed: z.boolean().optional()
+  }))
 });
 
 const reorderTasksBody = z.union([

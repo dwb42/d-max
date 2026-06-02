@@ -99,8 +99,11 @@ export default function CalendarRoute(props: {
   const [activeCalendarDrag, setActiveCalendarDrag] = useState<CalendarDragState | null>(null);
   const [sidebarProjectHover, setSidebarProjectHover] = useState<CalendarProjectHoverOverlay | null>(null);
   const [flexibleAllDayExpanded, setFlexibleAllDayExpanded] = useState(false);
+  const [now, setNow] = useState(() => new Date());
   const range = useMemo(() => calendarVisibleRange(props.controls.anchorDate, props.controls.mode), [props.controls.anchorDate, props.controls.mode]);
   const days = useMemo(() => daysInRange(range.start, range.end), [range]);
+  const today = dateOnlyLocal(now);
+  const currentTimeMinutes = now.getHours() * 60 + now.getMinutes();
   const events = calendar?.events ?? [];
   const writableCalendarSources = calendarSources.filter((source) => source.enabled && !source.readOnly);
   const visibleWarnings = (calendar?.warnings ?? []).filter((warning) => !dismissedWarningKeys.has(calendarWarningKey(warning)));
@@ -114,6 +117,8 @@ export default function CalendarRoute(props: {
   const endHour = Math.max(calendarDefaultEndHour, Math.ceil(latestEndMinutes / 60));
   const gridHeight = (endHour * 60 - calendarStartHour * 60) * calendarPixelsPerMinute;
   const activeProjects = props.initiatives.filter((initiative) => initiative.type === "project" && initiative.status === "active");
+  const projectsActiveToday = activeProjects.filter((initiative) => projectTimeframeIncludesDate(initiative, today));
+  const otherActiveProjects = activeProjects.filter((initiative) => !projectTimeframeIncludesDate(initiative, today));
   const tasksByInitiative = new Map<number, Task[]>();
   for (const task of props.tasks.filter((task) => task.status === "open")) {
     const current = tasksByInitiative.get(task.initiativeId) ?? [];
@@ -161,6 +166,11 @@ export default function CalendarRoute(props: {
   useEffect(() => {
     void loadCalendar();
   }, [range.start, range.end]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(new Date()), 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   async function reloadAfterMutation() {
     await Promise.all([loadCalendar(), props.onAfterChange()]);
@@ -230,53 +240,67 @@ export default function CalendarRoute(props: {
     await reloadAfterMutation();
   }
 
+  function renderProjectCard(initiative: Initiative) {
+    const category = props.categories.find((candidate) => candidate.id === initiative.categoryId);
+    const projectTasks = tasksByInitiative.get(initiative.id) ?? [];
+    const hoverInfo = projectHoverInfoById.get(initiative.id) ?? null;
+    return (
+      <details key={initiative.id} className="calendar-project-card">
+        <summary
+          className="calendar-project-summary"
+          draggable
+          onMouseEnter={(event) => hoverInfo ? showSidebarProjectHover(event.currentTarget, hoverInfo) : undefined}
+          onMouseLeave={() => setSidebarProjectHover(null)}
+          onFocus={(event) => hoverInfo ? showSidebarProjectHover(event.currentTarget, hoverInfo) : undefined}
+          onBlur={() => setSidebarProjectHover(null)}
+          onDragStart={(event) => startCalendarDrag(event, { kind: "initiative", initiativeId: initiative.id, title: displayInitiativeName(initiative) })}
+          onDragEnd={() => setActiveCalendarDrag(null)}
+        >
+          <span className="calendar-category-dot" style={{ background: category?.color ?? "#27806f" }} />
+          <span>
+            <strong>{displayInitiativeName(initiative)}</strong>
+            <small>{category?.name ?? "Ohne Kategorie"}</small>
+          </span>
+        </summary>
+        <div className="calendar-task-palette">
+          {projectTasks.length === 0 ? <span>Keine offenen Massnahmen</span> : null}
+          {projectTasks.map((task) => (
+            <button
+              key={task.id}
+              type="button"
+              draggable
+              onClick={() => props.onOpenTask(task.id)}
+              onDragStart={(event) => startCalendarDrag(event, { kind: "task", taskId: task.id, title: task.title })}
+              onDragEnd={() => setActiveCalendarDrag(null)}
+            >
+              <Circle size={13} />
+              {task.title}
+            </button>
+          ))}
+        </div>
+      </details>
+    );
+  }
+
   return (
     <section className="calendar-planner">
       <aside className="calendar-planner-sidebar">
         <div className="calendar-sidebar-section">
           <h2>Aktive Projekte</h2>
           <div className="calendar-project-list">
-            {activeProjects.map((initiative) => {
-              const category = props.categories.find((candidate) => candidate.id === initiative.categoryId);
-              const projectTasks = tasksByInitiative.get(initiative.id) ?? [];
-              const hoverInfo = projectHoverInfoById.get(initiative.id) ?? null;
-              return (
-                <details key={initiative.id} className="calendar-project-card">
-                  <summary
-                    className="calendar-project-summary"
-                    draggable
-                    onMouseEnter={(event) => hoverInfo ? showSidebarProjectHover(event.currentTarget, hoverInfo) : undefined}
-                    onMouseLeave={() => setSidebarProjectHover(null)}
-                    onFocus={(event) => hoverInfo ? showSidebarProjectHover(event.currentTarget, hoverInfo) : undefined}
-                    onBlur={() => setSidebarProjectHover(null)}
-                    onDragStart={(event) => startCalendarDrag(event, { kind: "initiative", initiativeId: initiative.id, title: displayInitiativeName(initiative) })}
-                    onDragEnd={() => setActiveCalendarDrag(null)}
-                  >
-                    <span className="calendar-category-dot" style={{ background: category?.color ?? "#27806f" }} />
-                    <span>
-                      <strong>{displayInitiativeName(initiative)}</strong>
-                      <small>{category?.name ?? "Ohne Kategorie"}</small>
-                    </span>
-                  </summary>
-                  <div className="calendar-task-palette">
-                    {projectTasks.length === 0 ? <span>Keine offenen Massnahmen</span> : null}
-                    {projectTasks.map((task) => (
-                      <button
-                        key={task.id}
-                        type="button"
-                        draggable
-                        onClick={() => props.onOpenTask(task.id)}
-                        onDragStart={(event) => startCalendarDrag(event, { kind: "task", taskId: task.id, title: task.title })}
-                        onDragEnd={() => setActiveCalendarDrag(null)}
-                      >
-                        <Circle size={13} />
-                        {task.title}
-                      </button>
-                    ))}
-                  </div>
-                </details>
-              );
-            })}
+            {projectsActiveToday.length === 0 ? <p className="calendar-project-empty">Keine Projekte im heutigen Zeitraum.</p> : null}
+            {projectsActiveToday.map(renderProjectCard)}
+            {otherActiveProjects.length > 0 ? (
+              <details className="calendar-project-overflow">
+                <summary className="calendar-project-overflow-summary">
+                  <span>Weitere aktive Projekte</span>
+                  <small>{otherActiveProjects.length}</small>
+                </summary>
+                <div className="calendar-project-list nested">
+                  {otherActiveProjects.map(renderProjectCard)}
+                </div>
+              </details>
+            ) : null}
           </div>
         </div>
       </aside>
@@ -327,7 +351,7 @@ export default function CalendarRoute(props: {
             </button>
           </div>
           {days.map((day) => (
-            <div className="calendar-day-header" key={day}>
+            <div className={`calendar-day-header ${day === today ? "today" : ""}`} key={day}>
               <strong>{formatCalendarDayName(day)}</strong>
               <span>{formatDateOnly(day)}</span>
             </div>
@@ -341,7 +365,7 @@ export default function CalendarRoute(props: {
                 {days.map((day, index) => (
                   <div
                     key={`fixed-${day}`}
-                    className="calendar-all-day-cell"
+                    className={`calendar-all-day-cell ${day === today ? "today" : ""}`}
                     style={{ gridColumn: index + 1, gridRow: `1 / span ${fixedAllDayRows}` }}
                   />
                 ))}
@@ -374,7 +398,7 @@ export default function CalendarRoute(props: {
                 {days.map((day, index) => (
                   <div
                     key={`flexible-${day}`}
-                    className="calendar-all-day-cell"
+                    className={`calendar-all-day-cell ${day === today ? "today" : ""}`}
                     style={{ gridColumn: index + 1, gridRow: `1 / span ${visibleFlexibleAllDayRows}` }}
                   />
                 ))}
@@ -423,12 +447,18 @@ export default function CalendarRoute(props: {
                 allEvents={events}
                 activeCalendarDrag={activeCalendarDrag}
                 projectHoverInfoById={projectHoverInfoById}
+                isToday={day === today}
+                currentTimeMinutes={currentTimeMinutes}
                 height={gridHeight}
                 endHour={endHour}
                 onDropEntry={createDroppedEntry}
                 onOpenStandalone={setStandaloneDraft}
-                onComplete={async (entryId) => {
-                  await completeCalendarEntry(entryId);
+                onToggleStatus={async (calendarEvent) => {
+                  if (calendarEvent.status === "done") {
+                    await updateCalendarEntry(calendarEvent.entryId, { status: "open" });
+                  } else {
+                    await completeCalendarEntry(calendarEvent.entryId);
+                  }
                   await reloadAfterMutation();
                 }}
                 onDelete={async (entryId) => {
@@ -557,11 +587,13 @@ function CalendarDayColumn(props: {
   allEvents: CalendarViewEvent[];
   activeCalendarDrag: CalendarDragState | null;
   projectHoverInfoById: Map<number, CalendarProjectHoverInfo>;
+  isToday: boolean;
+  currentTimeMinutes: number;
   height: number;
   endHour: number;
   onDropEntry: (payload: CalendarDragPayload, date: string, startMinutes: number) => Promise<void>;
   onOpenStandalone: (draft: { date: string; startMinutes: number }) => void;
-  onComplete: (entryId: number) => Promise<void>;
+  onToggleStatus: (event: Extract<CalendarViewEvent, { source: "dmax" }>) => Promise<void>;
   onDelete: (entryId: number) => Promise<void>;
   onResize: (entryId: number, input: { startAt?: string; endAt?: string }) => Promise<void>;
   onDragStart: (event: DragEvent<HTMLElement>, payload: CalendarDragPayload) => void;
@@ -574,9 +606,11 @@ function CalendarDayColumn(props: {
   const layouts = layoutCalendarEvents(props.events);
   const previewTop = dragPreview ? (dragPreview.startMinutes - calendarStartHour * 60) * calendarPixelsPerMinute : 0;
   const previewHeight = dragPreview ? Math.max(28, (dragPreview.endMinutes - dragPreview.startMinutes) * calendarPixelsPerMinute) : 0;
+  const currentTimeVisible = props.isToday && props.currentTimeMinutes >= calendarStartHour * 60 && props.currentTimeMinutes <= props.endHour * 60;
+  const currentTimeTop = (props.currentTimeMinutes - calendarStartHour * 60) * calendarPixelsPerMinute;
   return (
     <div
-      className={`calendar-day-column ${dragPreview ? "drag-active" : ""}`}
+      className={`calendar-day-column ${props.isToday ? "today" : ""} ${dragPreview ? "drag-active" : ""}`}
       style={{ height: props.height }}
       onDragOver={(event) => {
         event.preventDefault();
@@ -613,6 +647,9 @@ function CalendarDayColumn(props: {
       {Array.from({ length: props.endHour - calendarStartHour + 1 }, (_, index) => calendarStartHour + index).map((hour) => (
         <span className="calendar-hour-line" key={hour} style={{ top: (hour * 60 - calendarStartHour * 60) * calendarPixelsPerMinute }} />
       ))}
+      {currentTimeVisible ? (
+        <span className="calendar-current-time-line" style={{ top: currentTimeTop }} />
+      ) : null}
       {dragPreview ? (
         <>
           <span className="calendar-drop-line" style={{ top: previewTop }}>
@@ -632,7 +669,7 @@ function CalendarDayColumn(props: {
           key={layout.event.id}
           event={layout.event}
           layout={layout}
-          onComplete={props.onComplete}
+          onToggleStatus={props.onToggleStatus}
           onDelete={props.onDelete}
           onResize={props.onResize}
           onDragStart={props.onDragStart}
@@ -650,7 +687,7 @@ function CalendarDayColumn(props: {
 function CalendarEventBlock(props: {
   event: CalendarViewEvent;
   layout: CalendarEventLayout;
-  onComplete: (entryId: number) => Promise<void>;
+  onToggleStatus: (event: Extract<CalendarViewEvent, { source: "dmax" }>) => Promise<void>;
   onDelete: (entryId: number) => Promise<void>;
   onResize: (entryId: number, input: { startAt?: string; endAt?: string }) => Promise<void>;
   onDragStart: (event: DragEvent<HTMLElement>, payload: CalendarDragPayload) => void;
@@ -664,10 +701,18 @@ function CalendarEventBlock(props: {
   const color = eventColor(event);
   const draggable = event.source === "dmax";
   const projectHoverInfo = event.source === "dmax" && event.initiativeId ? props.projectHoverInfoById.get(event.initiativeId) ?? null : null;
+  const opensProjectDetail = event.source === "dmax" && Boolean(event.initiativeId) && !event.taskId;
+  function openProjectDetail() {
+    if (event.source === "dmax" && event.initiativeId && !event.taskId) {
+      openProjectInNewTab(event.initiativeId);
+    }
+  }
   return (
     <article
-      className={`calendar-event-block ${event.source} ${event.source === "dmax" && event.status === "done" ? "done" : ""} ${projectHoverInfo ? "has-project-info" : ""}`}
+      className={`calendar-event-block ${event.source} ${event.source === "dmax" && event.status === "done" ? "done" : ""} ${projectHoverInfo ? "has-project-info" : ""} ${opensProjectDetail ? "opens-project" : ""}`}
       draggable={draggable}
+      role={opensProjectDetail ? "button" : undefined}
+      tabIndex={opensProjectDetail ? 0 : undefined}
       onDragStart={(dragEvent) => {
         if (event.source !== "dmax") return;
         props.onDragStart(dragEvent, {
@@ -680,8 +725,16 @@ function CalendarEventBlock(props: {
       onClick={() => {
         if (event.source === "google") {
           props.onOpenGoogleEvent(event);
+        } else {
+          openProjectDetail();
         }
       }}
+      onKeyDown={(keyEvent) => {
+        if (!opensProjectDetail || (keyEvent.key !== "Enter" && keyEvent.key !== " ")) return;
+        keyEvent.preventDefault();
+        openProjectDetail();
+      }}
+      title={opensProjectDetail ? "Projekt in neuem Tab öffnen" : undefined}
       style={
         {
           top: props.layout.top,
@@ -699,8 +752,12 @@ function CalendarEventBlock(props: {
         {event.source === "dmax" ? (
           <button
             className="calendar-complete-toggle"
-            title={event.status === "done" ? "Erledigt" : "Erledigen"}
-            onClick={() => void props.onComplete(event.entryId)}
+            title={event.status === "done" ? "Wieder öffnen" : "Erledigen"}
+            aria-label={event.status === "done" ? "Kalendereintrag wieder öffnen" : "Kalendereintrag erledigen"}
+            onClick={(clickEvent) => {
+              clickEvent.stopPropagation();
+              void props.onToggleStatus(event);
+            }}
           >
             {event.status === "done" ? <CheckCircle2 size={15} /> : <Circle size={15} />}
           </button>
@@ -713,14 +770,23 @@ function CalendarEventBlock(props: {
           <span>{formatTimeRange(event.startAt, event.endAt)}</span>
         </div>
         {event.source === "dmax" ? (
-          <button className="calendar-delete-button" title="Loeschen" onClick={() => void props.onDelete(event.entryId)}>
+          <button
+            className="calendar-delete-button calendar-entry-delete-button"
+            title="Kalendereintrag löschen"
+            aria-label="Kalendereintrag löschen"
+            onClick={(clickEvent) => {
+              clickEvent.stopPropagation();
+              void props.onDelete(event.entryId);
+            }}
+          >
             <Trash2 size={14} />
           </button>
         ) : null}
         {event.source === "dmax" && !event.binding ? (
           <button
-            className="calendar-delete-button"
+            className="calendar-delete-button calendar-entry-google-button"
             title="Google Event erstellen"
+            aria-label="Google Event erstellen"
             onClick={(clickEvent) => {
               clickEvent.stopPropagation();
               props.onPublishDmaxEvent(event);
@@ -731,8 +797,9 @@ function CalendarEventBlock(props: {
         ) : null}
         {event.source === "dmax" && event.binding ? (
           <button
-            className="calendar-delete-button"
+            className="calendar-delete-button calendar-entry-google-button"
             title="Google Verknuepfung loesen"
+            aria-label="Google Verknüpfung lösen"
             onClick={(clickEvent) => {
               clickEvent.stopPropagation();
               void props.onUnlinkBinding(event.binding!.id);
@@ -1205,6 +1272,24 @@ function displayInitiativeName(initiative: Initiative): string {
 
 function formatInitiativeDateRangeForUi(initiative: Initiative): string | null {
   return initiative.startDate && initiative.endDate ? `${formatDateOnly(initiative.startDate)} - ${formatDateOnly(initiative.endDate)}` : null;
+}
+
+function projectTimeframeIncludesDate(initiative: Initiative, date: string): boolean {
+  if (!initiative.startDate && !initiative.endDate) return false;
+  if (initiative.startDate && initiative.startDate > date) return false;
+  if (initiative.endDate && initiative.endDate < date) return false;
+  return true;
+}
+
+function openProjectInNewTab(initiativeId: number): void {
+  window.open(`/projects/${initiativeId}`, "_blank", "noopener,noreferrer");
+}
+
+function dateOnlyLocal(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function formatDateOnly(value: string): string {

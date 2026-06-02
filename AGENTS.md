@@ -64,6 +64,11 @@ volume operations.
 - Task: deterministic actionable unit connected to an initiative.
 - Initiative memory: durable markdown stored in `initiatives.markdown`.
 - `initiatives.markdown` is required initiative memory.
+- Initiative mindmaps use `graph_layout_nodes` scoped as
+  `initiative:<initiativeId>`. The browser/API repository may read/write root,
+  branch, task, media, and freestyle layout nodes; agent tools may mutate only
+  freestyle nodes and should treat derived root/branch/task/media nodes as
+  read-only context.
 - Organization description/context memory: durable markdown stored in
   `organizations.markdown`. There is no person markdown field yet.
 - Who dimension: people and organizations are first-class parties. People and
@@ -90,6 +95,10 @@ volume operations.
   use API routes/repositories.
 - Browser Drive Mode currently bridges realtime audio only; durable voice tool
   commits are not wired.
+- Google Workspace file work is isolated in the `dmax-google-workspace`
+  OpenClaw subagent and uses `gog`, not d-max database tools. Workspace writes
+  require explicit target/change confirmation and OAuth/keyring state must stay
+  outside the repo.
 - Add setup/dev/test scripts when needed.
 - Production deploy is two-container Docker Compose behind a reverse proxy:
   `dmax-api` serves API/static web/Telegram and talks to the internal

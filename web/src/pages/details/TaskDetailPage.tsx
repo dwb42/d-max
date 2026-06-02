@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
-import { CalendarDays, CheckCircle2, Circle, LayoutGrid, ListTree, Plus, Trash2, X } from "lucide-react";
-import { DescriptionBlock, EditModal, EmptyState, EntityDetailPage, EntityHeader, ErrorState, InlineEditableText, MetadataGrid, RelationItem, RelationList, SectionBlock } from "../../components/ui/index.js";
-import type { Category, Initiative, InitiativeType, Organization, ParticipantRoleType, Person, Task, TaskChecklistItem, TaskDetail } from "../../types.js";
+import type { FormEvent, ReactNode } from "react";
+import { CalendarDays, CheckCircle2, Circle, Pencil, Plus, Trash2, X } from "lucide-react";
+import { DescriptionBlock, EditModal, EmptyState, EntityDetailPage, EntityHeader, ErrorState, InlineEditableText, MetadataGrid, SectionBlock } from "../../components/ui/index.js";
+import type { Category, Initiative, Organization, ParticipantRoleType, Person, Task, TaskChecklistItem, TaskDetail } from "../../types.js";
 import { MediaAttachmentsPanel, ParticipantsPanel } from "./SharedDetailPanels.js";
 import { type UpdateTaskInput, datePart, displayInitiativeName, dropAfter, formatDateTimeForUi, formatTaskDueDate, initiativeTypeLabel, moveIdToDropPosition, taskPriorityLabel, taskPriorityOptions, taskStatusLabel } from "./detailUtils.js";
 
@@ -107,11 +107,11 @@ function TaskPrioritySelect(props: {
 export function TaskDetailView(props: {
   detail: TaskDetail | null;
   loadError: string | null;
+  projects: Initiative[];
+  categories: Category[];
   people: Person[];
   organizations: Organization[];
   participantRoleTypes: ParticipantRoleType[];
-  onOpenInitiative: (initiativeId: number) => void;
-  onOpenCategory: (categoryName: string, initiativeType: InitiativeType) => void;
   onCreateParticipant: (input: {
     partyId: number;
     entityType: "initiative" | "task";
@@ -122,6 +122,7 @@ export function TaskDetailView(props: {
   }) => Promise<void>;
   onDeleteParticipant: (participantId: number) => Promise<void>;
   onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void>;
+  onMoveTask: (taskId: number, targetProjectId: number) => Promise<void>;
   onCreateChecklistItem: (taskId: number, name: string) => Promise<void>;
   onUpdateChecklistItem: (taskId: number, itemId: number, input: { name?: string; status?: TaskChecklistItem["status"] }) => Promise<void>;
   onDeleteChecklistItem: (taskId: number, itemId: number) => Promise<void>;
@@ -131,6 +132,8 @@ export function TaskDetailView(props: {
   onDeleteMedia: (linkId: number) => Promise<void>;
   onReorderMedia: (taskId: number, linkIds: number[]) => Promise<void>;
 }) {
+  const [moveProjectModalOpen, setMoveProjectModalOpen] = useState(false);
+
   if (props.loadError) {
     return (
       <EntityDetailPage>
@@ -155,13 +158,38 @@ export function TaskDetailView(props: {
   const participants = props.detail.participants ?? [];
   const mediaAttachments = props.detail.mediaAttachments ?? [];
   const checklistDone = checklistItems.filter((item) => item.status === "done").length;
+  const currentCategoryId = category?.id ?? null;
+  const moveProjectCandidates = props.projects
+    .filter((project) => project.type === "project" && project.id !== task.initiativeId && project.status !== "archived")
+    .sort((left, right) => {
+      if (left.categoryId === currentCategoryId && right.categoryId !== currentCategoryId) return -1;
+      if (right.categoryId === currentCategoryId && left.categoryId !== currentCategoryId) return 1;
+      return displayInitiativeName(left).localeCompare(displayInitiativeName(right)) || left.id - right.id;
+    });
   const aside = (
     <MetadataGrid
       items={[
         { label: "Status", value: taskStatusLabel(task.status) },
         { label: "Priorität", value: taskPriorityLabel(task.priority) },
         { label: "Fällig", value: task.dueAt ? formatTaskDueDate(task.dueAt) : "Ohne Fälligkeitsdatum" },
-        { label: "Projekt", value: initiative ? displayInitiativeName(initiative) : null },
+        {
+          label: "Projekt",
+          value: initiative ? (
+            <span className="task-project-metadata">
+              <span>{displayInitiativeName(initiative)}</span>
+              <button
+                type="button"
+                className="metadata-edit-button"
+                disabled={moveProjectCandidates.length === 0}
+                title={moveProjectCandidates.length === 0 ? "Kein anderes Projekt verfügbar" : "Projekt ändern"}
+                aria-label="Projekt dieser Maßnahme ändern"
+                onClick={() => setMoveProjectModalOpen(true)}
+              >
+                <Pencil size={13} />
+              </button>
+            </span>
+          ) : null
+        },
         { label: "Lebensbereich", value: category?.name ?? null },
         { label: "Checkliste", value: checklistItems.length > 0 ? `${checklistDone}/${checklistItems.length}` : null },
         { label: "Beteiligte", value: participants.length > 0 ? String(participants.length) : null },
@@ -174,85 +202,126 @@ export function TaskDetailView(props: {
   );
 
   return (
-    <EntityDetailPage className="task-detail" aside={aside}>
-      <TaskNotesPanel task={task} onUpdateTask={props.onUpdateTask} />
-      <TaskChecklistPanel
-        task={task}
-        items={checklistItems}
-        onCreateItem={props.onCreateChecklistItem}
-        onUpdateItem={props.onUpdateChecklistItem}
-        onDeleteItem={props.onDeleteChecklistItem}
-        onReorderItems={props.onReorderChecklistItems}
-      />
-      <TaskContextSection
-        initiative={initiative ?? null}
-        category={category ?? null}
-        onOpenInitiative={props.onOpenInitiative}
-        onOpenCategory={props.onOpenCategory}
-      />
-      <ParticipantsPanel
-        entityType="task"
-        entityId={task.id}
-        participants={participants}
-        people={props.people}
-        organizations={props.organizations}
-        roleTypes={props.participantRoleTypes}
-        surface="section"
-        createMode="modal"
-        onCreateParticipant={props.onCreateParticipant}
-        onDeleteParticipant={props.onDeleteParticipant}
-      />
-      <MediaAttachmentsPanel
-        entityType="task"
-        entityId={task.id}
-        attachments={mediaAttachments}
-        surface="section"
-        onUpload={props.onUploadMedia}
-        onUpdate={props.onUpdateMedia}
-        onDelete={props.onDeleteMedia}
-        onReorder={props.onReorderMedia}
-      />
-    </EntityDetailPage>
+    <>
+      <EntityDetailPage className="task-detail" aside={aside}>
+        <TaskNotesPanel task={task} onUpdateTask={props.onUpdateTask} />
+        <TaskChecklistPanel
+          task={task}
+          items={checklistItems}
+          onCreateItem={props.onCreateChecklistItem}
+          onUpdateItem={props.onUpdateChecklistItem}
+          onDeleteItem={props.onDeleteChecklistItem}
+          onReorderItems={props.onReorderChecklistItems}
+        />
+        <ParticipantsPanel
+          entityType="task"
+          entityId={task.id}
+          participants={participants}
+          people={props.people}
+          organizations={props.organizations}
+          roleTypes={props.participantRoleTypes}
+          surface="section"
+          createMode="modal"
+          onCreateParticipant={props.onCreateParticipant}
+          onDeleteParticipant={props.onDeleteParticipant}
+        />
+        <MediaAttachmentsPanel
+          entityType="task"
+          entityId={task.id}
+          attachments={mediaAttachments}
+          surface="section"
+          onUpload={props.onUploadMedia}
+          onUpdate={props.onUpdateMedia}
+          onDelete={props.onDeleteMedia}
+          onReorder={props.onReorderMedia}
+        />
+      </EntityDetailPage>
+      {moveProjectModalOpen && initiative ? (
+        <TaskMoveProjectModal
+          task={task}
+          currentProject={initiative}
+          projects={moveProjectCandidates}
+          categories={props.categories}
+          onCancel={() => setMoveProjectModalOpen(false)}
+          onMove={async (targetProjectId) => {
+            await props.onMoveTask(task.id, targetProjectId);
+            setMoveProjectModalOpen(false);
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 
-function TaskContextSection(props: {
-  initiative: Initiative | null;
-  category: Category | null;
-  onOpenInitiative: (initiativeId: number) => void;
-  onOpenCategory: (categoryName: string, initiativeType: InitiativeType) => void;
+function TaskMoveProjectModal(props: {
+  task: Task;
+  currentProject: Initiative;
+  projects: Initiative[];
+  categories: Category[];
+  onCancel: () => void;
+  onMove: (targetProjectId: number) => Promise<void>;
 }) {
-  if (!props.initiative && !props.category) {
-    return (
-      <SectionBlock title="Kontext">
-        <RelationList emptyMode="inline" emptyTitle="Noch kein Projekt- oder Lebensbereichskontext.">
-          {null}
-        </RelationList>
-      </SectionBlock>
-    );
+  const [targetProjectId, setTargetProjectId] = useState(() => String(props.projects[0]?.id ?? ""));
+  const [busy, setBusy] = useState(false);
+  const categoryById = new Map(props.categories.map((category) => [category.id, category]));
+  const categoryIds = [...new Set(props.projects.map((project) => project.categoryId))];
+
+  useEffect(() => {
+    setTargetProjectId(String(props.projects[0]?.id ?? ""));
+    setBusy(false);
+  }, [props.task.id, props.projects]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const parsedTargetId = Number(targetProjectId);
+    if (!Number.isInteger(parsedTargetId) || parsedTargetId <= 0 || busy) return;
+    setBusy(true);
+    try {
+      await props.onMove(parsedTargetId);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <SectionBlock title="Kontext">
-      <RelationList emptyMode="none">
-        {props.initiative ? (
-          <RelationItem
-            icon={<ListTree size={16} />}
-            title={displayInitiativeName(props.initiative)}
-            meta={initiativeTypeLabel(props.initiative.type)}
-            onOpen={() => props.onOpenInitiative(props.initiative!.id)}
-          />
-        ) : null}
-        {props.category ? (
-          <RelationItem
-            icon={<LayoutGrid size={16} />}
-            title={props.category.name}
-            meta="Lebensbereich"
-            onOpen={() => props.category ? props.onOpenCategory(props.category.name, props.initiative?.type ?? "project") : undefined}
-          />
-        ) : null}
-      </RelationList>
-    </SectionBlock>
+    <EditModal
+      title="Maßnahme verschieben"
+      label="Projekt dieser Maßnahme ändern"
+      description={`Aktuell: ${displayInitiativeName(props.currentProject)}`}
+      onCancel={props.onCancel}
+      onSubmit={(event) => void submit(event)}
+      footer={(
+        <>
+          <button type="submit" className="primary-action compact" disabled={busy || !targetProjectId}>
+            Verschieben
+          </button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={busy}>
+            Abbrechen
+          </button>
+        </>
+      )}
+    >
+      {props.projects.length === 0 ? (
+        <EmptyState title="Kein anderes Projekt verfügbar" />
+      ) : (
+        <label className="form-field">
+          <span>Zielprojekt</span>
+          <select value={targetProjectId} disabled={busy} onChange={(event) => setTargetProjectId(event.target.value)}>
+            {categoryIds.map((categoryId) => (
+              <optgroup key={categoryId} label={categoryById.get(categoryId)?.name ?? "Ohne Lebensbereich"}>
+                {props.projects
+                  .filter((project) => project.categoryId === categoryId)
+                  .map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {displayInitiativeName(project)}
+                    </option>
+                  ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+      )}
+    </EditModal>
   );
 }
 

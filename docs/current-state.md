@@ -1,6 +1,6 @@
 # d-max Current State
 
-Date: 2026-05-16
+Date: 2026-06-02
 
 Short handoff for fresh Codex/OpenClaw sessions. This file describes the
 implemented repository state; older plans are historical unless this file or
@@ -59,10 +59,14 @@ dependency resolution is explicit. The default `main` agent exposes only
 `d-max__...` tools through the
 `dmax-dynamic-tools` HTTP adapter, which calls the authenticated internal
 `dmax-api` tool endpoint.
-Browser, canvas, media, TTS, sandbox, web/research, memory, provider/plugin
-sprawl, and unrelated dynamic tools are excluded from the default DMAX turn;
-research/web remains separated in `dmax-research`. Codex/OpenClaw OAuth state
-must never be baked into the image, copied into `/root/.codex`, or committed.
+Browser, canvas, media, TTS, sandbox, web/research, Google Workspace, memory,
+provider/plugin sprawl, and unrelated dynamic tools are excluded from the
+default DMAX turn. Research/web remains separated in `dmax-research`; Google
+Workspace file work is separated in `dmax-google-workspace`, which uses `gog`
+through runtime commands after explicit confirmation for writes.
+Codex/OpenClaw OAuth
+state, gog OAuth state, and gog keyring secrets must never be baked into the
+image, copied into `/root/.codex`, or committed.
 The shared image still contains API defaults for the `dmax-api` command, so the
 `dmax-openclaw` service command explicitly unsets API data-path environment
 variables before starting the gateway.
@@ -76,7 +80,7 @@ SQLite tables:
 
 ```text
 categories, initiatives, initiative_relations,
-planning_canvases, planning_canvas_nodes,
+planning_canvases, planning_canvas_nodes, graph_layout_nodes,
 tasks,
 task_checklist_items,
 calendar_entries, calendar_sources, calendar_event_bindings, calendar_event_visibility,
@@ -219,7 +223,20 @@ related group that includes predecessor/successor edges can be moved up/down by
 dragging a predecessor/successor line; only the involved
 `planning_canvas_nodes.y` values change. Browser API mutations emit
 `planning_canvas_node` app state events. There are no OpenClaw/MCP tools for
-canvas layout yet.
+Planning Canvas timeline layout yet.
+`graph_layout_nodes` stores graph/mindmap layout state by scope. The current
+implemented scope is initiative mindmaps: a root initiative node, built-in
+Freestyle/Maßnahmen/Medien branch nodes, derived task and initiative-media
+nodes, and user-created freestyle nodes. Nodes persist `node_key`, node kind,
+optional source entity metadata, parent node key, label, `x`/`y`, optional
+`width`/`height`, and `collapsed`. The browser/API repository reads and writes
+this table for initiative mindmaps. OpenClaw/d-max tools can read full
+initiative mindmaps and can create, update, move/reparent, collapse/expand, and
+delete freestyle nodes. Agent tool mutations are intentionally restricted to
+`node_kind = 'freestyle'`; derived root, branch, task, and media nodes are
+read-only context for the agent. Deleting a freestyle leaf applies directly;
+deleting a freestyle subtree returns a confirmation envelope unless
+`confirmed=true`.
 Tasks have a deliberately small
 `open`/`done` status model; legacy non-`done` task statuses are migrated to
 `open`. `task_checklist_items` stores simple checklist items
@@ -326,6 +343,12 @@ Assistant messages can now carry optional generated-audio status metadata:
 audio files are stored as normal `media_assets` and linked back to the assistant
 message through `media_links.entity_type = app_chat_message` with role
 `assistant_audio`; the message stores status, not a raw filesystem path.
+Assistant messages may also store `research_summary_json`, a compact durable
+summary of `dmax-research` activity so browser chat keeps a reload-safe
+Webrecherche bubble with searched queries and fetched pages. Google Workspace
+subagent activity is derived from live OpenClaw activity streams and shown in a
+similar browser bubble during the active turn; no separate persisted Workspace
+summary column exists yet.
 `POST /api/chat/messages/:id/audio` is the idempotent assistant-message TTS
 entrypoint. It generates audio only for a final persisted assistant message,
 stores the binary through the media-asset pipeline, returns the normal chat
@@ -340,7 +363,10 @@ TTS fails.
   `docs/archive/session-handoffs/session-handoff-openclaw-latency-2026-05-02.md`;
   read it as background before continuing latency work, then verify against
   current code and runtime behavior.
-- Tools cover categories, initiatives, tasks, and task checklist items.
+- Tools cover categories, initiatives, initiative relations, initiative
+  freestyle mindmaps, tasks, task checklist items, media attachments, people,
+  organizations, party relationships, entity participants, and party contact
+  points.
   Initiative tools expose the `type` field for `idea`, `project`, and `habit`,
   `parentId`, `projectPhase` for `type=project`, plus `startDate`/`endDate` for
   time-bounded `type=project` initiatives. Parent/children hierarchy uses
@@ -348,6 +374,9 @@ TTS fails.
   Initiative relation tools can list, create, delete, and graph directed
   predecessor/successor links; natural language like "B follows A" maps to A
   precedes B.
+  Initiative mindmap tools can read the complete initiative mindmap and mutate
+  freestyle nodes only. Browser/API mindmap routes additionally support
+  snapshot replacement for UI undo/redo.
   Checklist tools can list, create, update, delete, and reorder items inside a
   task. Media tools can list, link, update, remove, and reorder existing media
   attachments for categories, initiatives, and tasks; browser/API upload creates
@@ -380,10 +409,9 @@ TTS fails.
   `idea` detail mode is intentionally concise for normal exploration: roughly
   5-7 prioritized points across variants, hypotheses, research fields, and
   possible condensation, not 3-5 points per subcategory.
-- Browser app-chat context includes initiative/task media summaries and
-  initiative precedence/parent context, but the static `OPENCLAW_TOOL_CONTEXT`
-  summary in `src/chat/app-chat.ts` currently omits the initiative-relation
-  tool names even though the MCP tools are registered and allowed.
+- Browser app-chat context includes initiative/task media summaries,
+  initiative precedence/parent context, and a static high-level tool summary
+  that names initiative relations and initiative freestyle mindmap tools.
 - Risky tool calls return `requiresConfirmation` unless the ToolRunner is
   invoked with an explicit trusted confirmation context. Normal MCP/OpenClaw
   tool calls cannot self-confirm by setting `confirmed: true`.
@@ -393,7 +421,11 @@ TTS fails.
   subprocess launcher and stale `start:container` gateway launcher have been
   removed. Local development can still use the local gateway fallback.
 - App chat watches the OpenClaw session file as a fallback when the gateway
-  request does not return its final payload reliably.
+  request does not return its final payload reliably. For session-mode turns,
+  it also follows OpenClaw registry session replacement, merges main-agent,
+  `dmax-research`, and `dmax-google-workspace` trajectory activities, and can
+  return a concise activity-based fallback when OpenClaw reports completion but
+  no final assistant transcript entry is available.
 - The embedded OpenClaw gateway client loader resolves the installed
   `GatewayClient` export dynamically from global OpenClaw `client-*.js` bundles
   and supports gateway protocol 3-4. This keeps the app-chat and production
@@ -467,6 +499,11 @@ Implemented behavior:
   generation succeeds, the browser attempts one autoplay of that reply; browser
   autoplay policy may block it, in which case the manual player remains the
   fallback.
+- Chat activity UI groups external agent activity into compact bubbles:
+  `dmax-research` shows searches and fetched pages, and
+  `dmax-google-workspace` shows read/write operations inferred from `gog`
+  activity. Persisted research summaries keep the Webrecherche bubble visible
+  after reloads.
 - App chat rejects concurrent turns in the same conversation before persisting
   a duplicate user message.
 - App refreshes data after mutations and via polling; normal navigation should
@@ -561,11 +598,12 @@ Implemented behavior:
   calendar view. The frontend calendar view is split into a lazy-loaded
   `CalendarRoute` chunk so non-calendar routes do not parse the calendar UI
   module at startup.
-- `/config`: configuration surface for Google Calendar accounts and DMAX
-  calendar sources. It has a single `Google-Konto hinzufuegen` action that
+- `/config`: configuration surface for Google Calendar accounts, DMAX calendar
+  sources, and Google Workspace auth for the OpenClaw Google Workspace
+  subagent. The calendar section has a `Google-Konto hinzufuegen` action that
   opens an OAuth modal, then renders one card per known Google account. Each
-  card shows the account label with `(verbunden)` in green or `(getrennt)` in
-  red, account-level reconnect/disconnect controls, and the calendars available
+  card shows the account label with `(verbunden)` in green or `(getrennt)` in red,
+  account-level reconnect/disconnect controls, and the calendars available
   through that account. Calendar rows can be added to or removed from DMAX; this
   toggles the corresponding `calendar_sources.enabled` selection. The separate
   `DMAX-Kalenderquellen` section lists only active DMAX-side calendar source
@@ -573,11 +611,15 @@ Implemented behavior:
   enabled/read-only flags only; no credentials or provider tokens. Writable
   Google calendar sources can be toggled to allow DMAX write actions; calendars
   discovered from Google default to read-only unless Google reports owner/writer
-  access.
+  access. The Google Workspace section starts an OAuth flow with Drive, Docs,
+  Sheets, Slides, Forms, and Sites scopes and imports the resulting refresh
+  token into `gog`, so `dmax-google-workspace` can use existing `gog` commands
+  for Google Workspace file types.
 - `/initiatives/:id`: type badge, editable basic fields (name, category, status,
   summary, `projectPhase` for `type=project`, and start/end dates for
-  `type=project`), markdown initiative memory rendered as UI, media attachments
-  with upload/preview/caption/remove controls, linked tasks, and a bottom
+  `type=project`), markdown initiative memory rendered as UI, an initiative
+  mindmap preview/full-screen modal, media attachments with
+  upload/preview/caption/remove controls, linked tasks, and a bottom
   `Relations` panel. `Relations` shows Parent, Children, Predecessors, and
   Successors in a two-by-two grid, starts collapsed when the initiative has no
   relations, and uses compact list rows with `I`/`P` markers for idea/project
@@ -591,6 +633,13 @@ Implemented behavior:
   left completion toggle for open/done, and expose a right-side delete action
   with a confirmation dialog explaining that notes, checklist, and media links
   are removed too.
+  The mindmap uses React Flow plus Dagre. It renders derived initiative root,
+  Freestyle/Maßnahmen/Medien branches, task nodes, media nodes, and freestyle
+  nodes. The preview opens a full-screen modal; the editable modal supports
+  freestyle node creation, rename, move/reparent, collapse/expand,
+  duplicate/delete, keyboard/clipboard shortcuts, and undo/redo by restoring
+  freestyle snapshots. Derived root/branch/task/media nodes are contextual and
+  cannot be semantically edited through the mindmap UI.
 - `/tasks/:id`: canonical task detail page. The title stands alone without a
   parent-project subtitle; header facts are ordered status, priority, due date.
   Due-date editing uses the native date input/picker path as directly as the
@@ -648,6 +697,9 @@ POST /api/config/google-calendar/auth-url
 GET  /api/config/google-calendar/calendars
 GET  /api/config/google-calendar/oauth/callback
 POST /api/config/google-calendar/disconnect
+GET  /api/config/google-workspace/status
+POST /api/config/google-workspace/auth-url
+POST /api/config/google-workspace/disconnect
 GET  /api/categories
 POST /api/categories
 PATCH /api/categories/:id
@@ -661,6 +713,11 @@ GET  /api/initiative-relations
 POST /api/initiative-relations
 DELETE /api/initiative-relations/:id
 GET  /api/initiative-graph
+GET  /api/graph/initiative/:initiativeId
+POST /api/graph/initiative/:initiativeId/freestyle-nodes
+PUT  /api/graph/initiative/:initiativeId/freestyle-nodes
+PATCH /api/graph/initiative/:initiativeId/nodes/:nodeKey
+DELETE /api/graph/initiative/:initiativeId/nodes/:nodeKey
 GET  /api/planning-canvas
 POST /api/planning-canvas/nodes
 PATCH /api/planning-canvas/nodes/:id
@@ -761,9 +818,6 @@ Known issue:
 - Align media API schemas with implemented support: either narrow accepted
   `entityType` values to category/initiative/task or implement
   `calendar_entry` and `app_chat_message` attachment validation and UI.
-- Add initiative-relation tools to the browser app-chat static tool-context
-  summary so OpenClaw receives the same high-level affordance list that the MCP
-  registry exposes.
 - Continue advanced Google Calendar integration from
   `docs/archive/google-calendar-integration-plan.md`: a first pragmatic multi-account
   OAuth/token UI exists, but a first-class connected-account table, account
@@ -812,10 +866,10 @@ repo writes on the VPS unless Dietrich explicitly approves that operation.
 
 ## Verification
 
-Last checked on 2026-05-16:
+Last checked on 2026-06-02:
 
 - `npm run typecheck` passed.
-- `npm test` passed: 36 test files, 163 tests.
+- `npm test` passed: 38 test files, 189 tests.
 - `npm run web:build` passed.
 - `npm run build` passed.
 - A one-off `dmax-config-audit` production image run with OpenClaw 2026.5.12

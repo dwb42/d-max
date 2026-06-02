@@ -30,6 +30,7 @@ export function migrate(databasePath?: string): void {
     migrateTaskChecklistItems(db);
     migrateMediaDomain(db);
     migrateWhoDomain(db);
+    migrateAppChatResearchSummary(db);
     db.exec(schema);
     ensureInboxCategory(db);
     migratePromptLogs(db);
@@ -194,6 +195,14 @@ function migrateAppChatAudioMetadata(db: ReturnType<typeof openDatabase>): void 
   ensureColumn(db, "app_chat_messages", "audio_error", "text");
   ensureColumn(db, "app_chat_messages", "audio_generated_from_message_id", "integer references app_chat_messages(id)");
   ensureColumn(db, "app_chat_messages", "audio_generated_at", "text");
+}
+
+function migrateAppChatResearchSummary(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "app_chat_messages")) {
+    return;
+  }
+
+  ensureColumn(db, "app_chat_messages", "research_summary_json", "text");
 }
 
 function migratePromptLogs(db: ReturnType<typeof openDatabase>): void {

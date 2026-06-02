@@ -16,6 +16,8 @@ import type {
   GoogleCalendarAccountStatus,
   GoogleCalendarAuthStatus,
   GoogleCalendarListItem,
+  GoogleWorkspaceAuthStatus,
+  GraphLayoutNode,
   LiveKitVoiceSession,
   MediaAttachment,
   MediaAsset,
@@ -33,6 +35,7 @@ import type {
   Initiative,
   InitiativeDetail,
   InitiativeGraph,
+  InitiativeMindmap,
   InitiativeRelationWithInitiatives,
   InitiativeType,
   ProjectPhase,
@@ -440,8 +443,22 @@ export async function fetchGoogleCalendarAccounts(): Promise<GoogleCalendarAccou
   return response.accounts;
 }
 
+export async function fetchGoogleWorkspaceAuthStatus(): Promise<GoogleWorkspaceAuthStatus> {
+  const response = await request<{ googleWorkspace: GoogleWorkspaceAuthStatus }>("/api/config/google-workspace/status");
+  return response.googleWorkspace;
+}
+
 export async function createGoogleCalendarAuthUrl(input: { loginHint?: string | null } = {}): Promise<string> {
   const response = await request<{ authUrl: string }>("/api/config/google-calendar/auth-url", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.authUrl;
+}
+
+export async function createGoogleWorkspaceAuthUrl(input: { loginHint?: string | null } = {}): Promise<string> {
+  const response = await request<{ authUrl: string }>("/api/config/google-workspace/auth-url", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input)
@@ -454,6 +471,14 @@ export async function disconnectGoogleCalendar(accountLabel?: string | null): Pr
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ accountLabel: accountLabel?.trim() || null })
+  });
+}
+
+export async function disconnectGoogleWorkspace(accountLabel: string): Promise<void> {
+  await request("/api/config/google-workspace/disconnect", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ accountLabel })
   });
 }
 
@@ -637,6 +662,68 @@ export async function fetchInitiativeGraph(input: { initiativeId?: number; maxDe
   return response.graph;
 }
 
+export async function fetchInitiativeMindmap(initiativeId: number): Promise<InitiativeMindmap> {
+  const response = await request<{ mindmap: InitiativeMindmap }>(`/api/graph/initiative/${initiativeId}`);
+  return response.mindmap;
+}
+
+export async function createInitiativeMindmapFreestyleNode(
+  initiativeId: number,
+  input: {
+    parentNodeKey?: string | null;
+    label?: string | null;
+    x?: number;
+    y?: number;
+  }
+): Promise<{ node: GraphLayoutNode; mindmap: InitiativeMindmap }> {
+  return request<{ node: GraphLayoutNode; mindmap: InitiativeMindmap }>(`/api/graph/initiative/${initiativeId}/freestyle-nodes`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+}
+
+export async function updateInitiativeMindmapNode(
+  initiativeId: number,
+  nodeKey: string,
+  input: {
+    label?: string;
+    x?: number;
+    y?: number;
+    width?: number | null;
+    height?: number | null;
+    collapsed?: boolean;
+    parentNodeKey?: string | null;
+  }
+): Promise<{ node: GraphLayoutNode; mindmap: InitiativeMindmap }> {
+  return request<{ node: GraphLayoutNode; mindmap: InitiativeMindmap }>(`/api/graph/initiative/${initiativeId}/nodes/${encodeURIComponent(nodeKey)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+}
+
+export async function deleteInitiativeMindmapNode(
+  initiativeId: number,
+  nodeKey: string
+): Promise<{ deleted: boolean; deletedNodeKeys: string[]; mindmap: InitiativeMindmap }> {
+  return request<{ deleted: boolean; deletedNodeKeys: string[]; mindmap: InitiativeMindmap }>(`/api/graph/initiative/${initiativeId}/nodes/${encodeURIComponent(nodeKey)}`, {
+    method: "DELETE"
+  });
+}
+
+export async function replaceInitiativeMindmapFreestyleNodes(
+  initiativeId: number,
+  nodes: Array<Pick<GraphLayoutNode, "nodeKey" | "parentNodeKey" | "label" | "x" | "y" | "width" | "height" | "collapsed">>
+): Promise<InitiativeMindmap> {
+  const response = await request<{ mindmap: InitiativeMindmap }>(`/api/graph/initiative/${initiativeId}/freestyle-nodes`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ nodes })
+  });
+  return response.mindmap;
+}
+
 export async function fetchPlanningCanvas(input: {
   canvasId?: number;
   search?: string;
@@ -719,6 +806,7 @@ export async function updateTaskStatus(id: number, status: Task["status"]) {
 export async function updateTask(
   id: number,
   input: {
+    initiativeId?: number;
     title?: string;
     status?: Task["status"];
     priority?: Task["priority"];

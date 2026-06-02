@@ -85,6 +85,23 @@ analysis/transcription features that still use OpenAI APIs directly.
 `DMAX_WEB_BASE_URL` and `GOOGLE_OAUTH_REDIRECT_URI` must point at the public
 domain.
 
+Google Workspace file access for the OpenClaw Google Workspace subagent uses `gog`
+inside `dmax-openclaw`, not a d-max database tool. Its config should live in
+the OpenClaw state volume via `XDG_CONFIG_HOME=/app/data/openclaw-state/xdg-config`.
+For local development, `/config` can start the Google Workspace OAuth flow and
+import the resulting refresh token into `gog`. For the encrypted file keyring in
+production, set a strong `GOG_KEYRING_PASSWORD` in the deployment environment,
+then authorize Drive, Docs, Sheets, Slides, Forms, and Sites from `/config` or
+from inside `dmax-openclaw`, for example:
+
+```bash
+docker compose exec dmax-openclaw sh -lc \
+  'gog auth add you@example.com --services drive,docs,sheets,slides,forms,sites --force-consent'
+```
+
+Never commit gog OAuth credentials, refresh tokens, service-account keys, or
+keyring passwords.
+
 Terminate TLS in a reverse proxy such as Caddy or Nginx and proxy the public
 domain to `127.0.0.1:${DMAX_HOST_PORT}`. `docker-compose.yml` binds only
 `dmax-api` to localhost; `dmax-openclaw` is exposed only on the internal Docker
@@ -199,8 +216,9 @@ runner image. On the VPS, run `npm ci --no-audit --no-fund` once inside
 
 Expected production OpenClaw version is `OpenClaw 2026.5.12 (f066dd2)`.
 The default agent in `openclaw/config.production-512.json` allows only
-`d-max__...` tools. Web/research remains separated in the `dmax-research`
-agent.
+`d-max__...` tools plus OpenClaw session/subagent orchestration tools.
+Web/research remains separated in the `dmax-research` agent, and Google
+Workspace file work remains separated in the `dmax-google-workspace` agent.
 
 Current VPS operational layout:
 

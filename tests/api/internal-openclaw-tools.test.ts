@@ -111,6 +111,117 @@ describe("internal OpenClaw tool endpoint", () => {
     });
   });
 
+  it("runs initiative mindmap freestyle CRUD through the API-owned tool runner", async () => {
+    const category = await postTool<{ id: number }>(apiPort, token, "createCategory", { name: "Mindmap API" });
+    const categoryData = expectToolData(category);
+    const initiative = await postTool<{ id: number }>(apiPort, token, "createInitiative", {
+      categoryId: categoryData.id,
+      type: "project",
+      name: "API Mindmap Project"
+    });
+    const initiativeData = expectToolData(initiative);
+
+    const created = await postTool<{ nodeKey: string; label: string; parentNodeKey: string }>(
+      apiPort,
+      token,
+      "createMindmapFreestyleNode",
+      { initiativeId: initiativeData.id, label: "API node" }
+    );
+    const createdData = expectToolData(created);
+    const updated = await postTool<{ nodeKey: string; label: string; x: number; y: number; collapsed: boolean }>(
+      apiPort,
+      token,
+      "updateMindmapFreestyleNode",
+      {
+        initiativeId: initiativeData.id,
+        nodeKey: createdData.nodeKey,
+        label: "Updated API node",
+        x: 360,
+        y: 180,
+        collapsed: true
+      }
+    );
+    const deleted = await postTool<{ deleted: true; deletedNodeKeys: string[] }>(apiPort, token, "deleteMindmapFreestyleNode", {
+      initiativeId: initiativeData.id,
+      nodeKey: createdData.nodeKey
+    });
+
+    expect(created.result).toMatchObject({
+      ok: true,
+      data: {
+        label: "API node",
+        parentNodeKey: "branch:freestyle"
+      }
+    });
+    expect(updated.result).toMatchObject({
+      ok: true,
+      data: {
+        nodeKey: createdData.nodeKey,
+        label: "Updated API node",
+        x: 360,
+        y: 180,
+        collapsed: true
+      }
+    });
+    expect(deleted.result).toMatchObject({
+      ok: true,
+      data: {
+        deleted: true,
+        deletedNodeKeys: [createdData.nodeKey]
+      }
+    });
+  });
+
+  it("preserves initiative mindmap validation errors, tool errors, and subtree confirmation envelopes", async () => {
+    const category = await postTool<{ id: number }>(apiPort, token, "createCategory", { name: "Mindmap Errors" });
+    const categoryData = expectToolData(category);
+    const initiative = await postTool<{ id: number }>(apiPort, token, "createInitiative", {
+      categoryId: categoryData.id,
+      type: "project",
+      name: "API Mindmap Errors"
+    });
+    const initiativeData = expectToolData(initiative);
+
+    const validation = await postTool<unknown>(apiPort, token, "createMindmapFreestyleNode", {
+      initiativeId: initiativeData.id,
+      label: ""
+    });
+    const derivedUpdate = await postTool<unknown>(apiPort, token, "updateMindmapFreestyleNode", {
+      initiativeId: initiativeData.id,
+      nodeKey: `initiative:${initiativeData.id}`,
+      x: 12
+    });
+    const parent = await postTool<{ nodeKey: string }>(apiPort, token, "createMindmapFreestyleNode", {
+      initiativeId: initiativeData.id,
+      label: "Parent"
+    });
+    const parentData = expectToolData(parent);
+    const child = await postTool<{ nodeKey: string }>(apiPort, token, "createMindmapFreestyleNode", {
+      initiativeId: initiativeData.id,
+      parentNodeKey: parentData.nodeKey,
+      label: "Child"
+    });
+    const childData = expectToolData(child);
+    const confirmation = await postTool<unknown>(apiPort, token, "deleteMindmapFreestyleNode", {
+      initiativeId: initiativeData.id,
+      nodeKey: parentData.nodeKey
+    });
+
+    expect(validation.result).toMatchObject({ ok: false, error: expect.stringContaining("String must contain at least 1 character") });
+    expect(derivedUpdate.result).toMatchObject({ ok: false, error: expect.stringContaining("Only freestyle") });
+    expect(confirmation.result).toMatchObject({
+      ok: false,
+      requiresConfirmation: true,
+      confirmationKind: "deleteMindmapFreestyleNodeSubtree",
+      proposedAction: {
+        tool: "deleteMindmapFreestyleNode",
+        input: { initiativeId: initiativeData.id, nodeKey: parentData.nodeKey }
+      }
+    });
+    expect((confirmation.result as { summary: string }).summary).toContain(parentData.nodeKey);
+    expect((confirmation.result as { summary: string }).summary).toContain(childData.nodeKey);
+  });
+
   it("preserves confirmation request result envelopes", async () => {
     const createResponse = await fetch(`http://127.0.0.1:${apiPort}/internal/openclaw/tools/createTask`, {
       method: "POST",
@@ -195,4 +306,42 @@ async function waitForHealth(port: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(`API did not become healthy for internal tool test.${lastError instanceof Error ? ` ${lastError.message}` : ""}`);
+}
+
+type InternalToolSuccess<TData> = { ok: true; result: { ok: true; data: TData } };
+type InternalToolFailure = {
+  ok: true;
+  result: {
+    ok: false;
+    error?: string;
+    requiresConfirmation?: true;
+    confirmationKind?: string;
+    summary?: string;
+    proposedAction?: unknown;
+  };
+};
+type InternalToolResponse<TData> = InternalToolSuccess<TData> | InternalToolFailure;
+
+async function postTool<TData>(
+  apiPort: number,
+  token: string,
+  toolName: string,
+  input: unknown
+): Promise<InternalToolResponse<TData>> {
+  const response = await fetch(`http://127.0.0.1:${apiPort}/internal/openclaw/tools/${toolName}`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ input, traceId: `test-${toolName}` })
+  });
+
+  expect(response.status).toBe(200);
+  return await response.json() as InternalToolResponse<TData>;
+}
+
+function expectToolData<TData>(response: InternalToolResponse<TData>): TData {
+  expect(response.result).toMatchObject({ ok: true });
+  return (response.result as { ok: true; data: TData }).data;
 }

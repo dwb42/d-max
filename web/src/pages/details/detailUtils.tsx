@@ -29,6 +29,7 @@ export type UpdateInitiativeInput = {
 };
 
 export type UpdateTaskInput = {
+  initiativeId?: number;
   title?: string;
   status?: Task["status"];
   priority?: Task["priority"];

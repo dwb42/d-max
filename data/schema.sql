@@ -66,6 +66,33 @@ create table if not exists planning_canvas_nodes (
   unique(canvas_id, initiative_id)
 );
 
+create table if not exists graph_layout_nodes (
+  id integer primary key,
+  scope_key text not null,
+  scope_type text not null check (scope_type in ('initiative', 'category', 'all_categories')),
+  scope_initiative_id integer references initiatives(id) on delete cascade,
+  scope_category_id integer references categories(id) on delete cascade,
+  node_key text not null,
+  node_kind text not null check (node_kind in ('initiative_root', 'branch', 'freestyle', 'task', 'media')),
+  entity_type text check (entity_type in ('initiative', 'task', 'media_asset')),
+  entity_id integer,
+  parent_node_key text,
+  label text not null,
+  x real not null,
+  y real not null,
+  width real,
+  height real,
+  collapsed integer not null default 0 check (collapsed in (0, 1)),
+  created_at text not null,
+  updated_at text not null,
+  unique(scope_key, node_key),
+  check (
+    (scope_type = 'initiative' and scope_initiative_id is not null and scope_category_id is null)
+    or (scope_type = 'category' and scope_initiative_id is null and scope_category_id is not null)
+    or (scope_type = 'all_categories' and scope_initiative_id is null and scope_category_id is null)
+  )
+);
+
 create table if not exists tasks (
   id integer primary key,
   initiative_id integer not null references initiatives(id),
@@ -313,6 +340,7 @@ create table if not exists app_chat_messages (
   audio_error text,
   audio_generated_from_message_id integer references app_chat_messages(id),
   audio_generated_at text,
+  research_summary_json text,
   created_at text not null
 );
 
@@ -372,6 +400,8 @@ create index if not exists idx_initiative_relations_successor on initiative_rela
 create index if not exists idx_initiative_relations_type on initiative_relations(relation_type, id);
 create index if not exists idx_planning_canvas_nodes_canvas on planning_canvas_nodes(canvas_id, y, x, id);
 create index if not exists idx_planning_canvas_nodes_initiative on planning_canvas_nodes(initiative_id);
+create index if not exists idx_graph_layout_nodes_scope_parent on graph_layout_nodes(scope_key, parent_node_key, node_key);
+create index if not exists idx_graph_layout_nodes_entity on graph_layout_nodes(entity_type, entity_id);
 create index if not exists idx_categories_sort_order on categories(sort_order, id);
 create index if not exists idx_initiatives_category_sort_order on initiatives(category_id, sort_order, id);
 create index if not exists idx_initiatives_parent_id on initiatives(parent_id);

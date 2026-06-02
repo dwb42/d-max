@@ -280,6 +280,25 @@ describe("repositories", () => {
     expect(tasks.list({ initiativeId: secondProject.id }).map((task) => task.id)).toEqual([secondTask.id, firstTask.id]);
   });
 
+  it("moves a task to another project at the end of the target task order", () => {
+    const category = new CategoryRepository(db).create({ name: "Business" });
+    const initiatives = new InitiativeRepository(db);
+    const sourceProject = initiatives.create({ categoryId: category.id, name: "Source" });
+    const targetProject = initiatives.create({ categoryId: category.id, name: "Target" });
+    const tasks = new TaskRepository(db);
+    const existingTargetTask = tasks.create({ initiativeId: targetProject.id, title: "Already there" });
+    const movedTask = tasks.create({ initiativeId: sourceProject.id, title: "Move me" });
+
+    const moved = tasks.update({ id: movedTask.id, initiativeId: targetProject.id });
+
+    expect(moved.initiativeId).toBe(targetProject.id);
+    expect(tasks.list({ initiativeId: sourceProject.id })).toEqual([]);
+    expect(tasks.list({ initiativeId: targetProject.id }).map((task) => task.id)).toEqual([
+      existingTargetTask.id,
+      movedTask.id
+    ]);
+  });
+
   it("creates calendar entries and completes linked tasks", () => {
     const category = new CategoryRepository(db).create({ name: "Business" });
     const initiative = new InitiativeRepository(db).create({ categoryId: category.id, name: "d-max" });

@@ -20,6 +20,7 @@ services:
       DMAX_OPENCLAW_MODEL: openai/gpt-5.5
       DMAX_INTERNAL_TOOL_TOKEN: ${DMAX_INTERNAL_TOOL_TOKEN:?set DMAX_INTERNAL_TOOL_TOKEN for production}
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?set OPENCLAW_GATEWAY_TOKEN for production}
+      XDG_CONFIG_HOME: /app/data/openclaw-state/xdg-config
       OPENCLAW_ALLOW_INSECURE_PRIVATE_WS: "1"
       GOOGLE_CALENDAR_TOKEN_PATH: /app/data/google-calendar-oauth.json
     command: ["npm", "run", "api:prod"]

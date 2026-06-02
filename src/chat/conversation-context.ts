@@ -1686,6 +1686,7 @@ function buildPromptSections(type: ConversationContext["type"], description: str
     "- Changing an existing initiative's type is a lifecycle decision and requires confirmation.",
     "- A repeated request is not explicit confirmation for a lifecycle change.",
     "- A requiresConfirmation tool result means the change was not applied.",
+    "- Initiative freestyle mindmaps are inspectable through getInitiativeMindmap and editable only through freestyle mindmap node tools; do not convert freestyle nodes into tasks/initiatives unless asked.",
     "",
     "Life area/category description guidance:",
     "- Categories are life areas and have a Markdown description field named description.",
@@ -1718,6 +1719,7 @@ function buildPromptSections(type: ConversationContext["type"], description: str
     "- Changing an existing initiative's type is a lifecycle decision and requires confirmation.",
     "- A repeated request is not explicit confirmation for a lifecycle change.",
     "- A requiresConfirmation tool result means the change was not applied.",
+    "- Initiative freestyle mindmaps are inspectable through getInitiativeMindmap and editable only through freestyle mindmap node tools; do not convert freestyle nodes into tasks/initiatives unless asked.",
     "",
     "Life area/category description guidance:",
     "- Categories are life areas and have a Markdown description field named description.",
@@ -1791,7 +1793,15 @@ function responsePolicyLines(): string[] {
     "- Antworte moeglichst in der Sprache des Nutzers; bei deutscher Nutzerfrage auf Deutsch.",
     "- Gib nicht jedes Mal eine vollstaendige Vollanalyse aus; lieber fokussiert hilfreich antworten.",
     "- Nutze Response-Strukturen als Orientierung, nicht als starres Formular; waehle nur Abschnitte, die zur konkreten Nutzerfrage passen.",
-    "- Bei explizitem Ausfuehrungswunsch handle oder unterstuetze konkret, statt nur zu analysieren."
+    "- Bei explizitem Ausfuehrungswunsch handle oder unterstuetze konkret, statt nur zu analysieren.",
+    "",
+    "External capability routing:",
+    "- Wenn der Nutzer aktuelle Webrecherche oder Quellenpruefung braucht, delegiere an den `dmax-research` Subagenten und fasse die Quellenarbeit sichtbar zusammen.",
+    "- Wenn der Nutzer eine Google-Workspace-Datei lesen, pruefen, erstellen oder bearbeiten will, insbesondere docs.google.com Links fuer Sheets, Docs, Slides oder Forms, delegiere an den `dmax-google-workspace` Subagenten.",
+    "- Nutze fuer diese Delegation `sessions_spawn` mit `agentId:\"dmax-google-workspace\"` bzw. `agentId:\"dmax-research\"`; nutze `context:\"isolated\"`, wenn der Subagent nur Link/Rechercheauftrag und knappe DMAX-Kontextzusammenfassung braucht.",
+    "- Wenn die Antwort vom Subagenten-Ergebnis abhaengt, sende keine Platzhalterantwort. Nutze nach `sessions_spawn` `sessions_yield`, bis die Completion als Folgemessage angekommen ist, und antworte erst dann inhaltlich.",
+    "- Behaupte bei Google-Workspace-Links nicht, dass du keinen direkten Zugriff hast, bevor der `dmax-google-workspace` Subagent die Datei mit `gog` versucht hat.",
+    "- Schreibe in Google-Workspace-Dateien nur nach expliziter Bestaetigung von Ziel-Datei, Bereich und konkreter Aenderung."
   ];
 }
 

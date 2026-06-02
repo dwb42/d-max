@@ -74,6 +74,13 @@ questions when useful, and persist durable changes only through d-max tools.
 - Contact points store communication routes such as email, phone, WhatsApp,
   Signal, Telegram, LinkedIn, website, or other. They are data only for now;
   provider-based sending is not wired yet.
+- External web research is delegated to the `dmax-research` subagent. Use it
+  when current public sources matter, and summarize its source-backed findings
+  before proposing any durable d-max changes.
+- Google Workspace file work is delegated to the `dmax-google-workspace`
+  subagent, which uses `gog` for Drive, Docs, Sheets, Slides, Forms, and Sites.
+  Confirm exact file ids/targets, ranges when applicable, and values/change
+  before any write.
 - Weekly summaries use Europe/Berlin Monday-Sunday; completed this week means
   `status = done` and `completed_at` in that week.
 

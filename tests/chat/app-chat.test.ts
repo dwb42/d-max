@@ -48,6 +48,7 @@ describe("AppChatService", () => {
     expect(result.context).toEqual({ type: "global" });
     expect(agentMessages[0]).toContain("Type: global");
     expect(agentMessages[0]).toContain("Initiative type guidance");
+    expect(agentMessages[0]).toContain("dmax-google-workspace");
     expect(agentMessages[0]).toContain("Use type=idea");
     expect(agentMessages[0]).toContain("Use type=habit");
     expect(agentMessages[0]).toContain("Projekt einwöchige Fahrradtour im Juni");
@@ -94,7 +95,7 @@ describe("AppChatService", () => {
       contextType: "project",
       contextEntityId: project.id,
       userInput: "Fasse mir dieses Projekt zusammen.",
-      openClawSessionId: `explicit:dmax-web-chat-${result.conversationId}`
+      openClawSessionId: `explicit:dmax-web-chat-v5-${result.conversationId}`
     });
     expect(promptLog.systemInstructions).toContain("Context contract");
     expect(promptLog.systemInstructions).toContain("Initiative type guidance");
@@ -170,6 +171,28 @@ describe("AppChatService", () => {
     expect(first.title).toBeNull();
     expect(second.title).toBeNull();
     expect(service.listMessages({ conversationId: second.id })).toEqual([]);
+  });
+
+  it("hides empty titled prewarm conversations from contextual chat history", async () => {
+    const category = new CategoryRepository(db).create({ name: "Health" });
+    const project = new InitiativeRepository(db).create({ categoryId: category.id, name: "Health Rhythm" });
+    const emptyUserConversation = service.createConversation({ type: "initiative", initiativeId: project.id });
+    const prewarmResult = db
+      .prepare(
+        `insert into app_conversations (title, context_type, context_entity_id, created_at, updated_at)
+         values (?, ?, ?, ?, ?)`
+      )
+      .run("Health Rhythm", "initiative", project.id, "2026-05-03T18:16:32.945Z", "2026-05-03T18:16:32.945Z");
+
+    const realConversation = await service.handleMessage({
+      message: "Weiter mit dieser Session.",
+      context: { type: "initiative", initiativeId: project.id }
+    });
+
+    const conversationIds = service.listConversations({ type: "initiative", initiativeId: project.id }).map((conversation) => conversation.id);
+    expect(conversationIds).toContain(emptyUserConversation.id);
+    expect(conversationIds).toContain(realConversation.conversationId);
+    expect(conversationIds).not.toContain(Number(prewarmResult.lastInsertRowid));
   });
 
   it("continues a pre-created empty contextual chat session", async () => {

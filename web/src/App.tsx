@@ -71,6 +71,7 @@ import {
   createGoogleEventFromDmax,
   createGoogleOnlyEvent,
   createGoogleCalendarAuthUrl,
+  createGoogleWorkspaceAuthUrl,
   createCalendarSource,
   createChatConversation,
   createInitiative,
@@ -89,6 +90,7 @@ import {
   deleteMediaAttachment,
   deleteTaskChecklistItem,
   disconnectGoogleCalendar,
+  disconnectGoogleWorkspace,
   fetchCalendarView,
   fetchChatActivity,
   fetchChatConversations,
@@ -97,6 +99,7 @@ import {
   fetchGoogleCalendarAccounts,
   fetchGoogleCalendars,
   fetchGoogleCalendarAuthStatus,
+  fetchGoogleWorkspaceAuthStatus,
   fetchHiddenCalendarEvents,
   fetchInitiativeGraph,
   fetchOpenClawStatus,
@@ -209,7 +212,10 @@ import type {
   GoogleCalendarAccountStatus,
   GoogleCalendarAuthStatus,
   GoogleCalendarListItem,
+  GoogleWorkspaceAuthStatus,
   ChatActivity,
+  ChatResearchSummary,
+  ChatWorkspaceSummary,
   AppPromptLog,
   PersistedChatMessage,
   OpenClawStatus,
@@ -282,6 +288,7 @@ type ChatMessage = {
   audioMimeType?: string | null;
   audioDurationMs?: number | null;
   activities?: ChatActivity[];
+  researchSummary?: ChatResearchSummary | null;
 };
 type ContextualAgentState = {
   open: boolean;
@@ -652,7 +659,13 @@ function contextualAgentErrorMessage(err: unknown): string {
 
 async function loadPersistedChatMessages(conversationId?: number | null): Promise<ChatMessage[]> {
   const messages = await fetchChatMessages(conversationId);
-  return messages.map(chatMessageFromPersisted);
+  const chatMessages = messages.map(chatMessageFromPersisted);
+  if (!conversationId) {
+    return chatMessages;
+  }
+
+  const activities = await fetchChatActivity(conversationId).catch(() => []);
+  return attachActivitiesToLastAssistant(chatMessages, activities);
 }
 
 function chatMessageFromPersisted(message: PersistedChatMessage): ChatMessage {
@@ -666,7 +679,8 @@ function chatMessageFromPersisted(message: PersistedChatMessage): ChatMessage {
     audioError: message.audioError,
     audioUrl: message.audioAttachment?.asset.fileUrl ?? null,
     audioMimeType: message.audioAttachment?.asset.mimeType ?? null,
-    audioDurationMs: message.audioAttachment?.asset.durationMs ?? null
+    audioDurationMs: message.audioAttachment?.asset.durationMs ?? null,
+    researchSummary: message.researchSummary
   };
 }
 
@@ -836,7 +850,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void prewarmOpenClaw(agentTarget.context).catch(() => undefined);
+    void prewarmOpenClaw().catch(() => undefined);
   }, [agentTargetKey]);
 
   useEffect(() => {
@@ -2314,11 +2328,11 @@ export default function App() {
           <TaskDetailView
             detail={taskDetail}
             loadError={taskLoadError}
+            projects={(overview?.initiatives ?? []).filter((initiative) => initiative.type === "project")}
+            categories={overview?.categories ?? []}
             people={peopleList ?? []}
             organizations={organizationList ?? []}
             participantRoleTypes={participantRoleTypes}
-            onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
-            onOpenCategory={(categoryName, initiativeType) => navigate(pathForCollectionCategory(collectionViewForInitiativeType(initiativeType), categoryName))}
             onCreateParticipant={async (input) => {
               await createEntityParticipant(input);
               if (route.taskId) setTaskDetail(await fetchTaskDetail(route.taskId));
@@ -2329,6 +2343,11 @@ export default function App() {
             }}
             onUpdateTask={async (taskId, input) => {
               await updateTask(taskId, input);
+              await refresh();
+              setTaskDetail(await fetchTaskDetail(taskId));
+            }}
+            onMoveTask={async (taskId, targetProjectId) => {
+              await updateTask(taskId, { initiativeId: targetProjectId });
               await refresh();
               setTaskDetail(await fetchTaskDetail(taskId));
             }}
@@ -2811,6 +2830,7 @@ function ChatView(props: {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const isVoiceActive = props.voicePhase !== "idle";
   const visibleMessages = props.messages.filter((message) => message.text.trim() || message.activities?.length || message.source);
+  const showEmptyState = visibleMessages.length === 0 && !props.busy;
   const latestMessage = props.messages.at(-1);
   const hasCurrentAssistantText = Boolean(latestMessage?.role === "assistant" && latestMessage.text.trim());
 
@@ -2828,9 +2848,17 @@ function ChatView(props: {
 
   return (
     <section className="chat-layout">
-      <div className="chat-thread" ref={props.threadRef}>
+      <div className={`chat-thread ${showEmptyState ? "empty" : ""}`} ref={props.threadRef}>
+        {showEmptyState ? <div className="chat-empty-state">Noch keine Nachrichten in diesem Chat.</div> : null}
         {visibleMessages.map((message) => (
           <article key={message.id} className={`chat-message ${message.role}`}>
+            {message.role === "assistant" ? (
+              <>
+                <ResearchSummaryBubble summary={message.researchSummary ?? researchSummaryFromActivities(message.activities ?? [])} />
+                <GoogleWorkspaceBubble summary={workspaceSummaryFromActivities(message.activities ?? [])} />
+                {message.activities?.length ? <ActivityTrail activities={message.activities} /> : null}
+              </>
+            ) : null}
             <RichText text={message.text} />
             {message.role === "assistant" && hasChatAudioState(message) ? (
               <ChatAudioPlayer
@@ -2839,7 +2867,7 @@ function ChatView(props: {
                 onAutoPlaySettled={props.onAutoPlayAudioSettled}
               />
             ) : null}
-            {message.activities?.length ? <ActivityTrail activities={message.activities} /> : null}
+            {message.role !== "assistant" && message.activities?.length ? <ActivityTrail activities={message.activities} /> : null}
             {message.source ? <span>{message.source === "voice" ? "voice message" : "text"}</span> : null}
           </article>
         ))}
@@ -2856,6 +2884,8 @@ function ChatView(props: {
                 <Square size={12} />
               </button>
             </div>
+            <ResearchSummaryBubble summary={researchSummaryFromActivities(props.activities)} live />
+            <GoogleWorkspaceBubble summary={workspaceSummaryFromActivities(props.activities)} live />
             {props.activities.length ? <ActivityTrail activities={props.activities} /> : null}
           </article>
         ) : null}
@@ -4035,6 +4065,7 @@ function ConfigView() {
   const [sources, setSources] = useState<CalendarSource[]>([]);
   const [accounts, setAccounts] = useState<GoogleCalendarAccountStatus[]>([]);
   const [globalStatus, setGlobalStatus] = useState<GoogleCalendarAuthStatus | null>(null);
+  const [workspaceStatus, setWorkspaceStatus] = useState<GoogleWorkspaceAuthStatus | null>(null);
   const [accountCalendars, setAccountCalendars] = useState<Record<string, { loading: boolean; calendars: GoogleCalendarListItem[]; error: string | null }>>({});
   const [newAccountLabel, setNewAccountLabel] = useState(initialGoogleAccount);
   const [addAccountOpen, setAddAccountOpen] = useState(false);
@@ -4053,14 +4084,16 @@ function ConfigView() {
   }, [accounts, newAccountLabel, sources]);
 
   async function loadConfig() {
-    const [nextSources, nextAccounts, nextGlobalStatus] = await Promise.all([
+    const [nextSources, nextAccounts, nextGlobalStatus, nextWorkspaceStatus] = await Promise.all([
       fetchCalendarSources(),
       fetchGoogleCalendarAccounts(),
-      fetchGoogleCalendarAuthStatus()
+      fetchGoogleCalendarAuthStatus(),
+      fetchGoogleWorkspaceAuthStatus()
     ]);
     setSources(nextSources);
     setAccounts(nextAccounts);
     setGlobalStatus(nextGlobalStatus);
+    setWorkspaceStatus(nextWorkspaceStatus);
     await Promise.all(nextAccounts.filter((account) => account.status.connected).map((account) => loadAccountCalendars(account.accountLabel)));
   }
 
@@ -4094,6 +4127,16 @@ function ConfigView() {
       window.location.href = authUrl;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Google OAuth konnte nicht gestartet werden.");
+    }
+  }
+
+  async function connectWorkspaceAccount(accountLabel: string) {
+    try {
+      setError(null);
+      const authUrl = await createGoogleWorkspaceAuthUrl({ loginHint: accountLabel.trim() });
+      window.location.href = authUrl;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google Workspace OAuth konnte nicht gestartet werden.");
     }
   }
 
@@ -4357,6 +4400,60 @@ function ConfigView() {
             </article>
           ))}
         </div>
+        </section>
+      </div>
+
+      <div className="config-section">
+        <div className="config-section-header">
+          <div>
+            <h2>Google Workspace fuer DMAX Agent</h2>
+            <p>Verbindet Google Drive, Docs, Tabellen, Praesentationen, Formulare und Sites fuer den OpenClaw-Subagenten. Die Anmeldung importiert den OAuth-Refresh-Token in gogcli.</p>
+          </div>
+        </div>
+        {workspaceStatus && !workspaceStatus.gogInstalled ? (
+          <div className="config-hint warning">gogcli ist lokal nicht installiert. Installiere `gogcli`, bevor der Agent Google Sheets nutzen kann.</div>
+        ) : null}
+        {workspaceStatus && !workspaceStatus.configured ? (
+          <div className="config-hint">
+            Setze `GOOGLE_OAUTH_CLIENT_ID` und `GOOGLE_OAUTH_CLIENT_SECRET`. Authorized redirect URI in Google:
+            <code>{globalStatus?.redirectUri ?? `http://localhost:3088/api/config/google-calendar/oauth/callback`}</code>
+          </div>
+        ) : null}
+        <div className="google-connect-action">
+          <button className="primary-action compact" type="button" disabled={!workspaceStatus?.gogInstalled || !globalStatus?.configured || !newAccountLabel.trim()} onClick={() => void connectWorkspaceAccount(newAccountLabel)}>
+            <Clock size={16} />
+            Google Workspace verbinden
+          </button>
+        </div>
+        <section className="config-subsection">
+          <div className="config-subsection-title">
+            <strong>gogcli Status</strong>
+            <span>{workspaceStatus?.connected ? "verbunden" : "nicht verbunden"}</span>
+          </div>
+          {workspaceStatus?.detail ? <div className="config-hint">{workspaceStatus.detail}</div> : null}
+          <div className="config-source-list">
+            {!workspaceStatus?.accounts.length ? <EmptyState title="Noch kein Workspace-Konto verbunden" /> : null}
+            {workspaceStatus?.accounts.map((accountLabel) => (
+              <article className="config-source-row" key={accountLabel}>
+                <span className="calendar-category-dot" style={{ background: "#5167b8" }} />
+                <div>
+                  <strong>{accountLabel}</strong>
+                  <span>Google Workspace Dateien via gogcli</span>
+                </div>
+                <span className="readonly-pill">drive + docs + sheets + slides + forms + sites</span>
+                <button
+                  className="secondary-action compact"
+                  type="button"
+                  onClick={async () => {
+                    await disconnectGoogleWorkspace(accountLabel);
+                    await loadConfig();
+                  }}
+                >
+                  Trennen
+                </button>
+              </article>
+            ))}
+          </div>
         </section>
       </div>
     </section>
@@ -6919,6 +7016,222 @@ function ActivityTrail({ activities }: { activities: ChatActivity[] }) {
       })}
     </div>
   );
+}
+
+function ResearchSummaryBubble({ summary, live = false }: { summary: ChatResearchSummary | null; live?: boolean }) {
+  const [open, setOpen] = useState(false);
+  if (!summary) {
+    return null;
+  }
+
+  const pageLabel = summary.pageCount === 1 ? "1 Seite" : `${summary.pageCount} Seiten`;
+  const searchLabel = summary.searchCount === 1 ? "1 Suchlauf" : `${summary.searchCount} Suchläufe`;
+  const title = live || summary.status === "running" ? "Webrecherche-Agent aktiv" : "Webrecherche abgeschlossen";
+  const subtitle = summary.status === "failed"
+    ? "Webrecherche mit Fehlern beendet"
+    : `${searchLabel}, ${pageLabel} geprüft`;
+  const activeTargets = live ? [...summary.queries.slice(-2), ...summary.pages.map((page) => page.url).slice(-2)].slice(-3) : [];
+
+  return (
+    <div className={`research-bubble ${live ? "live" : summary.status}`}>
+      <button type="button" className="research-bubble-summary" onClick={() => setOpen((current) => !current)} aria-expanded={open}>
+        <span className="research-status-dot" aria-hidden="true" />
+        <span>
+          <strong>{title}</strong>
+          <span>{subtitle}</span>
+        </span>
+        <ChevronDown size={14} aria-hidden="true" />
+      </button>
+      {activeTargets.length ? (
+        <div className="research-active-targets">
+          {activeTargets.map((target) => <span key={target}>{formatActivityDetail(target)}</span>)}
+        </div>
+      ) : null}
+      {open ? (
+        <div className="research-details">
+          {summary.queries.length ? (
+            <div>
+              <strong>Suchanfragen</strong>
+              <ul>
+                {summary.queries.map((query) => <li key={query}>{query}</li>)}
+              </ul>
+            </div>
+          ) : null}
+          {summary.pages.length ? (
+            <div>
+              <strong>Geprüfte Seiten</strong>
+              <ul>
+                {summary.pages.map((page) => (
+                  <li key={page.url}>
+                    <a href={page.url} target="_blank" rel="noreferrer">{displayUrl(page.url)}</a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function GoogleWorkspaceBubble({ summary, live = false }: { summary: ChatWorkspaceSummary | null; live?: boolean }) {
+  const [open, setOpen] = useState(false);
+  if (!summary) {
+    return null;
+  }
+
+  const operationLabel = summary.operationCount === 1 ? "1 Tabellenaktion" : `${summary.operationCount} Tabellenaktionen`;
+  const title = live || summary.status === "running" ? "Google-Workspace-Agent aktiv" : "Google Workspace abgeschlossen";
+  const subtitle = summary.status === "failed"
+    ? "Google Workspace mit Fehlern beendet"
+    : `${operationLabel}, ${summary.readCount} lesen, ${summary.writeCount} schreiben`;
+  const activeTargets = live
+    ? summary.operations
+        .slice(-3)
+        .map((operation) => [operationLabelForWorkspace(operation.operation, operation.service), operation.range ?? operation.spreadsheetId ?? operation.fileId].filter(Boolean).join(" · "))
+    : [];
+
+  return (
+    <div className={`workspace-bubble ${live ? "live" : summary.status}`}>
+      <button type="button" className="workspace-bubble-summary" onClick={() => setOpen((current) => !current)} aria-expanded={open}>
+        <span className="workspace-status-dot" aria-hidden="true" />
+        <span>
+          <strong>{title}</strong>
+          <span>{subtitle}</span>
+        </span>
+        <ChevronDown size={14} aria-hidden="true" />
+      </button>
+      {activeTargets.length ? (
+        <div className="workspace-active-targets">
+          {activeTargets.map((target) => <span key={target}>{formatActivityDetail(target)}</span>)}
+        </div>
+      ) : null}
+      {open ? (
+        <div className="workspace-details">
+          {summary.operations.length ? (
+            <ul>
+              {summary.operations.map((operation, index) => (
+                <li key={`${operation.operation}-${operation.spreadsheetId ?? ""}-${operation.range ?? ""}-${index}`}>
+                  <strong>{operationLabelForWorkspace(operation.operation, operation.service)}</strong>
+                  {operation.range ? <span>{operation.range}</span> : null}
+                  {operation.spreadsheetId || operation.fileId ? <span>{shortFileId(operation.spreadsheetId ?? operation.fileId ?? "")}</span> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <span>Subagent wurde aktiviert.</span>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function researchSummaryFromActivities(activities: ChatActivity[]): ChatResearchSummary | null {
+  const researchActivities = activities.filter((activity) => activity.kind === "research" || activity.agentId === "dmax-research");
+  const queries = uniqueActivityValues(researchActivities.flatMap((activity) => activity.query ? [activity.query] : []));
+  const urls = uniqueActivityValues(researchActivities.flatMap((activity) => activity.url ? [activity.url] : []));
+  if (researchActivities.length === 0 && queries.length === 0 && urls.length === 0) {
+    return null;
+  }
+  const completed = [...researchActivities].reverse().find((activity) => activity.kind === "research" && activity.status !== "running");
+  const failed = researchActivities.some((activity) => activity.status === "failed");
+  return {
+    agentId: "dmax-research",
+    status: failed ? "failed" : completed ? "completed" : "running",
+    startedAt: researchActivities.find((activity) => activity.kind === "research" && activity.status === "running")?.timestamp ?? null,
+    completedAt: completed?.timestamp ?? null,
+    searchCount: researchActivities.filter((activity) => activity.toolName === "web_search" && activity.kind === "tool_call").length,
+    pageCount: researchActivities.filter((activity) => activity.toolName === "web_fetch" && activity.kind === "tool_call").length,
+    queries,
+    pages: urls.map((url) => ({ url }))
+  };
+}
+
+function workspaceSummaryFromActivities(activities: ChatActivity[]): ChatWorkspaceSummary | null {
+  const workspaceActivities = activities.filter((activity) => activity.kind === "workspace" || activity.agentId === "dmax-google-workspace");
+  if (workspaceActivities.length === 0) {
+    return null;
+  }
+  const operations = workspaceActivities
+    .filter((activity) => activity.operation)
+    .map((activity) => ({
+      operation: activity.operation ?? "sheets",
+      service: activity.service ?? null,
+      fileId: activity.fileId ?? null,
+      spreadsheetId: activity.spreadsheetId ?? null,
+      range: activity.range ?? null,
+      status: activity.status
+    }));
+  const completed = [...workspaceActivities].reverse().find((activity) => activity.kind === "workspace" && activity.status !== "running");
+  const failed = workspaceActivities.some((activity) => activity.status === "failed");
+  return {
+    agentId: "dmax-google-workspace",
+    status: failed ? "failed" : completed ? "completed" : "running",
+    startedAt: workspaceActivities.find((activity) => activity.kind === "workspace" && activity.status === "running")?.timestamp ?? null,
+    completedAt: completed?.timestamp ?? null,
+    operationCount: operations.length,
+    readCount: operations.filter((operation) => isWorkspaceReadOperation(operation.operation)).length,
+    writeCount: operations.filter((operation) => isWorkspaceWriteOperation(operation.operation)).length,
+    operations
+  };
+}
+
+function operationLabelForWorkspace(operation: string, service?: string | null): string {
+  const labels: Record<string, string> = {
+    get: "Tabelle gelesen",
+    read: "Tabelle gelesen",
+    show: "Tabelle gelesen",
+    metadata: "Metadaten gelesen",
+    raw: "Tabelle gelesen",
+    update: "Zellen aktualisiert",
+    edit: "Zellen aktualisiert",
+    set: "Zellen aktualisiert",
+    append: "Zeilen angehaengt",
+    add: "Zeilen angehaengt",
+    create: "Tabelle erstellt",
+    new: "Tabelle erstellt"
+  };
+  const serviceLabel = service ? workspaceServiceLabel(service) : "Workspace";
+  return labels[operation] ?? `${serviceLabel} ${operation}`;
+}
+
+function workspaceServiceLabel(service: string): string {
+  const labels: Record<string, string> = {
+    drive: "Drive",
+    docs: "Docs",
+    sheets: "Sheets",
+    slides: "Slides",
+    forms: "Forms",
+    sites: "Sites"
+  };
+  return labels[service] ?? "Workspace";
+}
+
+function isWorkspaceReadOperation(operation: string): boolean {
+  return ["get", "read", "show", "metadata", "info", "raw", "export", "download", "dl", "notes", "links", "hyperlinks"].includes(operation);
+}
+
+function isWorkspaceWriteOperation(operation: string): boolean {
+  return ["create", "new", "update", "edit", "set", "append", "add", "insert", "clear", "format", "merge", "unmerge", "freeze", "add-tab", "rename-tab", "delete-tab"].includes(operation);
+}
+
+function shortFileId(value: string): string {
+  return value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-6)}` : value;
+}
+
+function uniqueActivityValues(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function displayUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname}${parsed.pathname === "/" ? "" : parsed.pathname}`;
+  } catch {
+    return url;
+  }
 }
 
 function formatActivityDetail(detail: string): string {

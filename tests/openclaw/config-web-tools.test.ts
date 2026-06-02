@@ -11,6 +11,7 @@ describe("OpenClaw web config tools", () => {
       const mainAgent = config.agents?.list?.find((agent) => agent.id === "main");
       const allowedTools = new Set(mainAgent?.tools?.allow ?? []);
       const expectedTools = tools.map((tool) => `d-max__${tool.name}`);
+      const expectedOrchestrationTools = ["agents_list", "sessions_list", "sessions_spawn", "sessions_send", "sessions_yield", "session_status", "subagents"];
 
       expect(expectedTools).toEqual([
         "d-max__listCategories",
@@ -26,6 +27,10 @@ describe("OpenClaw web config tools", () => {
         "d-max__createInitiativeRelation",
         "d-max__deleteInitiativeRelation",
         "d-max__getInitiativeGraph",
+        "d-max__getInitiativeMindmap",
+        "d-max__createMindmapFreestyleNode",
+        "d-max__updateMindmapFreestyleNode",
+        "d-max__deleteMindmapFreestyleNode",
         "d-max__listTasks",
         "d-max__createTask",
         "d-max__updateTask",
@@ -62,8 +67,8 @@ describe("OpenClaw web config tools", () => {
         "d-max__updatePartyContactPoint"
       ]);
       expect([...allowedTools].filter((tool) => tool.startsWith("d-max__")).sort()).toEqual([...expectedTools].sort());
-      expect([...allowedTools].every((tool) => tool.startsWith("d-max__"))).toBe(true);
-      expect(allowedTools.size).toBe(expectedTools.length);
+      expect([...allowedTools].filter((tool) => !tool.startsWith("d-max__")).sort()).toEqual([...expectedOrchestrationTools].sort());
+      expect(allowedTools.size).toBe(expectedTools.length + expectedOrchestrationTools.length);
     }
   );
 
@@ -108,7 +113,11 @@ describe("OpenClaw web config tools", () => {
       for (const toolName of forbiddenDefaultTools) {
         expect(mainTools.has(toolName), toolName).toBe(false);
       }
-      expect(mainAgent?.subagents?.allowAgents).toEqual(["dmax-research"]);
+      expect(mainTools.has("sessions_spawn")).toBe(true);
+      expect(mainTools.has("sessions_send")).toBe(true);
+      expect(mainTools.has("sessions_yield")).toBe(true);
+      expect(mainTools.has("subagents")).toBe(true);
+      expect(mainAgent?.subagents?.allowAgents).toEqual(["dmax-research", "dmax-google-workspace"]);
       expect(mainAgent?.subagents?.requireAgentId).toBe(true);
       expect(researchTools.has("group:web")).toBe(true);
       expect([...researchDeny]).toEqual(expect.arrayContaining([
@@ -125,6 +134,23 @@ describe("OpenClaw web config tools", () => {
         "sandbox",
         "tts"
       ]));
+    }
+  );
+
+  it.each(["openclaw/config.web.json", "openclaw/config.staging-512.json", "openclaw/config.production.json", "openclaw/config.production-512.json"])(
+    "keeps Google Workspace isolated in a dedicated runtime subagent in %s",
+    (configPathInput) => {
+      const config = readOpenClawConfig(configPathInput);
+      const googleAgent = config.agents?.list?.find((agent) => agent.id === "dmax-google-workspace");
+      const allowedTools = new Set(googleAgent?.tools?.allow ?? []);
+      const deniedTools = new Set(googleAgent?.tools?.deny ?? []);
+
+      expect(googleAgent).toBeTruthy();
+      expect(allowedTools.has("group:runtime")).toBe(true);
+      expect(allowedTools.has("group:web")).toBe(false);
+      expect(deniedTools.has("group:web")).toBe(true);
+      expect(deniedTools.has("group:sessions")).toBe(true);
+      expect(googleAgent?.subagents?.allowAgents).toEqual([]);
     }
   );
 

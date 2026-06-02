@@ -53,6 +53,51 @@ export type InitiativeGraph = {
   relations: InitiativeRelationWithInitiatives[];
 };
 
+export type GraphScope =
+  | { type: "initiative"; initiativeId: number }
+  | { type: "category"; categoryId: number }
+  | { type: "all_categories" };
+
+export type GraphLayoutNodeKind = "initiative_root" | "branch" | "freestyle" | "task" | "media";
+export type GraphLayoutEntityType = "initiative" | "task" | "media_asset";
+
+export type GraphLayoutNode = {
+  id: number;
+  scopeKey: string;
+  scope: GraphScope;
+  nodeKey: string;
+  nodeKind: GraphLayoutNodeKind;
+  entityType: GraphLayoutEntityType | null;
+  entityId: number | null;
+  parentNodeKey: string | null;
+  label: string;
+  x: number;
+  y: number;
+  width: number | null;
+  height: number | null;
+  collapsed: boolean;
+  moveSupport: {
+    visual: boolean;
+    semantic: boolean;
+    freestyleParent: boolean;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GraphLayoutEdge = {
+  id: string;
+  sourceNodeKey: string;
+  targetNodeKey: string;
+  kind: "parent_child";
+};
+
+export type InitiativeMindmap = {
+  scope: GraphScope;
+  nodes: GraphLayoutNode[];
+  edges: GraphLayoutEdge[];
+};
+
 export type PlanningCanvas = {
   id: number;
   name: string;
@@ -375,6 +420,14 @@ export type GoogleCalendarAuthStatus = {
 export type GoogleCalendarAccountStatus = {
   accountLabel: string;
   status: GoogleCalendarAuthStatus;
+};
+
+export type GoogleWorkspaceAuthStatus = {
+  gogInstalled: boolean;
+  configured: boolean;
+  connected: boolean;
+  accounts: string[];
+  detail: string | null;
 };
 
 export type GoogleCalendarListItem = {
@@ -705,11 +758,50 @@ export type StateEvent = {
 
 export type ChatActivity = {
   id: string;
-  kind: "tool_call" | "tool_result" | "plan" | "reasoning";
+  kind: "tool_call" | "tool_result" | "plan" | "reasoning" | "research" | "workspace";
   status: "running" | "completed" | "failed";
   title: string;
   detail?: string;
   timestamp?: string;
+  agentId?: string;
+  toolName?: string;
+  query?: string;
+  url?: string;
+  command?: string;
+  service?: string;
+  operation?: string;
+  fileId?: string;
+  spreadsheetId?: string;
+  range?: string;
+};
+
+export type ChatResearchSummary = {
+  agentId: "dmax-research";
+  status: "running" | "completed" | "failed";
+  startedAt: string | null;
+  completedAt: string | null;
+  searchCount: number;
+  pageCount: number;
+  queries: string[];
+  pages: Array<{ url: string; status?: string | null }>;
+};
+
+export type ChatWorkspaceSummary = {
+  agentId: "dmax-google-workspace";
+  status: "running" | "completed" | "failed";
+  startedAt: string | null;
+  completedAt: string | null;
+  operationCount: number;
+  readCount: number;
+  writeCount: number;
+  operations: {
+    service?: string | null;
+    operation: string;
+    fileId?: string | null;
+    spreadsheetId?: string | null;
+    range?: string | null;
+    status?: string | null;
+  }[];
 };
 
 export type PersistedChatMessage = {
@@ -723,6 +815,7 @@ export type PersistedChatMessage = {
   audioError: string | null;
   audioGeneratedFromMessageId: number | null;
   audioGeneratedAt: string | null;
+  researchSummary: ChatResearchSummary | null;
   audioAttachment: MediaAttachment | null;
   createdAt: string;
 };

@@ -36,6 +36,10 @@
             "d-max__createInitiativeRelation",
             "d-max__deleteInitiativeRelation",
             "d-max__getInitiativeGraph",
+            "d-max__getInitiativeMindmap",
+            "d-max__createMindmapFreestyleNode",
+            "d-max__updateMindmapFreestyleNode",
+            "d-max__deleteMindmapFreestyleNode",
             "d-max__listTasks",
             "d-max__createTask",
             "d-max__updateTask",
@@ -69,11 +73,18 @@
             "d-max__deleteEntityParticipant",
             "d-max__listPartyContactPoints",
             "d-max__createPartyContactPoint",
-            "d-max__updatePartyContactPoint"
+            "d-max__updatePartyContactPoint",
+            "agents_list",
+            "sessions_list",
+            "sessions_spawn",
+            "sessions_send",
+            "sessions_yield",
+            "session_status",
+            "subagents"
           ]
         },
         "subagents": {
-          "allowAgents": ["dmax-research"],
+          "allowAgents": ["dmax-research", "dmax-google-workspace"],
           "requireAgentId": true
         }
       },
@@ -100,6 +111,34 @@
             "browser",
             "gateway",
             "cron"
+          ]
+        },
+        "subagents": {
+          "allowAgents": [],
+          "requireAgentId": true
+        }
+      },
+      {
+        "id": "dmax-google-workspace",
+        "name": "d-max Google Workspace Agent",
+        "workspace": "/Users/dw/Projects/d-max/openclaw/workspace/dmax-google-workspace",
+        "tools": {
+          "allow": [
+            "group:runtime"
+          ],
+          "deny": [
+            "group:web",
+            "group:fs",
+            "group:media",
+            "group:automation",
+            "group:sessions",
+            "browser",
+            "canvas",
+            "gateway",
+            "media",
+            "memory",
+            "sandbox",
+            "tts"
           ]
         },
         "subagents": {

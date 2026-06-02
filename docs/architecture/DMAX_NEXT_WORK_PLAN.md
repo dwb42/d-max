@@ -1,6 +1,6 @@
 # DMAX Next Work Plan
 
-Last updated: 2026-05-15
+Last updated: 2026-06-02
 
 This is the forward-looking technical plan after the completed canonical UI refactor. It is intentionally not a phase history. Future coding-agent sessions should use this file with the active UI docs, not the archived UI refactor planning set.
 
@@ -42,6 +42,8 @@ Current frontend structure:
 - Detail route compositions live in `web/src/pages/details/`.
 - Shared UI primitives live in `web/src/components/ui/`.
 - Party/contact primitives live in `web/src/components/party/`.
+- The initiative mindmap surface lives in
+  `web/src/components/graph/InitiativeMindmap.tsx`.
 - `web/src/App.tsx` is still large, roughly 8k lines at this writing.
 
 `App.tsx` still owns:
@@ -54,7 +56,7 @@ Current frontend structure:
 - create/edit modal open state that crosses route boundaries;
 - DMAX drawer state, route-to-context mapping, chat streaming, voice-message handling, audio reply playback;
 - utility/debug routes such as config, prompt templates and prompt inspector;
-- calendar, timeline and planning-canvas surfaces.
+- calendar, timeline, planning-canvas and initiative-mindmap integration.
 
 The main next decision is whether to reduce shell/drawer technical risk first or to move into product-specific feature work. The recommended default is to extract DMAX drawer/context code first, then do one narrow orchestration decomposition pass, then contain utility/debug surfaces.
 
@@ -78,7 +80,7 @@ The DMAX drawer is central to the product and still crosses too many concerns in
 - user-facing error mapping;
 - drawer shell and resize behavior.
 
-Extracting it reduces risk before calendar/planning or config/debug work, because the drawer appears across nearly every route. It also creates a better boundary for future agent/chat experience improvements.
+Extracting it reduces risk before calendar/planning/mindmap or config/debug work, because the drawer appears across nearly every route. It also creates a better boundary for future agent/chat experience improvements.
 
 ### In Scope
 
@@ -98,7 +100,7 @@ Extracting it reduces risk before calendar/planning or config/debug work, becaus
 - No redesign of the drawer UX.
 - No new chat features.
 - No broad app-shell refactor.
-- No calendar/planning work.
+- No calendar/planning/mindmap work.
 - No migration of `/drive` durable voice tool behavior.
 
 ### Candidate Files And Components
@@ -241,7 +243,7 @@ Even after list/detail extraction, `App.tsx` still contains:
 - DMAX drawer/chat/voice handling;
 - `/drive` voice surface;
 - config, prompt templates and prompt inspector;
-- planning canvas and timeline;
+- planning canvas, timeline, and initiative mindmap integration;
 - many formatting and debug helper functions.
 
 ### Already Extracted
@@ -738,7 +740,7 @@ DMAX Stabilization - Phase 26: DMAX Drawer / Context Extraction
 
 Read AGENTS.md, docs/architecture/DMAX_NEXT_WORK_PLAN.md, active docs/ui guidance, web/src/App.tsx and current drawer/chat code.
 
-Scope: behavior-preserving extraction only. Extract the DMAX drawer visual components and route-to-context helpers from App.tsx into focused frontend modules. Do not redesign the drawer, change OpenClaw/chat APIs, alter schemas, or touch calendar/planning/config surfaces.
+Scope: behavior-preserving extraction only. Extract the DMAX drawer visual components and route-to-context helpers from App.tsx into focused frontend modules. Do not redesign the drawer, change OpenClaw/chat APIs, alter schemas, or touch calendar/planning/mindmap/config surfaces.
 
 Preserve: scoped context labels, mobile drawer containment, old chats, new chat, streaming, abort, voice-message controls, audio replies and user-facing error mapping.
 

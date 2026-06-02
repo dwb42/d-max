@@ -59,10 +59,24 @@ comes before this?", "what depends on this?", and "what comes next?". Cycles and
 self-relations are rejected. Deleting one relation does not require
 confirmation.
 
+## Freestyle Mindmaps
+
+Use `getInitiativeMindmap` plus the freestyle mindmap tools for
+planning-canvas thoughts, clusters, rough structure, and visual idea sorting
+inside an initiative. Use node keys returned by `getInitiativeMindmap`.
+`createMindmapFreestyleNode` creates only freestyle notes; omitted
+`parentNodeKey` goes under `branch:freestyle`, while `parentNodeKey=null`
+creates a floating note. `updateMindmapFreestyleNode` can rename, move,
+resize, collapse/expand, or reparent freestyle nodes only. Derived root,
+branch, task, and media nodes are read-only context for these tools. Do not
+convert freestyle mindmap nodes into tasks, initiatives, markdown sections, or
+checklist items unless Dietrich explicitly asks for that semantic conversion.
+
 ## Confirmation
 
 Require confirmation for:
 - deleting tasks
+- deleting a freestyle mindmap subtree
 - archiving or completing initiatives
 - batch/mass changes
 
@@ -113,6 +127,17 @@ initiative, task, or calendar entry. Inspect available roles with
 Use `createPartyContactPoint` and `updatePartyContactPoint` for contact routes.
 These contact points prepare future executable communication, but sending
 messages through providers is not implemented yet.
+
+## External Research And Google Workspace
+
+Use the `dmax-research` subagent for web research. Do not use web tools in the
+default d-max turn.
+
+Use the `dmax-google-workspace` subagent for Google Workspace files. It uses
+`gog`, not d-max database tools, for Drive, Docs, Sheets, Slides, Forms, and
+Sites. Any write, append, clear, delete, formatting, share, publish, copy, or
+bulk operation requires explicit confirmation of the target file/range when
+applicable and the exact values/change.
 
 ## Silent Replies
 

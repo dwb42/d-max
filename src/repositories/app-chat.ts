@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import type { OpenClawResearchSummary } from "../chat/openclaw-agent.js";
 import { nowIso } from "../db/time.js";
 
 export type AppChatRole = "user" | "assistant";
@@ -16,6 +17,7 @@ export type AppChatMessage = {
   audioError: string | null;
   audioGeneratedFromMessageId: number | null;
   audioGeneratedAt: string | null;
+  researchSummary: OpenClawResearchSummary | null;
   createdAt: string;
 };
 
@@ -30,6 +32,7 @@ type AppChatMessageRow = {
   audio_error: string | null;
   audio_generated_from_message_id: number | null;
   audio_generated_at: string | null;
+  research_summary_json: string | null;
   created_at: string;
 };
 
@@ -43,6 +46,7 @@ export type CreateAppChatMessageInput = {
   audioError?: string | null;
   audioGeneratedFromMessageId?: number | null;
   audioGeneratedAt?: string | null;
+  researchSummary?: OpenClawResearchSummary | null;
 };
 
 export type UpdateAppChatMessageAudioInput = {
@@ -66,6 +70,7 @@ function toMessage(row: AppChatMessageRow): AppChatMessage {
     audioError: row.audio_error,
     audioGeneratedFromMessageId: row.audio_generated_from_message_id,
     audioGeneratedAt: row.audio_generated_at,
+    researchSummary: parseResearchSummary(row.research_summary_json),
     createdAt: row.created_at
   };
 }
@@ -87,8 +92,8 @@ export class AppChatRepository {
     const result = this.db
       .prepare(
         `insert into app_chat_messages
-          (conversation_id, role, content, source, audio_generation_status, audio_provider, audio_error, audio_generated_from_message_id, audio_generated_at, created_at)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          (conversation_id, role, content, source, audio_generation_status, audio_provider, audio_error, audio_generated_from_message_id, audio_generated_at, research_summary_json, created_at)
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         input.conversationId ?? null,
@@ -100,6 +105,7 @@ export class AppChatRepository {
         input.audioError ?? null,
         input.audioGeneratedFromMessageId ?? null,
         input.audioGeneratedAt ?? null,
+        input.researchSummary ? JSON.stringify(input.researchSummary) : null,
         now
       );
 
@@ -137,5 +143,17 @@ export class AppChatRepository {
   findById(id: number): AppChatMessage | null {
     const row = this.db.prepare("select * from app_chat_messages where id = ?").get(id) as AppChatMessageRow | undefined;
     return row ? toMessage(row) : null;
+  }
+}
+
+function parseResearchSummary(value: string | null): OpenClawResearchSummary | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(value) as OpenClawResearchSummary;
+    return parsed && parsed.agentId === "dmax-research" ? parsed : null;
+  } catch {
+    return null;
   }
 }

@@ -5,7 +5,7 @@ import { AppChatRepository } from "../repositories/app-chat.js";
 import type { AppChatMessage, AppChatSource } from "../repositories/app-chat.js";
 import { AppPromptLogRepository } from "../repositories/app-prompt-logs.js";
 import type { AppPromptLog } from "../repositories/app-prompt-logs.js";
-import { prepareOpenClawSession, readOpenClawTrajectorySummary, runOpenClawSessionTurn } from "./openclaw-agent.js";
+import { prepareOpenClawSession, readOpenClawTrajectorySummary, runOpenClawSessionTurn, summarizeOpenClawResearchActivities } from "./openclaw-agent.js";
 import type { OpenClawActivity, OpenClawPreparedSession } from "./openclaw-agent.js";
 import { buildContextualAgentMessage, conversationContextFromStorage, resolveConversationContext } from "./conversation-context.js";
 import type { ConversationContext } from "./conversation-context.js";
@@ -97,7 +97,7 @@ export class AppChatService {
     return this.conversations.listByContext({
       contextType: resolved.contextType,
       contextEntityId: resolved.contextEntityId
-    });
+    }).filter((conversation) => !conversation.title?.trim() || this.conversationHasMessages(conversation.id));
   }
 
   createConversation(context: ConversationContext): AppConversation {
@@ -107,6 +107,13 @@ export class AppChatService {
       contextType: resolved.contextType,
       contextEntityId: resolved.contextEntityId
     });
+  }
+
+  private conversationHasMessages(conversationId: number): boolean {
+    const row = this.db
+      .prepare("select 1 from app_chat_messages where conversation_id = ? limit 1")
+      .get(conversationId) as { "1": number } | undefined;
+    return Boolean(row);
   }
 
   async prepareConversationContext(
@@ -309,14 +316,15 @@ export class AppChatService {
       content: agentResult.text,
       source: "system",
       audioGenerationStatus: prepared.userMessageSource === "app_voice_message" ? "pending" : "none",
-      audioGeneratedFromMessageId: prepared.userMessageSource === "app_voice_message" ? prepared.userMessageId : null
+      audioGeneratedFromMessageId: prepared.userMessageSource === "app_voice_message" ? prepared.userMessageId : null,
+      researchSummary: summarizeOpenClawResearchActivities(agentResult.activities)
     });
     addTurnTraceEvent(prepared.trace, "assistant_message_persisted", {
       assistantMessageId: assistantMessage.id
     });
     this.conversations.touch(prepared.conversationId);
     addTurnTraceEvent(prepared.trace, "conversation_touched");
-    prepared.trace.openClaw = readOpenClawTrajectorySummary(agentResult.openClawSessionId ?? `dmax-web-chat-${prepared.conversationId}`, {
+    prepared.trace.openClaw = readOpenClawTrajectorySummary(agentResult.openClawSessionId ?? openClawSessionKeyForConversation(prepared.conversationId), {
       after: prepared.trace.startedAt
     });
     addTurnTraceEvent(prepared.trace, "response_creation_finished");
@@ -392,13 +400,16 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+const APP_CHAT_OPENCLAW_SESSION_VERSION = "v5";
+
 function openClawSessionKeyForConversation(conversationId: number): string {
-  return `explicit:dmax-web-chat-${conversationId}`;
+  return `explicit:dmax-web-chat-${APP_CHAT_OPENCLAW_SESSION_VERSION}-${conversationId}`;
 }
 
 function openClawSessionLabelForConversation(conversationId: number, title?: string | null): string {
   const cleanedTitle = title?.trim();
-  return cleanedTitle ? `d-max app conversation ${conversationId}: ${cleanedTitle}` : `d-max app conversation ${conversationId}`;
+  const prefix = `d-max app conversation ${APP_CHAT_OPENCLAW_SESSION_VERSION} ${conversationId}`;
+  return cleanedTitle ? `${prefix}: ${cleanedTitle}` : prefix;
 }
 
 function createDiagnosticContext(
@@ -430,6 +441,7 @@ const OPENCLAW_TOOL_CONTEXT = [
   "Known d-max tool surface:",
   "- Categories: listCategories, createCategory, updateCategory",
   "- Initiatives: listInitiatives, getInitiative, createInitiative, updateInitiative, archiveInitiative, updateInitiativeMarkdown",
+  "- Initiative freestyle mindmaps: getInitiativeMindmap, createMindmapFreestyleNode, updateMindmapFreestyleNode, deleteMindmapFreestyleNode. Use node keys from getInitiativeMindmap; do not convert freestyle nodes into tasks/initiatives unless asked.",
   "- Tasks: listTasks, createTask, updateTask, completeTask, deleteTask. Task status is only open or done.",
   "- Task checklists: listTaskChecklistItems, createTaskChecklistItem, updateTaskChecklistItem, deleteTaskChecklistItem, reorderTaskChecklistItems",
   "- Media: listMediaAttachments, attachMediaToEntity, updateMediaAttachment, deleteMediaAttachment, reorderMediaAttachments"

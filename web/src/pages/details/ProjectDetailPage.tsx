@@ -4,6 +4,7 @@ import { CalendarDays, Lock, LockOpen, Plus, Trash2, X } from "lucide-react";
 import { ConfirmModal, DescriptionBlock, EditModal, EmptyState, EntityDetailPage, MetadataGrid, RelationList, SectionBlock, handleModalEscape, useModalEscape } from "../../components/ui/index.js";
 import { createGoogleEventFromDmax, fetchCalendarSources, unlinkCalendarBinding } from "../../api.js";
 import type { AppOverview, CalendarSource, Initiative, InitiativeDetail, InitiativeRelationWithInitiatives, InitiativeType, Organization, ParticipantRoleType, Person, ProjectPhase, Task } from "../../types.js";
+import { InitiativeMindmapSection } from "../../components/graph/InitiativeMindmap.js";
 import { MediaAttachmentsPanel, ParticipantsPanel, TaskCreateInlineForm, TasksView } from "./SharedDetailPanels.js";
 import { type CreateInitiativeInput, type RelationshipCreateDraft, type RelationshipCreateSlot, type UpdateInitiativeInput, InitiativeTypeBadge, InitiativeTypeInitial, defaultInitiativeMarkdown, displayInitiativeName, formatDateTimeForUi, formatInitiativeDateRangeForUi, initiativeAncestorIds, initiativeCandidateOptionGroups, initiativeDescendantIds, initiativeDateRangeInvalid, initiativeStatusLabel, initiativeStatusOptions, initiativeTypeLabel, initiativeTypeOptions, primeEmptyDatePickerMonth, projectPhaseLabel, projectPhaseOptions, restorePrimedEmptyDateInput } from "./detailUtils.js";
 
@@ -79,6 +80,9 @@ export function InitiativeDetailView(props: {
       )}
     >
       <InitiativeMarkdownPanel initiative={initiative} onUpdateInitiative={props.onUpdateInitiative} />
+      <SectionBlock title="Mindmap" className="initiative-mindmap-section">
+        <InitiativeMindmapSection initiativeId={initiative.id} />
+      </SectionBlock>
       <SectionBlock
         title="Maßnahmen"
         description={`${openTasks} offen · ${doneTasks} erledigt`}

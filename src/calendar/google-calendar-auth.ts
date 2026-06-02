@@ -4,10 +4,18 @@ import { randomBytes } from "node:crypto";
 import { env } from "../config/env.js";
 
 const googleCalendarScope = "https://www.googleapis.com/auth/calendar";
+const googleWorkspaceScopes = [
+  "https://www.googleapis.com/auth/drive",
+  "https://www.googleapis.com/auth/documents",
+  "https://www.googleapis.com/auth/spreadsheets",
+  "https://www.googleapis.com/auth/presentations",
+  "https://www.googleapis.com/auth/forms.body",
+  "https://www.googleapis.com/auth/forms.responses.readonly"
+];
 const authorizationEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
 const tokenEndpoint = "https://oauth2.googleapis.com/token";
 
-type StoredGoogleCalendarToken = {
+export type StoredGoogleCalendarToken = {
   accessToken: string;
   refreshToken: string | null;
   expiresAt: number;
@@ -26,7 +34,7 @@ type GoogleTokenResponse = {
   error_description?: string;
 };
 
-const pendingStates = new Map<string, { expiresAt: number; accountLabel: string | null }>();
+const pendingStates = new Map<string, { expiresAt: number; accountLabel: string | null; purpose: "calendar" | "workspace" }>();
 
 export type GoogleCalendarAuthStatus = {
   configured: boolean;
@@ -72,15 +80,23 @@ export class GoogleCalendarAuth {
   }
 
   createAuthorizationUrl(loginHint?: string | null): string {
+    return this.createAuthorizationUrlForPurpose("calendar", loginHint);
+  }
+
+  createWorkspaceAuthorizationUrl(loginHint?: string | null): string {
+    return this.createAuthorizationUrlForPurpose("workspace", loginHint);
+  }
+
+  private createAuthorizationUrlForPurpose(purpose: "calendar" | "workspace", loginHint?: string | null): string {
     this.assertConfigured();
     const state = randomBytes(20).toString("hex");
     const accountLabel = loginHint?.trim() || null;
-    pendingStates.set(state, { expiresAt: Date.now() + 10 * 60_000, accountLabel });
+    pendingStates.set(state, { expiresAt: Date.now() + 10 * 60_000, accountLabel, purpose });
     const url = new URL(authorizationEndpoint);
     url.searchParams.set("client_id", env.googleOAuthClientId!);
     url.searchParams.set("redirect_uri", this.redirectUri());
     url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", googleCalendarScope);
+    url.searchParams.set("scope", purpose === "workspace" ? googleWorkspaceScopes.join(" ") : googleCalendarScope);
     url.searchParams.set("access_type", "offline");
     url.searchParams.set("include_granted_scopes", "true");
     url.searchParams.set("prompt", "consent");
@@ -91,7 +107,7 @@ export class GoogleCalendarAuth {
     return url.toString();
   }
 
-  async handleCallback(input: { code: string; state: string }): Promise<{ accountLabel: string | null }> {
+  async handleCallback(input: { code: string; state: string }): Promise<{ accountLabel: string | null; purpose: "calendar" | "workspace"; token: StoredGoogleCalendarToken }> {
     this.assertConfigured();
     const pendingState = pendingStates.get(input.state);
     pendingStates.delete(input.state);
@@ -123,7 +139,7 @@ export class GoogleCalendarAuth {
     } else {
       this.writeToken(storedToken);
     }
-    return { accountLabel: pendingState.accountLabel };
+    return { accountLabel: pendingState.accountLabel, purpose: pendingState.purpose, token: storedToken };
   }
 
   async getAccessToken(accountLabel?: string | null, options: { allowLegacyFallback?: boolean } = {}): Promise<string | null> {

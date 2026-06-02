@@ -6,7 +6,10 @@ import {
   listOpenClawSessionActivities,
   readOpenClawTrajectorySummary,
   resetOpenClawGatewayClientForTests,
-  runOpenClawAgentTurn
+  runOpenClawAgentTurn,
+  runOpenClawSessionTurn,
+  summarizeOpenClawResearchActivities,
+  summarizeOpenClawWorkspaceActivities
 } from "../../src/chat/openclaw-agent.js";
 
 describe("runOpenClawAgentTurn", () => {
@@ -64,6 +67,31 @@ describe("runOpenClawAgentTurn", () => {
     });
 
     expect(result.text).toBe("ok from session file");
+  });
+
+  it("reads the active session transcript when OpenClaw replaces a cached session during a run", async () => {
+    const { configPath, stateDir } = installFakeSessionGatewayClientModule();
+
+    const result = await runOpenClawSessionTurn("hello", { sessionKey: "explicit:chat-1" }, {
+      configPath,
+      stateDir,
+      timeoutSeconds: 5
+    });
+
+    expect(result.text).toBe("ok from replacement session");
+    expect(result.sessionId).toBe("new-session");
+  });
+
+  it("waits for the final assistant reply after an external subagent completion instead of returning the early spawn note", async () => {
+    const { configPath, stateDir } = installFakeSessionGatewayClientModuleWithDelayedSubagentCompletion();
+
+    const result = await runOpenClawSessionTurn("hello", { sessionKey: "explicit:chat-subagent" }, {
+      configPath,
+      stateDir,
+      timeoutSeconds: 5
+    });
+
+    expect(result.text).toBe("final workspace analysis");
   });
 
   it("summarizes OpenClaw trajectory timing for a session", () => {
@@ -150,6 +178,173 @@ describe("runOpenClawAgentTurn", () => {
     expect(activities[0]?.detail).not.toContain("Dieser lange Markdown-Inhalt");
   });
 
+  it("surfaces dmax-research web activity and builds a compact summary", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "d-max-openclaw-research-activity-test-"));
+    const stateDir = path.join(tempDir, "state");
+    const mainSessionDir = path.join(stateDir, "agents", "main", "sessions");
+    const researchSessionDir = path.join(stateDir, "agents", "dmax-research", "sessions");
+    mkdirSync(mainSessionDir, { recursive: true });
+    mkdirSync(researchSessionDir, { recursive: true });
+    writeFileSync(path.join(mainSessionDir, "main-session.jsonl"), "");
+    writeFileSync(
+      path.join(researchSessionDir, "research-session.trajectory.jsonl"),
+      [
+        {
+          type: "session.started",
+          ts: "2026-05-19T10:00:01.000Z",
+          sessionId: "research-session",
+          data: { sessionFile: "$OPENCLAW_STATE_DIR/agents/dmax-research/sessions/research-session.jsonl" }
+        },
+        {
+          type: "session.ended",
+          ts: "2026-05-19T10:00:05.000Z",
+          sessionId: "research-session",
+          data: { status: "success" }
+        }
+      ].map((record) => JSON.stringify(record)).join("\n")
+    );
+    writeFileSync(
+      path.join(researchSessionDir, "research-session.jsonl"),
+      [
+        {
+          type: "message",
+          id: "research-call-1",
+          timestamp: "2026-05-19T10:00:02.000Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "web-1", name: "web_search", arguments: { query: "VSF Reiserad Stahl Rohloff" } }]
+          }
+        },
+        {
+          type: "message",
+          id: "research-call-2",
+          timestamp: "2026-05-19T10:00:03.000Z",
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "web-2", name: "web_fetch", arguments: { url: "https://example.com/reiserad" } }]
+          }
+        }
+      ].map((record) => JSON.stringify(record)).join("\n")
+    );
+
+    const activities = listOpenClawSessionActivities("main-session", { stateDir });
+    const summary = summarizeOpenClawResearchActivities(activities);
+
+    expect(activities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "research", title: "Webrecherche-Agent gestartet", agentId: "dmax-research" }),
+      expect.objectContaining({ kind: "tool_call", toolName: "web_search", query: "VSF Reiserad Stahl Rohloff", agentId: "dmax-research" }),
+      expect.objectContaining({ kind: "tool_call", toolName: "web_fetch", url: "https://example.com/reiserad", agentId: "dmax-research" })
+    ]));
+    expect(summary).toMatchObject({
+      agentId: "dmax-research",
+      status: "completed",
+      searchCount: 1,
+      pageCount: 1,
+      queries: ["VSF Reiserad Stahl Rohloff"],
+      pages: [{ url: "https://example.com/reiserad" }]
+    });
+  });
+
+  it("surfaces dmax-google-workspace sheets activity and builds a compact summary", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "d-max-openclaw-workspace-activity-test-"));
+    const stateDir = path.join(tempDir, "state");
+    const mainSessionDir = path.join(stateDir, "agents", "main", "sessions");
+    const workspaceSessionDir = path.join(stateDir, "agents", "dmax-google-workspace", "sessions");
+    mkdirSync(mainSessionDir, { recursive: true });
+    mkdirSync(workspaceSessionDir, { recursive: true });
+    writeFileSync(path.join(mainSessionDir, "main-session.jsonl"), "");
+    writeFileSync(
+      path.join(workspaceSessionDir, "workspace-session.trajectory.jsonl"),
+      [
+        {
+          type: "session.started",
+          ts: "2026-05-19T10:00:01.000Z",
+          sessionId: "workspace-session",
+          data: { sessionFile: "$OPENCLAW_STATE_DIR/agents/dmax-google-workspace/sessions/workspace-session.jsonl" }
+        },
+        {
+          type: "session.ended",
+          ts: "2026-05-19T10:00:05.000Z",
+          sessionId: "workspace-session",
+          data: { status: "success" }
+        }
+      ].map((record) => JSON.stringify(record)).join("\n")
+    );
+    writeFileSync(
+      path.join(workspaceSessionDir, "workspace-session.jsonl"),
+      [
+        {
+          type: "message",
+          id: "workspace-call-1",
+          timestamp: "2026-05-19T10:00:02.000Z",
+          message: {
+            role: "assistant",
+            content: [{
+              type: "toolCall",
+              id: "runtime-1",
+              name: "runtime",
+              arguments: {
+                command: "gog sheets get 1abcPackliste 'Tab1!A1:D20' --json"
+              }
+            }]
+          }
+        },
+        {
+          type: "message",
+          id: "workspace-call-2",
+          timestamp: "2026-05-19T10:00:03.000Z",
+          message: {
+            role: "assistant",
+            content: [{
+              type: "toolCall",
+              id: "runtime-2",
+              name: "runtime",
+              arguments: {
+                command: "gog docs get 1abcDoc --json"
+              }
+            }]
+          }
+        }
+      ].map((record) => JSON.stringify(record)).join("\n")
+    );
+
+    const activities = listOpenClawSessionActivities("main-session", { stateDir });
+    const summary = summarizeOpenClawWorkspaceActivities(activities);
+
+    expect(activities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "workspace", title: "Google-Workspace-Agent gestartet", agentId: "dmax-google-workspace" }),
+      expect.objectContaining({
+        kind: "tool_call",
+        agentId: "dmax-google-workspace",
+        command: "gog sheets get 1abcPackliste 'Tab1!A1:D20' --json",
+        service: "sheets",
+        operation: "get",
+        fileId: "1abcPackliste",
+        spreadsheetId: "1abcPackliste",
+        range: "Tab1!A1:D20"
+      }),
+      expect.objectContaining({
+        kind: "tool_call",
+        agentId: "dmax-google-workspace",
+        command: "gog docs get 1abcDoc --json",
+        service: "docs",
+        operation: "get",
+        fileId: "1abcDoc"
+      })
+    ]));
+    expect(summary).toMatchObject({
+      agentId: "dmax-google-workspace",
+      status: "completed",
+      operationCount: 2,
+      readCount: 2,
+      writeCount: 0,
+      operations: [
+        { service: "sheets", operation: "get", fileId: "1abcPackliste", spreadsheetId: "1abcPackliste", range: "Tab1!A1:D20" },
+        { service: "docs", operation: "get", fileId: "1abcDoc" }
+      ]
+    });
+  });
+
   function installFakeGatewayClientModule(options: { requestBody?: string } = {}): { configPath: string; stateDir: string } {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "d-max-openclaw-agent-test-"));
     const stateDir = path.join(tempDir, "state");
@@ -194,6 +389,229 @@ export class t {
       result: { payloads: [{ text: "ok from gateway", mediaUrl: null }] }
     };
 `}
+  }
+}
+`
+    );
+    process.env.OPENCLAW_GATEWAY_CLIENT_MODULE = modulePath;
+
+    return { configPath, stateDir };
+  }
+
+  function installFakeSessionGatewayClientModule(): { configPath: string; stateDir: string } {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "d-max-openclaw-session-test-"));
+    const stateDir = path.join(tempDir, "state");
+    const configPath = path.join(tempDir, "config.json");
+    const modulePath = path.join(tempDir, "gateway-client.mjs");
+    const sessionDir = path.join(stateDir, "agents", "main", "sessions");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(configPath, "{}");
+    writeFileSync(path.join(sessionDir, "old-session.jsonl"), "");
+    writeFileSync(
+      path.join(sessionDir, "sessions.json"),
+      JSON.stringify({
+        "agent:main:explicit:chat-1": {
+          sessionId: "old-session",
+          sessionFile: path.join(sessionDir, "old-session.jsonl")
+        }
+      })
+    );
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    writeFileSync(
+      modulePath,
+      `
+import fs from "node:fs";
+import path from "node:path";
+
+export class t {
+  constructor(options) {
+    this.options = options;
+  }
+
+  start() {
+    queueMicrotask(() => this.options.onHelloOk({ features: { methods: ["health", "sessions.create", "sessions.send", "agent.wait"] } }));
+  }
+
+  stop() {}
+
+  async request(method, params) {
+    const sessionDir = path.join(process.env.OPENCLAW_STATE_DIR, "agents", "main", "sessions");
+    if (method === "health") {
+      return { status: "ok", result: { ok: true } };
+    }
+    if (method === "sessions.create") {
+      return {
+        status: "ok",
+        result: {
+          key: params.key,
+          sessionId: "old-session",
+          entry: { sessionFile: path.join(sessionDir, "old-session.jsonl") }
+        }
+      };
+    }
+    if (method === "sessions.send") {
+      fs.renameSync(path.join(sessionDir, "old-session.jsonl"), path.join(sessionDir, "old-session.jsonl.reset.test"));
+      const newSessionFile = path.join(sessionDir, "new-session.jsonl");
+      fs.writeFileSync(
+        newSessionFile,
+        JSON.stringify({
+          type: "message",
+          id: "assistant-2",
+          timestamp: new Date().toISOString(),
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "ok from replacement session" }]
+          }
+        }) + "\\n"
+      );
+      fs.writeFileSync(
+        path.join(sessionDir, "sessions.json"),
+        JSON.stringify({
+          "agent:main:explicit:chat-1": {
+            sessionId: "new-session",
+            sessionFile: newSessionFile
+          }
+        })
+      );
+      return { status: "ok", result: { runId: "run-1" } };
+    }
+    if (method === "agent.wait") {
+      return { status: "ok", result: { status: "ok" } };
+    }
+    throw new Error("unexpected method " + method);
+  }
+}
+`
+    );
+    process.env.OPENCLAW_GATEWAY_CLIENT_MODULE = modulePath;
+
+    return { configPath, stateDir };
+  }
+
+  function installFakeSessionGatewayClientModuleWithDelayedSubagentCompletion(): { configPath: string; stateDir: string } {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "d-max-openclaw-subagent-wait-test-"));
+    const stateDir = path.join(tempDir, "state");
+    const configPath = path.join(tempDir, "config.json");
+    const modulePath = path.join(tempDir, "gateway-client.mjs");
+    const sessionDir = path.join(stateDir, "agents", "main", "sessions");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(configPath, "{}");
+    writeFileSync(path.join(sessionDir, "subagent-wait-session.jsonl"), "");
+    writeFileSync(
+      path.join(sessionDir, "sessions.json"),
+      JSON.stringify({
+        "agent:main:explicit:chat-subagent": {
+          sessionId: "subagent-wait-session",
+          sessionFile: path.join(sessionDir, "subagent-wait-session.jsonl")
+        }
+      })
+    );
+    process.env.OPENCLAW_STATE_DIR = stateDir;
+    writeFileSync(
+      modulePath,
+      `
+import fs from "node:fs";
+import path from "node:path";
+
+function appendRecord(sessionFile, record) {
+  fs.appendFileSync(sessionFile, JSON.stringify(record) + "\\n");
+}
+
+export class t {
+  constructor(options) {
+    this.options = options;
+  }
+
+  start() {
+    queueMicrotask(() => this.options.onHelloOk({ features: { methods: ["health", "sessions.create", "sessions.send", "agent.wait"] } }));
+  }
+
+  stop() {}
+
+  async request(method, params) {
+    const sessionDir = path.join(process.env.OPENCLAW_STATE_DIR, "agents", "main", "sessions");
+    const sessionFile = path.join(sessionDir, "subagent-wait-session.jsonl");
+    if (method === "health") {
+      return { status: "ok", result: { ok: true } };
+    }
+    if (method === "sessions.create") {
+      return {
+        status: "ok",
+        result: {
+          key: params.key,
+          sessionId: "subagent-wait-session",
+          entry: { sessionFile }
+        }
+      };
+    }
+    if (method === "sessions.send") {
+      appendRecord(sessionFile, {
+        type: "message",
+        id: "assistant-early",
+        timestamp: new Date().toISOString(),
+        message: {
+          role: "assistant",
+          content: [
+            { type: "text", text: "early workspace spawn note" },
+            {
+              type: "toolCall",
+              id: "spawn-1",
+              name: "sessions_spawn",
+              arguments: {
+                runtime: "subagent",
+                agentId: "dmax-google-workspace",
+                context: "isolated",
+                task: "read sheet"
+              }
+            }
+          ]
+        }
+      });
+      appendRecord(sessionFile, {
+        type: "message",
+        id: "spawn-result",
+        timestamp: new Date().toISOString(),
+        message: {
+          role: "toolResult",
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              status: "accepted",
+              childSessionKey: "agent:dmax-google-workspace:subagent:test-child",
+              runId: "child-run-1"
+            })
+          }]
+        }
+      });
+      setTimeout(() => {
+        appendRecord(sessionFile, {
+          type: "message",
+          id: "internal-completion",
+          timestamp: new Date().toISOString(),
+          message: {
+            role: "user",
+            content: [{
+              type: "text",
+              text: "[Internal task completion event]\\nsession_key: agent:dmax-google-workspace:subagent:test-child\\nstatus: completed successfully\\nResult: done"
+            }]
+          }
+        });
+        appendRecord(sessionFile, {
+          type: "message",
+          id: "assistant-final",
+          timestamp: new Date().toISOString(),
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "final workspace analysis" }]
+          }
+        });
+      }, 200);
+      return { status: "ok", result: { runId: "run-1" } };
+    }
+    if (method === "agent.wait") {
+      return { status: "ok", result: { status: "ok" } };
+    }
+    throw new Error("unexpected method " + method);
   }
 }
 `

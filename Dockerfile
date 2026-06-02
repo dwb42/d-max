@@ -19,10 +19,17 @@ FROM node:24-slim AS runner
 WORKDIR /app
 
 ARG OPENCLAW_VERSION=2026.5.12
+ARG GOGCLI_VERSION=0.17.0
+ARG TARGETARCH
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates lsof \
+  && apt-get install -y --no-install-recommends ca-certificates curl lsof \
   && rm -rf /var/lib/apt/lists/* \
+  && arch="${TARGETARCH:-$(dpkg --print-architecture)}" \
+  && case "$arch" in amd64) gog_arch=amd64 ;; arm64) gog_arch=arm64 ;; *) echo "Unsupported gogcli arch: $arch" >&2; exit 1 ;; esac \
+  && curl -fsSL "https://github.com/openclaw/gogcli/releases/download/v${GOGCLI_VERSION}/gogcli_${GOGCLI_VERSION}_linux_${gog_arch}.tar.gz" \
+    | tar -xz -C /usr/local/bin gog \
+  && chmod +x /usr/local/bin/gog \
   && npm install -g openclaw@${OPENCLAW_VERSION} @openai/codex @openclaw/codex@${OPENCLAW_VERSION} \
   && npm cache clean --force \
   && rm -rf /root/.npm /usr/local/lib/node_modules/npm/docs /usr/local/lib/node_modules/npm/man
