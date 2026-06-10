@@ -71,7 +71,10 @@ volume operations.
   read-only context. The browser renders initiative mindmaps with deterministic
   radial auto-layout by default; persisted freestyle `x/y` remains an API/tool
   capability and a lightweight side/order hint, not the browser's rendered
-  coordinate source of truth.
+  coordinate source of truth. Same-parent mindmap siblings should keep compact
+  uniform vertical spacing, while adjacent parent clusters use a larger uniform
+  spacing derived from measured subtree extents to avoid visible child-node
+  collisions.
 - Organization description/context memory: durable markdown stored in
   `organizations.markdown`. There is no person markdown field yet.
 - Who dimension: people and organizations are first-class parties. People and

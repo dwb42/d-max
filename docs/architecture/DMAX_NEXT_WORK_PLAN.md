@@ -44,7 +44,11 @@ Current frontend structure:
 - Party/contact primitives live in `web/src/components/party/`.
 - The initiative mindmap surface lives in
   `web/src/components/graph/InitiativeMindmap.tsx`, with pure radial
-  auto-layout helpers in `web/src/components/graph/mindmap-layout.ts`.
+  auto-layout helpers in `web/src/components/graph/mindmap-layout.ts`. The
+  layout treats persisted freestyle `x/y` as side/order hints, keeps visible
+  same-parent siblings compact and uniform, and computes larger uniform gaps
+  between parent clusters from measured subtree extents so child groups do not
+  visually collide.
 - `web/src/App.tsx` is still large, roughly 8k lines at this writing.
 
 `App.tsx` still owns:

@@ -235,10 +235,14 @@ deterministic radial auto-layout implemented in
 visible main topics are balanced left/right, and subtopics grow outward on
 their inherited side. Layout is recomputed from the visible hierarchy and node
 label measurements so content edits and collapsed branches reflow without
-overlap. Persisted freestyle `x`/`y` values remain available to API/tool callers
-and are used by the browser as lightweight side/order hints after semantic
-drag-reorder or reparent actions, not as the rendered default coordinates. The
-browser/API repository reads and writes this table for initiative mindmaps.
+overlap. Siblings with the same parent use compact uniform vertical spacing;
+adjacent parent clusters use a larger uniform spacing that is increased from
+the measured subtree extents when needed so neighboring child groups do not
+collide. Persisted freestyle `x`/`y` values remain available to API/tool
+callers and are used by the browser as lightweight side/order hints after
+semantic drag-reorder or reparent actions, not as the rendered default
+coordinates. The browser/API repository reads and writes this table for
+initiative mindmaps.
 OpenClaw/d-max tools can read full
 initiative mindmaps and can create, update, move/reparent, collapse/expand, and
 delete freestyle nodes. Agent tool mutations are intentionally restricted to
@@ -661,7 +665,11 @@ Implemented behavior:
   the bottom `+` creates a sibling immediately after the selected node; double
   click edits a node label; pressing `Enter` in the editor closes edit mode and
   returns focus to the mindmap so another `Enter` creates the sibling. Selected
-  nodes have a visible ring. Semantic node actions preserve the current
+  nodes have a visible ring. Non-root parent nodes show a small side-aware
+  collapse control at the child-branch junction; expanded parents show a
+  subtle minus control, while collapsed parents show the number of hidden child
+  nodes as the expand control. The central/root node intentionally does not
+  render a collapse affordance. Semantic node actions preserve the current
   pan/zoom; `Zentrieren` is the explicit fit-view action. Mindmap edges use
   side-aware curved connectors from parent to child. Derived
   root/branch/task/media nodes are contextual and cannot be semantically edited
