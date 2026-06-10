@@ -92,6 +92,23 @@ describe("initiative mindmap repository", () => {
     });
   });
 
+  it("keeps explicit empty freestyle labels but still defaults omitted labels", () => {
+    const mindmap = new InitiativeMindmapRepository(db);
+
+    const blank = mindmap.createFreestyleNode({
+      scope: { type: "initiative", initiativeId },
+      parentNodeKey: "branch:freestyle",
+      label: ""
+    });
+    const defaulted = mindmap.createFreestyleNode({
+      scope: { type: "initiative", initiativeId },
+      parentNodeKey: "branch:freestyle"
+    });
+
+    expect(blank.label).toBe("");
+    expect(defaulted.label).toBe("Neuer Gedanke");
+  });
+
   it("supports floating freestyle nodes and snapshot restore for undo/redo", () => {
     const mindmap = new InitiativeMindmapRepository(db);
     const floating = mindmap.createFreestyleNode({

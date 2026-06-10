@@ -1,6 +1,6 @@
 # d-max Current State
 
-Date: 2026-06-02
+Date: 2026-06-10
 
 Short handoff for fresh Codex/OpenClaw sessions. This file describes the
 implemented repository state; older plans are historical unless this file or
@@ -229,14 +229,25 @@ implemented scope is initiative mindmaps: a root initiative node, built-in
 Freestyle/Maßnahmen/Medien branch nodes, derived task and initiative-media
 nodes, and user-created freestyle nodes. Nodes persist `node_key`, node kind,
 optional source entity metadata, parent node key, label, `x`/`y`, optional
-`width`/`height`, and `collapsed`. The browser/API repository reads and writes
-this table for initiative mindmaps. OpenClaw/d-max tools can read full
+`width`/`height`, and `collapsed`. The browser renders initiative mindmaps with
+deterministic radial auto-layout implemented in
+`web/src/components/graph/mindmap-layout.ts`: the initiative root is central,
+visible main topics are balanced left/right, and subtopics grow outward on
+their inherited side. Layout is recomputed from the visible hierarchy and node
+label measurements so content edits and collapsed branches reflow without
+overlap. Persisted freestyle `x`/`y` values remain available to API/tool callers
+and are used by the browser as lightweight side/order hints after semantic
+drag-reorder or reparent actions, not as the rendered default coordinates. The
+browser/API repository reads and writes this table for initiative mindmaps.
+OpenClaw/d-max tools can read full
 initiative mindmaps and can create, update, move/reparent, collapse/expand, and
 delete freestyle nodes. Agent tool mutations are intentionally restricted to
 `node_kind = 'freestyle'`; derived root, branch, task, and media nodes are
 read-only context for the agent. Deleting a freestyle leaf applies directly;
 deleting a freestyle subtree returns a confirmation envelope unless
-`confirmed=true`.
+`confirmed=true`. UI-created freestyle nodes may have a deliberately blank
+label while inline editing starts; omitted labels still default to
+`Neuer Gedanke` in the repository.
 Tasks have a deliberately small
 `open`/`done` status model; legacy non-`done` task statuses are migrated to
 `open`. `task_checklist_items` stores simple checklist items
@@ -319,9 +330,13 @@ loading indefinitely. Loading a calendar range also prefetches the following
 two one-week ranges in the background so near-future week navigation can hit the
 local cache. Cache entries are invalidated after Google event
 create/update/delete, binding link/unlink, OAuth, and calendar-source changes.
-Google OAuth now
-requests calendar write scope; existing read-only token files may need
-reconnecting before write actions succeed. Ideas are loose thoughts
+Google OAuth now requests calendar write scope; existing read-only, expired, or
+revoked token files may need disconnect/reconnect before write actions or live
+calendar loading succeed. OAuth callback failures redirect back to `/config`
+with a visible error instead of leaving the browser on a raw JSON callback
+response. The OAuth token exchange uses a bounded timeout, retries transient
+network failures, and reports the concrete network/token error.
+Ideas are loose thoughts
 without time binding, and habits are ongoing practices without a clear
 start/end. Categories are life areas; their `description` field is Markdown for
 scope, current situation/satisfaction, target state, and high-level measures.
@@ -604,7 +619,9 @@ Implemented behavior:
   opens an OAuth modal, then renders one card per known Google account. Each
   card shows the account label with `(verbunden)` in green or `(getrennt)` in red,
   account-level reconnect/disconnect controls, and the calendars available
-  through that account. Calendar rows can be added to or removed from DMAX; this
+  through that account. OAuth callback errors from Google Calendar or Google
+  Workspace are read from the URL and shown as the route-level error banner.
+  Calendar rows can be added to or removed from DMAX; this
   toggles the corresponding `calendar_sources.enabled` selection. The separate
   `DMAX-Kalenderquellen` section lists only active DMAX-side calendar source
   selections. Source rows store provider/account/calendar/display metadata and
@@ -633,13 +650,22 @@ Implemented behavior:
   left completion toggle for open/done, and expose a right-side delete action
   with a confirmation dialog explaining that notes, checklist, and media links
   are removed too.
-  The mindmap uses React Flow plus Dagre. It renders derived initiative root,
+  The mindmap uses React Flow with deterministic radial auto-layout. It renders
+  derived initiative root,
   Freestyle/Maßnahmen/Medien branches, task nodes, media nodes, and freestyle
   nodes. The preview opens a full-screen modal; the editable modal supports
-  freestyle node creation, rename, move/reparent, collapse/expand,
+  freestyle node creation, rename, semantic drag reparent/reorder/side changes,
+  collapse/expand,
   duplicate/delete, keyboard/clipboard shortcuts, and undo/redo by restoring
-  freestyle snapshots. Derived root/branch/task/media nodes are contextual and
-  cannot be semantically edited through the mindmap UI.
+  freestyle snapshots. `Tab` or the right `+` creates a subtopic; `Enter` or
+  the bottom `+` creates a sibling immediately after the selected node; double
+  click edits a node label; pressing `Enter` in the editor closes edit mode and
+  returns focus to the mindmap so another `Enter` creates the sibling. Selected
+  nodes have a visible ring. Semantic node actions preserve the current
+  pan/zoom; `Zentrieren` is the explicit fit-view action. Mindmap edges use
+  side-aware curved connectors from parent to child. Derived
+  root/branch/task/media nodes are contextual and cannot be semantically edited
+  through the mindmap UI.
 - `/tasks/:id`: canonical task detail page. The title stands alone without a
   parent-project subtitle; header facts are ordered status, priority, due date.
   Due-date editing uses the native date input/picker path as directly as the

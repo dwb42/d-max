@@ -4060,7 +4060,11 @@ function CalendarHeaderControls(props: {
 }
 
 function ConfigView() {
-  const initialGoogleAccountFromUrl = new URLSearchParams(window.location.search).get("account");
+  const configUrlParams = new URLSearchParams(window.location.search);
+  const initialGoogleAccountFromUrl = configUrlParams.get("account");
+  const initialOAuthError = configUrlParams.get("google") === "error" || configUrlParams.get("workspace") === "error"
+    ? configUrlParams.get("detail") || "Google OAuth konnte nicht abgeschlossen werden."
+    : null;
   const initialGoogleAccount = initialGoogleAccountFromUrl || "dw@b42.io";
   const [sources, setSources] = useState<CalendarSource[]>([]);
   const [accounts, setAccounts] = useState<GoogleCalendarAccountStatus[]>([]);
@@ -4070,7 +4074,7 @@ function ConfigView() {
   const [newAccountLabel, setNewAccountLabel] = useState(initialGoogleAccount);
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [manualSourceDraft, setManualSourceDraft] = useState({ calendarId: "", displayName: "", color: "#27806f" });
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialOAuthError);
   const activeSources = sources.filter((source) => source.enabled);
   const knownAccountLabels = useMemo(() => {
     const labels = new Set(accounts.map((account) => account.accountLabel));

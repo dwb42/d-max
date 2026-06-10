@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { applyNodeChanges, Background, Controls, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow } from "@xyflow/react";
-import type { Edge, Node, NodeChange, NodeProps } from "@xyflow/react";
-import dagre from "@dagrejs/dagre";
-import { ChevronDown, ChevronRight, Copy, GitBranch, Maximize2, Plus, Redo2, RefreshCw, Trash2, Undo2, X } from "lucide-react";
+import { applyNodeChanges, Background, BaseEdge, Controls, getBezierPath, Handle, Position, ReactFlow, ReactFlowProvider, useReactFlow } from "@xyflow/react";
+import type { Edge, EdgeProps, Node, NodeChange, NodeProps } from "@xyflow/react";
+import { Copy, Maximize2, Minus, Plus, Redo2, Trash2, Undo2, X } from "lucide-react";
 import {
   createInitiativeMindmapFreestyleNode,
   deleteInitiativeMindmapNode,
@@ -13,12 +12,30 @@ import {
 } from "../../api.js";
 import type { GraphLayoutNode, InitiativeMindmap as InitiativeMindmapData } from "../../types.js";
 import { EmptyState, ErrorState, useModalEscape } from "../ui/index.js";
+import {
+  applyMindmapDropIntent,
+  computeMindmapDropIntent,
+  computeRadialMindmapLayout,
+  freestyleSnapshot,
+  rootNodeKey,
+  siblingCreationHint,
+  type FreestyleSnapshot,
+  type MindmapLayout,
+  type MindmapMode,
+  type MindmapSide,
+  type MindmapTopicLevel
+} from "./mindmap-layout.js";
 import "@xyflow/react/dist/style.css";
 
 type MindmapNodeData = {
   graphNode: GraphLayoutNode;
+  topicLevel: MindmapTopicLevel;
+  side: MindmapSide | null;
   preview: boolean;
   childCount: number;
+  canAddChild: boolean;
+  canAddSibling: boolean;
+  draggable: boolean;
   editing: boolean;
   onAddAdjacent: (nodeKey: string, side: MindmapCreateSide) => void;
   onDelete: (nodeKey: string) => void;
@@ -28,13 +45,9 @@ type MindmapNodeData = {
 };
 
 type MindmapNode = Node<MindmapNodeData, "mindmap">;
-type MindmapMode = "freestyle" | "structure";
-type MindmapCreateSide = "top" | "right" | "bottom" | "left";
-type FreestyleSnapshot = Array<Pick<GraphLayoutNode, "nodeKey" | "parentNodeKey" | "label" | "x" | "y" | "width" | "height" | "collapsed">>;
+type MindmapEdge = Edge<{ side: MindmapSide }, "mindmap">;
+type MindmapCreateSide = "right" | "bottom";
 
-const MIN_NODE_WIDTH = 180;
-const MAX_NODE_WIDTH = 360;
-const BASE_NODE_HEIGHT = 56;
 const CANVAS_MARGIN_X = 88;
 const CANVAS_MARGIN_Y = 72;
 
@@ -63,21 +76,13 @@ function InitiativeMindmapModal(props: { initiativeId: number; onClose: () => vo
         aria-label="Initiativen-Mindmap"
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <header className="mindmap-modal-header">
-          <div>
-            <h2>Mindmap</h2>
-          </div>
-          <button type="button" className="icon-button" onClick={props.onClose} aria-label="Mindmap schließen" title="Schließen">
-            <X size={18} />
-          </button>
-        </header>
-        <InitiativeMindmapCanvas initiativeId={props.initiativeId} />
+        <InitiativeMindmapCanvas initiativeId={props.initiativeId} onClose={props.onClose} />
       </section>
     </div>
   );
 }
 
-function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolean; onOpen?: () => void }) {
+function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolean; onOpen?: () => void; onClose?: () => void }) {
   const [mindmap, setMindmap] = useState<InitiativeMindmapData | null>(null);
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null);
   const [editingNodeKey, setEditingNodeKey] = useState<string | null>(null);
@@ -88,7 +93,9 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const mindmapRef = useRef<InitiativeMindmapData | null>(null);
+  const layoutRef = useRef<MindmapLayout | null>(null);
   const selectedNodeKeyRef = useRef<string | null>(null);
+  const previousEditingNodeKeyRef = useRef<string | null>(null);
   const canvasElementRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -98,6 +105,14 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
   useEffect(() => {
     selectedNodeKeyRef.current = selectedNodeKey;
   }, [selectedNodeKey]);
+
+  useEffect(() => {
+    const previousEditingNodeKey = previousEditingNodeKeyRef.current;
+    if (!props.preview && previousEditingNodeKey && !editingNodeKey) {
+      window.requestAnimationFrame(() => canvasElementRef.current?.focus());
+    }
+    previousEditingNodeKeyRef.current = editingNodeKey || null;
+  }, [editingNodeKey, props.preview]);
 
   const loadMindmap = useCallback(async () => {
     setLoading(true);
@@ -147,22 +162,20 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
     await restoreSnapshot(next);
   }, [busy, props.preview, redoStack, restoreSnapshot]);
 
-  const createChild = useCallback(async (parentNodeKey: string | null, input: { x?: number; y?: number; label?: string; edit?: boolean } = {}) => {
+  const createChild = useCallback(async (parentNodeKey: string | null, input: { label?: string; edit?: boolean; x?: number; y?: number } = {}) => {
     if (props.preview || busy) return;
     const current = mindmapRef.current;
     const parent = parentNodeKey ? current?.nodes.find((node) => node.nodeKey === parentNodeKey) : null;
-    const childIndex = parentNodeKey && current ? current.edges.filter((edge) => edge.sourceNodeKey === parentNodeKey).length : 0;
-    const x = input.x ?? (parent ? parent.x + nodeWidth(parent) + 96 : undefined);
-    const y = input.y ?? (parent ? parent.y + childIndex * (nodeHeight(parent) + 18) : undefined);
+    if (parent && (!parent.moveSupport.freestyleParent || parent.nodeKind === "media")) return;
     pushUndoSnapshot();
     setBusy(true);
     setError(null);
     try {
       const result = await createInitiativeMindmapFreestyleNode(props.initiativeId, {
         parentNodeKey,
-        label: input.label,
-        x,
-        y
+        label: input.label ?? "",
+        x: input.x,
+        y: input.y
       });
       setMindmap(result.mindmap);
       setSelectedNodeKey(result.node.nodeKey);
@@ -214,64 +227,67 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
     await deleteNode(selectedNodeKeyRef.current);
   }, [deleteNode]);
 
+  const createSibling = useCallback(async (nodeKey: string | null, label?: string) => {
+    const current = mindmapRef.current;
+    if (!current) return;
+    const hint = siblingCreationHint(current, nodeKey);
+    if (!hint) return;
+    await createChild(hint.parentNodeKey, { label, x: hint.x, y: hint.y });
+  }, [createChild]);
+
   const createAdjacent = useCallback((nodeKey: string, side: MindmapCreateSide) => {
     const current = mindmapRef.current;
     const node = current?.nodes.find((candidate) => candidate.nodeKey === nodeKey);
     if (!current || !node) return;
-    const dx = side === "right" ? nodeWidth(node) + 96 : side === "left" ? -nodeWidth(node) - 96 : 0;
-    const dy = side === "bottom" ? nodeHeight(node) + 42 : side === "top" ? -nodeHeight(node) - 42 : 0;
-    const childIndex = current.edges.filter((edge) => edge.sourceNodeKey === nodeKey).length;
-    const fanoutY = side === "right" || side === "left" ? childIndex * (nodeHeight(node) + 18) : 0;
-    const fanoutX = side === "top" || side === "bottom" ? childIndex * Math.min(nodeWidth(node) + 28, 260) : 0;
-    void createChild(nodeKey, { x: node.x + dx + fanoutX, y: node.y + dy + fanoutY });
-  }, [createChild]);
-
-  const createSibling = useCallback(async (nodeKey: string | null, label?: string) => {
-    const current = mindmapRef.current;
-    if (!current) return;
-    const rootKey = rootNodeKey(current);
-    const selected = current.nodes.find((node) => node.nodeKey === nodeKey) ?? current.nodes.find((node) => node.nodeKey === rootKey);
-    if (!selected) return;
-    const parentNodeKey = selected.parentNodeKey ?? rootKey;
-    await createChild(parentNodeKey, {
-      label,
-      x: selected.x,
-      y: selected.y + nodeHeight(selected) + 32
-    });
-  }, [createChild]);
+    if (side === "bottom") {
+      void createSibling(nodeKey);
+      return;
+    }
+    void createChild(node.nodeKey);
+  }, [createChild, createSibling]);
 
   const duplicateSelected = useCallback(async () => {
     const current = mindmapRef.current;
     const selected = current?.nodes.find((node) => node.nodeKey === selectedNodeKeyRef.current);
     if (!selected || selected.nodeKind !== "freestyle") return;
-    await createChild(selected.parentNodeKey, {
-      label: selected.label,
-      x: selected.x + 36,
-      y: selected.y + 36
+    await createChild(selected.parentNodeKey ?? (current ? rootNodeKey(current) : null), {
+      label: selected.label
     });
   }, [createChild]);
 
+  const layout = useMemo(() => {
+    return mindmap ? computeRadialMindmapLayout(mindmap, mode) : null;
+  }, [mindmap, mode]);
+
+  useEffect(() => {
+    layoutRef.current = layout;
+  }, [layout]);
+
   const { nodes, edges } = useMemo(() => {
-    if (!mindmap) return { nodes: [] as MindmapNode[], edges: [] as Edge[] };
-    const visibleNodeKeys = visibleMindmapNodeKeys(mindmap, mode);
-    const childCounts = childCountByNodeKey(mindmap, mode);
+    if (!layout) return { nodes: [] as MindmapNode[], edges: [] as MindmapEdge[] };
     return {
-      nodes: mindmap.nodes.filter((node) => visibleNodeKeys.has(node.nodeKey)).map((node) => ({
-        id: node.nodeKey,
+      nodes: layout.nodes.map((layoutNode) => ({
+        id: layoutNode.nodeKey,
         type: "mindmap" as const,
-        position: { x: node.x + CANVAS_MARGIN_X, y: node.y + CANVAS_MARGIN_Y },
-        width: nodeWidth(node),
-        height: nodeHeight(node),
+        position: { x: layoutNode.x + CANVAS_MARGIN_X, y: layoutNode.y + CANVAS_MARGIN_Y },
+        width: layoutNode.width,
+        height: layoutNode.height,
+        draggable: !props.preview && layoutNode.graphNode.nodeKind === "freestyle",
         style: {
-          width: nodeWidth(node),
-          minHeight: nodeHeight(node)
+          width: layoutNode.width,
+          minHeight: layoutNode.height
         },
-        selected: node.nodeKey === selectedNodeKey,
+        selected: layoutNode.nodeKey === selectedNodeKey,
         data: {
-          graphNode: node,
+          graphNode: layoutNode.graphNode,
+          topicLevel: layoutNode.topicLevel,
+          side: layoutNode.side,
           preview: Boolean(props.preview),
-          childCount: childCounts.get(node.nodeKey) ?? 0,
-          editing: editingNodeKey === node.nodeKey,
+          childCount: layout.childCounts.get(layoutNode.nodeKey) ?? 0,
+          canAddChild: !props.preview && layoutNode.graphNode.moveSupport.freestyleParent && layoutNode.graphNode.nodeKind !== "media",
+          canAddSibling: !props.preview && layoutNode.nodeKey !== layout.rootNodeKey,
+          draggable: !props.preview && layoutNode.graphNode.nodeKind === "freestyle",
+          editing: editingNodeKey === layoutNode.nodeKey,
           onAddAdjacent: createAdjacent,
           onDelete: (nodeKey: string) => void deleteNode(nodeKey),
           onRename: renameNode,
@@ -279,55 +295,55 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
           onToggleCollapse: toggleCollapse
         }
       })),
-      edges: visibleMindmapEdges(mindmap, visibleNodeKeys, mode).map((edge) => ({
-        id: edge.id,
-        source: edge.sourceNodeKey,
-        target: edge.targetNodeKey,
-        type: "smoothstep",
-        className: "mindmap-edge",
-        animated: false
-      }))
+      edges: layout.edges.map((edge) => {
+        const targetNode = layout.nodesByKey.get(edge.targetNodeKey);
+        const side = targetNode?.side ?? "right";
+        return {
+          id: edge.id,
+          source: edge.sourceNodeKey,
+          target: edge.targetNodeKey,
+          sourceHandle: side === "left" ? "left-source" : "right-source",
+          targetHandle: side === "left" ? "right-target" : "left-target",
+          type: "mindmap" as const,
+          className: "mindmap-edge",
+          animated: false,
+          data: { side }
+        };
+      })
     };
-  }, [createAdjacent, deleteNode, editingNodeKey, mindmap, mode, props.preview, renameNode, selectedNodeKey, toggleCollapse]);
+  }, [createAdjacent, deleteNode, editingNodeKey, layout, props.preview, renameNode, selectedNodeKey, toggleCollapse]);
 
-  const saveNodePosition = useCallback(async (_event: unknown, node: Node) => {
-    if (props.preview) return;
+  const applySemanticDrop = useCallback(async (_event: unknown, node: Node): Promise<boolean> => {
+    if (props.preview || busy) return false;
+    const current = mindmapRef.current;
+    const currentLayout = layoutRef.current;
+    if (!current || !currentLayout) return false;
+    const intent = computeMindmapDropIntent(currentLayout, {
+      draggedNodeKey: node.id,
+      x: Math.round(node.position.x - CANVAS_MARGIN_X),
+      y: Math.round(node.position.y - CANVAS_MARGIN_Y)
+    });
+    if (!intent) return false;
+    const snapshot = applyMindmapDropIntent(current, intent);
+    if (!snapshot) return false;
+
     pushUndoSnapshot();
     setError(null);
-    try {
-      const result = await updateInitiativeMindmapNode(props.initiativeId, node.id, {
-        x: Math.round(node.position.x - CANVAS_MARGIN_X),
-        y: Math.round(node.position.y - CANVAS_MARGIN_Y),
-        width: typeof node.measured?.width === "number" ? Math.round(node.measured.width) : undefined,
-        height: typeof node.measured?.height === "number" ? Math.round(node.measured.height) : undefined
-      });
-      setMindmap(result.mindmap);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Position konnte nicht gespeichert werden.");
-    }
-  }, [props.initiativeId, props.preview, pushUndoSnapshot]);
-
-  const autoArrange = useCallback(async () => {
-    if (!mindmap || props.preview || busy) return;
     setBusy(true);
-    setError(null);
     try {
-      const arranged = arrangeMindmap(mindmap, selectedNodeKey);
-      setMindmap({ ...mindmap, nodes: mindmap.nodes.map((node) => arranged.get(node.nodeKey) ?? node) });
-      pushUndoSnapshot();
-      await Promise.all([...arranged.values()].map((node) =>
-        updateInitiativeMindmapNode(props.initiativeId, node.nodeKey, {
-          x: Math.round(node.x),
-          y: Math.round(node.y)
-        })
-      ));
-      setMindmap(await fetchInitiativeMindmap(props.initiativeId));
+      const restored = await replaceInitiativeMindmapFreestyleNodes(props.initiativeId, snapshot);
+      setMindmap(restored);
+      setSelectedNodeKey(node.id);
+      return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Auto-Arrange konnte nicht gespeichert werden.");
+      setError(err instanceof Error ? err.message : "Mindmap konnte nicht umgeordnet werden.");
+      return false;
     } finally {
       setBusy(false);
     }
-  }, [busy, mindmap, props.initiativeId, props.preview, pushUndoSnapshot, selectedNodeKey]);
+  }, [busy, props.initiativeId, props.preview, pushUndoSnapshot]);
+
+  const [centerRequest, setCenterRequest] = useState(0);
 
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
     if (props.preview) return;
@@ -349,6 +365,14 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
       return;
     }
     if (targetIsEditor) return;
+    if (event.key === " ") {
+      const selected = mindmapRef.current?.nodes.find((node) => node.nodeKey === selectedNodeKeyRef.current);
+      if (selected?.nodeKind === "freestyle") {
+        event.preventDefault();
+        setEditingNodeKey(selected.nodeKey);
+      }
+      return;
+    }
     if (event.key === "Tab") {
       event.preventDefault();
       const current = mindmapRef.current;
@@ -367,9 +391,9 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
     }
     if (event.key.startsWith("Arrow")) {
       event.preventDefault();
-      selectRelativeNode(mindmapRef.current, selectedNodeKeyRef.current, event.key, mode, setSelectedNodeKey);
+      selectRelativeNode(layoutRef.current, selectedNodeKeyRef.current, event.key, setSelectedNodeKey);
     }
-  }, [createChild, createSibling, deleteSelected, duplicateSelected, mode, props.preview, redo, undo]);
+  }, [createChild, createSibling, deleteSelected, duplicateSelected, props.preview, redo, undo]);
 
   const handlePaste = useCallback((event: ClipboardEvent<HTMLDivElement>) => {
     if (props.preview || (event.target as HTMLElement).closest("textarea, input")) return;
@@ -382,19 +406,15 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
       pushUndoSnapshot();
       const selected = current.nodes.find((node) => node.nodeKey === selectedNodeKeyRef.current);
       const parentNodeKey = selected?.parentNodeKey ?? rootNodeKey(current);
-      let y = selected ? selected.y + nodeHeight(selected) + 32 : 80;
       let nextMindmap = current;
       for (const line of lines) {
         const result = await createInitiativeMindmapFreestyleNode(props.initiativeId, {
           parentNodeKey,
-          label: line,
-          x: selected?.x ?? 120,
-          y
+          label: line
         });
         nextMindmap = result.mindmap;
         setMindmap(nextMindmap);
         setSelectedNodeKey(result.node.nodeKey);
-        y += nodeHeight(result.node) + 26;
       }
       setEditingNodeKey(null);
     };
@@ -467,13 +487,13 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
             <button type="button" className={mode === "structure" ? "active" : ""} onClick={() => setMode("structure")}>Struktur</button>
           </div>
           <button type="button" className="small-button" onClick={() => void createChild(selectedNodeKey ?? (mindmap ? rootNodeKey(mindmap) : null))} disabled={busy}>
-            <Plus size={14} /> Knoten
+            <Plus size={14} /> Subtopic
           </button>
           <button type="button" className="small-button" onClick={() => void createSibling(selectedNodeKey)} disabled={busy}>
             <Plus size={14} /> Geschwister
           </button>
-          <button type="button" className="small-button" onClick={() => void autoArrange()} disabled={busy}>
-            <RefreshCw size={14} /> Auto-arrange
+          <button type="button" className="small-button" onClick={() => setCenterRequest((value) => value + 1)} disabled={busy}>
+            <Maximize2 size={14} /> Zentrieren
           </button>
           <button type="button" className="icon-button compact" onClick={() => void undo()} disabled={busy || undoStack.length === 0} aria-label="Rückgängig" title="Rückgängig">
             <Undo2 size={14} />
@@ -488,6 +508,11 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
             <Trash2 size={14} />
           </button>
           {error ? <span className="mindmap-inline-error">{error}</span> : null}
+          {props.onClose ? (
+            <button type="button" className="icon-button compact mindmap-toolbar-close" onClick={props.onClose} aria-label="Mindmap schließen" title="Schließen">
+              <X size={16} />
+            </button>
+          ) : null}
         </div>
       ) : (
         <button
@@ -516,9 +541,8 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
             canvasElementRef.current?.focus();
             setSelectedNodeKey(null);
           }}
-          onNodeDragStop={saveNodePosition}
-          onCreateAt={(x, y) => void createChild(null, { x, y })}
-          onCreateConnected={(sourceNodeKey, x, y) => void createChild(sourceNodeKey, { x, y })}
+          onNodeDragStop={applySemanticDrop}
+          centerRequest={centerRequest}
         />
       </ReactFlowProvider>
     </div>
@@ -527,25 +551,30 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
 
 function MindmapFlow(props: {
   nodes: MindmapNode[];
-  edges: Edge[];
+  edges: MindmapEdge[];
   preview: boolean;
+  centerRequest: number;
   onNodeClick: (event: ReactMouseEvent, node: Node) => void;
   onPaneClick: () => void;
-  onNodeDragStop: (event: unknown, node: Node) => void;
-  onCreateAt: (x: number, y: number) => void;
-  onCreateConnected: (sourceNodeKey: string, x: number, y: number) => void;
+  onNodeDragStop: (event: unknown, node: Node) => Promise<boolean>;
 }) {
   const flow = useReactFlow();
-  const connectSourceRef = useRef<string | null>(null);
   const [flowNodes, setFlowNodes] = useState(props.nodes);
+  const didInitialFitViewRef = useRef(false);
+  const previousCenterRequestRef = useRef(props.centerRequest);
 
   useEffect(() => {
     setFlowNodes(props.nodes);
   }, [props.nodes]);
 
   useEffect(() => {
+    const shouldFitInitially = !didInitialFitViewRef.current && props.nodes.length > 0;
+    const shouldFitByRequest = previousCenterRequestRef.current !== props.centerRequest;
+    previousCenterRequestRef.current = props.centerRequest;
+    if (!shouldFitInitially && !shouldFitByRequest) return;
+    didInitialFitViewRef.current = true;
     window.requestAnimationFrame(() => flow.fitView({ padding: props.preview ? 0.1 : 0.18, duration: 200 }));
-  }, [flow, props.nodes, props.preview]);
+  }, [flow, props.centerRequest, props.nodes.length, props.preview]);
 
   const handleNodesChange = useCallback((changes: NodeChange<MindmapNode>[]) => {
     setFlowNodes((currentNodes) => applyNodeChanges(changes, currentNodes) as MindmapNode[]);
@@ -556,9 +585,9 @@ function MindmapFlow(props: {
       nodes={flowNodes}
       edges={props.edges}
       nodeTypes={nodeTypes}
-      fitView
+      edgeTypes={edgeTypes}
       nodesDraggable={!props.preview}
-      nodesConnectable={!props.preview}
+      nodesConnectable={false}
       elementsSelectable={!props.preview}
       panOnDrag={!props.preview}
       zoomOnScroll={!props.preview}
@@ -567,30 +596,14 @@ function MindmapFlow(props: {
       preventScrolling={!props.preview}
       onNodesChange={handleNodesChange}
       onNodeClick={props.onNodeClick}
-      onPaneClick={(event) => {
+      onPaneClick={() => {
         props.onPaneClick();
-        if (props.preview || event.detail < 2) return;
-        const position = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-        props.onCreateAt(Math.round(position.x - CANVAS_MARGIN_X), Math.round(position.y - CANVAS_MARGIN_Y));
       }}
-      onConnectStart={(_event, params) => {
-        connectSourceRef.current = params.nodeId ?? null;
+      onNodeDragStop={(event, node) => {
+        void props.onNodeDragStop(event, node).then((accepted) => {
+          if (!accepted) setFlowNodes(props.nodes);
+        });
       }}
-      onConnectEnd={(event) => {
-        if (props.preview || !connectSourceRef.current) return;
-        const maybeElement = event.target as HTMLElement | null;
-        if (maybeElement?.closest(".react-flow__node")) {
-          connectSourceRef.current = null;
-          return;
-        }
-        const point = "clientX" in event
-          ? { x: event.clientX, y: event.clientY }
-          : { x: 0, y: 0 };
-        const position = flow.screenToFlowPosition(point);
-        props.onCreateConnected(connectSourceRef.current, Math.round(position.x - CANVAS_MARGIN_X), Math.round(position.y - CANVAS_MARGIN_Y));
-        connectSourceRef.current = null;
-      }}
-      onNodeDragStop={props.onNodeDragStop}
       proOptions={{ hideAttribution: true }}
     >
       <Background gap={22} size={1} />
@@ -625,25 +638,34 @@ function MindmapNodeComponent(props: NodeProps<MindmapNode>) {
     }
   };
 
+  const startEditingFromNode = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!editable || editing) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button, textarea, .react-flow__handle")) return;
+    event.stopPropagation();
+    props.data.onStartEditing(graphNode.nodeKey);
+  };
+
   return (
-    <div className={`mindmap-node kind-${graphNode.nodeKind}${props.selected ? " selected" : ""}`}>
-      <Handle type="target" position={Position.Left} />
-      <Handle type="target" position={Position.Top} />
-      <div className="mindmap-node-icon" aria-hidden="true">
-        <GitBranch size={14} />
-      </div>
-      {props.data.childCount > 0 ? (
+    <div
+      className={`mindmap-node kind-${graphNode.nodeKind} topic-${props.data.topicLevel}${props.data.draggable ? " draggable" : ""}${props.selected ? " selected" : ""}`}
+      onDoubleClick={startEditingFromNode}
+      title={editable ? "Doppelklick zum Umbenennen" : undefined}
+    >
+      <Handle id="left-target" type="target" position={Position.Left} />
+      <Handle id="right-target" type="target" position={Position.Right} />
+      {props.data.childCount > 0 && props.data.topicLevel !== "central" ? (
         <button
           type="button"
-          className="mindmap-node-collapse nodrag"
+          className={`mindmap-node-collapse nodrag ${props.data.side === "left" ? "side-left" : "side-right"}${graphNode.collapsed ? " is-collapsed" : ""}`}
           onClick={(event) => {
             event.stopPropagation();
             props.data.onToggleCollapse(graphNode.nodeKey);
           }}
-          aria-label={graphNode.collapsed ? "Teilbaum ausklappen" : "Teilbaum einklappen"}
-          title={graphNode.collapsed ? "Ausklappen" : "Einklappen"}
+          aria-label={graphNode.collapsed ? `${props.data.childCount} Kindknoten ausklappen` : `${props.data.childCount} Kindknoten einklappen`}
+          title={graphNode.collapsed ? `${props.data.childCount} ausklappen` : "Einklappen"}
         >
-          {graphNode.collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+          {graphNode.collapsed ? props.data.childCount : <Minus size={12} strokeWidth={1.8} />}
         </button>
       ) : null}
       {editing ? (
@@ -675,7 +697,6 @@ function MindmapNodeComponent(props: NodeProps<MindmapNode>) {
           role={editable ? "button" : undefined}
           tabIndex={editable ? 0 : undefined}
           className="mindmap-node-label"
-          onDoubleClick={() => editable && props.data.onStartEditing(graphNode.nodeKey)}
           onKeyDown={(event) => {
             if (!editable) return;
             if (event.key === "Enter") {
@@ -707,7 +728,7 @@ function MindmapNodeComponent(props: NodeProps<MindmapNode>) {
               <Trash2 size={12} />
             </button>
           ) : null}
-          {(["top", "right", "bottom", "left"] as const).map((side) => (
+          {(["right", "bottom"] as const).filter((side) => side === "right" ? props.data.canAddChild : props.data.canAddSibling).map((side) => (
             <button
               key={side}
               type="button"
@@ -719,166 +740,83 @@ function MindmapNodeComponent(props: NodeProps<MindmapNode>) {
                 event.stopPropagation();
                 props.data.onAddAdjacent(graphNode.nodeKey, side);
               }}
-              aria-label="Freestyle-Knoten hinzufügen"
-              title="Freestyle-Knoten hinzufügen"
+              aria-label={side === "right" ? "Subtopic hinzufügen" : "Geschwister hinzufügen"}
+              title={side === "right" ? "Subtopic hinzufügen" : "Geschwister hinzufügen"}
             >
               <Plus size={12} />
             </button>
           ))}
         </>
       ) : null}
-      <Handle type="source" position={Position.Right} />
-      <Handle type="source" position={Position.Bottom} />
+      <Handle id="left-source" type="source" position={Position.Left} />
+      <Handle id="right-source" type="source" position={Position.Right} />
     </div>
   );
 }
 
 const nodeTypes = { mindmap: MindmapNodeComponent };
+const edgeTypes = { mindmap: MindmapEdgeComponent };
 
-function arrangeMindmap(mindmap: InitiativeMindmapData, selectedNodeKey: string | null): Map<string, GraphLayoutNode> {
-  const included = selectedNodeKey ? descendantsIncluding(mindmap, selectedNodeKey) : new Set(mindmap.nodes.map((node) => node.nodeKey));
-  const graph = new dagre.graphlib.Graph();
-  graph.setDefaultEdgeLabel(() => ({}));
-  graph.setGraph({ rankdir: "LR", ranksep: 108, nodesep: 42, marginx: 32, marginy: 32 });
+function MindmapEdgeComponent(props: EdgeProps<MindmapEdge>) {
+  const [path] = getBezierPath({
+    sourceX: props.sourceX,
+    sourceY: props.sourceY,
+    sourcePosition: props.sourcePosition,
+    targetX: props.targetX,
+    targetY: props.targetY,
+    targetPosition: props.targetPosition,
+    curvature: 0.34
+  });
 
-  for (const node of mindmap.nodes) {
-    if (!included.has(node.nodeKey)) continue;
-    graph.setNode(node.nodeKey, { width: nodeWidth(node), height: nodeHeight(node) });
-  }
-  for (const edge of mindmap.edges) {
-    if (included.has(edge.sourceNodeKey) && included.has(edge.targetNodeKey)) {
-      graph.setEdge(edge.sourceNodeKey, edge.targetNodeKey);
-    }
-  }
-
-  dagre.layout(graph);
-  const arranged = new Map<string, GraphLayoutNode>();
-  const anchor = selectedNodeKey ? mindmap.nodes.find((node) => node.nodeKey === selectedNodeKey) : null;
-  const selectedLayout = selectedNodeKey ? graph.node(selectedNodeKey) : null;
-  const offsetX = anchor && selectedLayout ? anchor.x - selectedLayout.x + (anchor.width ?? 190) / 2 : 0;
-  const offsetY = anchor && selectedLayout ? anchor.y - selectedLayout.y + (anchor.height ?? 54) / 2 : 0;
-
-  for (const node of mindmap.nodes) {
-    if (!included.has(node.nodeKey)) continue;
-    const layoutNode = graph.node(node.nodeKey);
-    if (!layoutNode) continue;
-    const width = nodeWidth(node);
-    const height = nodeHeight(node);
-    arranged.set(node.nodeKey, {
-      ...node,
-      x: layoutNode.x - width / 2 + offsetX,
-      y: layoutNode.y - height / 2 + offsetY
-    });
-  }
-  return arranged;
-}
-
-function descendantsIncluding(mindmap: InitiativeMindmapData, nodeKey: string): Set<string> {
-  const result = new Set([nodeKey]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const node of mindmap.nodes) {
-      if (node.parentNodeKey && result.has(node.parentNodeKey) && !result.has(node.nodeKey)) {
-        result.add(node.nodeKey);
-        changed = true;
-      }
-    }
-  }
-  return result;
-}
-
-function visibleMindmapNodeKeys(mindmap: InitiativeMindmapData, mode: MindmapMode): Set<string> {
-  const rootKey = rootNodeKey(mindmap);
-  const visible = new Set(
-    mindmap.nodes
-      .filter((node) => mode === "structure" || node.nodeKind === "initiative_root" || node.nodeKind === "freestyle")
-      .map((node) => node.nodeKey)
+  return (
+    <BaseEdge
+      id={props.id}
+      path={path}
+      markerEnd={props.markerEnd}
+      interactionWidth={props.interactionWidth}
+      className="mindmap-edge"
+      style={props.style}
+    />
   );
-  const hasFreestyleChildren = mindmap.nodes.some((node) => node.parentNodeKey === "branch:freestyle");
-  if (!hasFreestyleChildren) {
-    visible.delete("branch:freestyle");
-  }
-  for (const node of mindmap.nodes) {
-    if (!visible.has(node.nodeKey) || !node.collapsed) continue;
-    for (const childKey of descendantsIncluding(mindmap, node.nodeKey)) {
-      if (childKey !== node.nodeKey) visible.delete(childKey);
-    }
-  }
-  visible.add(rootKey);
-  return visible;
-}
-
-function visibleMindmapEdges(mindmap: InitiativeMindmapData, visibleNodeKeys: Set<string>, mode: MindmapMode): Array<{ id: string; sourceNodeKey: string; targetNodeKey: string }> {
-  const rootKey = rootNodeKey(mindmap);
-  return mindmap.nodes
-    .filter((node) => visibleNodeKeys.has(node.nodeKey) && node.parentNodeKey)
-    .map((node) => {
-      const sourceNodeKey = visibleNodeKeys.has(node.parentNodeKey!) ? node.parentNodeKey! : mode === "freestyle" && node.parentNodeKey === "branch:freestyle" ? rootKey : null;
-      return sourceNodeKey ? {
-        id: `parent:${sourceNodeKey}->${node.nodeKey}`,
-        sourceNodeKey,
-        targetNodeKey: node.nodeKey
-      } : null;
-    })
-    .filter((edge): edge is { id: string; sourceNodeKey: string; targetNodeKey: string } => Boolean(edge));
-}
-
-function childCountByNodeKey(mindmap: InitiativeMindmapData, mode: MindmapMode): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const node of mindmap.nodes) {
-    if (!node.parentNodeKey) continue;
-    if (mode === "freestyle" && node.nodeKind !== "freestyle") continue;
-    counts.set(node.parentNodeKey, (counts.get(node.parentNodeKey) ?? 0) + 1);
-  }
-  return counts;
-}
-
-function rootNodeKey(mindmap: InitiativeMindmapData): string {
-  const root = mindmap.nodes.find((node) => node.nodeKind === "initiative_root");
-  return root?.nodeKey ?? (mindmap.scope.type === "initiative" ? `initiative:${mindmap.scope.initiativeId}` : "root");
-}
-
-function freestyleSnapshot(mindmap: InitiativeMindmapData): FreestyleSnapshot {
-  return mindmap.nodes
-    .filter((node) => node.nodeKind === "freestyle")
-    .map((node) => ({
-      nodeKey: node.nodeKey,
-      parentNodeKey: node.parentNodeKey,
-      label: node.label,
-      x: node.x,
-      y: node.y,
-      width: node.width,
-      height: node.height,
-      collapsed: node.collapsed
-    }));
 }
 
 function selectRelativeNode(
-  mindmap: InitiativeMindmapData | null,
+  layout: MindmapLayout | null,
   selectedNodeKey: string | null,
   key: string,
-  mode: MindmapMode,
   setSelectedNodeKey: (nodeKey: string | null) => void
 ): void {
-  if (!mindmap) return;
-  const visible = visibleMindmapNodeKeys(mindmap, mode);
-  const nodes = mindmap.nodes.filter((node) => visible.has(node.nodeKey));
-  const selected = nodes.find((node) => node.nodeKey === selectedNodeKey) ?? nodes.find((node) => node.nodeKey === rootNodeKey(mindmap));
+  if (!layout) return;
+  const nodes = layout.nodes;
+  const selected = nodes.find((node) => node.nodeKey === selectedNodeKey) ?? layout.nodesByKey.get(layout.rootNodeKey);
   if (!selected) return;
 
-  if (key === "ArrowLeft" && selected.parentNodeKey) {
-    setSelectedNodeKey(visible.has(selected.parentNodeKey) ? selected.parentNodeKey : rootNodeKey(mindmap));
+  if (key === "ArrowLeft") {
+    if (selected.side === "right" && selected.parentNodeKey) {
+      setSelectedNodeKey(selected.parentNodeKey);
+      return;
+    }
+    const leftSibling = nodes
+      .filter((node) => node.side === "left")
+      .sort((a, b) => Math.abs((a.y + a.height / 2) - (selected.y + selected.height / 2)) - Math.abs((b.y + b.height / 2) - (selected.y + selected.height / 2)))[0];
+    setSelectedNodeKey(leftSibling?.nodeKey ?? layout.rootNodeKey);
     return;
   }
+
   if (key === "ArrowRight") {
-    const child = nodes.find((node) => node.parentNodeKey === selected.nodeKey);
-    if (child) setSelectedNodeKey(child.nodeKey);
+    if (selected.side === "left" && selected.parentNodeKey) {
+      setSelectedNodeKey(selected.parentNodeKey);
+      return;
+    }
+    const rightSibling = nodes
+      .filter((node) => node.side === "right")
+      .sort((a, b) => Math.abs((a.y + a.height / 2) - (selected.y + selected.height / 2)) - Math.abs((b.y + b.height / 2) - (selected.y + selected.height / 2)))[0];
+    setSelectedNodeKey(rightSibling?.nodeKey ?? layout.rootNodeKey);
     return;
   }
 
   const siblings = nodes
-    .filter((node) => node.parentNodeKey === selected.parentNodeKey)
+    .filter((node) => node.parentNodeKey === selected.parentNodeKey && node.side === selected.side)
     .sort((a, b) => a.y - b.y || a.x - b.x);
   const index = siblings.findIndex((node) => node.nodeKey === selected.nodeKey);
   if (index === -1) return;
@@ -887,18 +825,4 @@ function selectRelativeNode(
   } else if (key === "ArrowDown") {
     setSelectedNodeKey(siblings[Math.min(siblings.length - 1, index + 1)]?.nodeKey ?? selected.nodeKey);
   }
-}
-
-function nodeWidth(node: GraphLayoutNode): number {
-  if (node.nodeKind === "branch") return 220;
-  if (node.nodeKind === "initiative_root") return Math.min(340, Math.max(300, node.label.length * 7 + 88));
-  return Math.min(MAX_NODE_WIDTH, Math.max(300, node.label.length * 7 + 92));
-}
-
-function nodeHeight(node: GraphLayoutNode): number {
-  if (node.nodeKind === "branch") return 54;
-  const width = nodeWidth(node);
-  const estimatedCharsPerLine = Math.max(18, Math.floor((width - 88) / 7));
-  const estimatedLines = Math.min(3, Math.max(1, Math.ceil(node.label.length / estimatedCharsPerLine)));
-  return BASE_NODE_HEIGHT + (estimatedLines - 1) * 18;
 }

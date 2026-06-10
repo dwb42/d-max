@@ -469,7 +469,14 @@ const server = http.createServer(async (req, res) => {
         sendHtmlRedirect(res, "/config?google=error&detail=missing_code_or_state");
         return;
       }
-      const result = await googleCalendarAuth.handleCallback({ code, state });
+      let result: Awaited<ReturnType<typeof googleCalendarAuth.handleCallback>>;
+      try {
+        result = await googleCalendarAuth.handleCallback({ code, state });
+      } catch (callbackError) {
+        const detail = callbackError instanceof Error ? callbackError.message : "Google OAuth callback failed";
+        sendHtmlRedirect(res, `/config?google=error&detail=${encodeURIComponent(detail)}`);
+        return;
+      }
       if (result.purpose === "workspace" && result.accountLabel) {
         googleWorkspaceAuth.importRefreshToken({ accountLabel: result.accountLabel, token: result.token });
       }
@@ -1913,7 +1920,7 @@ const updatePlanningCanvasNodeBody = z.object({
 
 const createMindmapFreestyleNodeBody = z.object({
   parentNodeKey: z.string().trim().min(1).nullable().optional(),
-  label: z.string().trim().min(1).nullable().optional(),
+  label: z.string().trim().nullable().optional(),
   x: mindmapCoordinate.optional(),
   y: mindmapCoordinate.optional()
 });
@@ -1932,7 +1939,7 @@ const replaceMindmapFreestyleNodesBody = z.object({
   nodes: z.array(z.object({
     nodeKey: z.string().trim().min(1),
     parentNodeKey: z.string().trim().min(1).nullable(),
-    label: z.string().trim().min(1),
+    label: z.string().trim(),
     x: mindmapCoordinate,
     y: mindmapCoordinate,
     width: mindmapCoordinate.nonnegative().nullable().optional(),

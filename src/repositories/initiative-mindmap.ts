@@ -190,7 +190,7 @@ export class InitiativeMindmapRepository {
       entityType: null,
       entityId: null,
       parentNodeKey,
-      label: input.label?.trim() || "Neuer Gedanke",
+      label: input.label === undefined || input.label === null ? "Neuer Gedanke" : input.label.trim(),
       x: input.x ?? (parent ? parent.x + 260 : 80),
       y: input.y ?? (parent ? parent.y + siblingCount * 76 : 80 + siblingCount * 76),
       width: 180,

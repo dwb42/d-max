@@ -14,6 +14,8 @@ const googleWorkspaceScopes = [
 ];
 const authorizationEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
 const tokenEndpoint = "https://oauth2.googleapis.com/token";
+const tokenExchangeTimeoutMs = 15_000;
+const tokenExchangeAttempts = 3;
 
 export type StoredGoogleCalendarToken = {
   accessToken: string;
@@ -271,19 +273,46 @@ function accountTokenPath(accountLabel: string): string {
 }
 
 async function postToken(params: Record<string, string>): Promise<GoogleTokenResponse> {
-  const response = await fetch(tokenEndpoint, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(params)
-  });
-  const json = await response.json().catch(() => ({})) as GoogleTokenResponse;
-  if (!response.ok) {
-    return {
-      ...json,
-      error: json.error ?? `HTTP ${response.status}`
-    };
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= tokenExchangeAttempts; attempt += 1) {
+    try {
+      const response = await fetch(tokenEndpoint, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(params),
+        signal: AbortSignal.timeout(tokenExchangeTimeoutMs)
+      });
+      const json = await response.json().catch(() => ({})) as GoogleTokenResponse;
+      if (!response.ok) {
+        return {
+          ...json,
+          error: json.error ?? `HTTP ${response.status}`
+        };
+      }
+      return json;
+    } catch (error) {
+      lastError = error;
+      if (attempt < tokenExchangeAttempts) {
+        await sleep(250 * attempt);
+      }
+    }
   }
-  return json;
+  throw new Error(`Google OAuth token exchange request failed: ${formatFetchFailure(lastError)}`);
+}
+
+function formatFetchFailure(error: unknown): string {
+  if (error instanceof DOMException && error.name === "TimeoutError") {
+    return `request timed out after ${tokenExchangeTimeoutMs}ms`;
+  }
+  if (error instanceof Error) {
+    const cause = error.cause instanceof Error ? ` (${error.cause.message})` : "";
+    return `${error.message}${cause}`;
+  }
+  return "unknown network error";
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function formatTokenError(response: GoogleTokenResponse, fallback: string): string {

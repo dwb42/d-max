@@ -27,7 +27,6 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@dagrejs/dagre": "^3.0.0",
     "@livekit/components-react": "^2.9.20",
     "@livekit/components-styles": "^1.2.0",
     "@livekit/rtc-node": "^0.13.27",

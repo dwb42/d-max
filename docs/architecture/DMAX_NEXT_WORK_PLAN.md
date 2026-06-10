@@ -43,7 +43,8 @@ Current frontend structure:
 - Shared UI primitives live in `web/src/components/ui/`.
 - Party/contact primitives live in `web/src/components/party/`.
 - The initiative mindmap surface lives in
-  `web/src/components/graph/InitiativeMindmap.tsx`.
+  `web/src/components/graph/InitiativeMindmap.tsx`, with pure radial
+  auto-layout helpers in `web/src/components/graph/mindmap-layout.ts`.
 - `web/src/App.tsx` is still large, roughly 8k lines at this writing.
 
 `App.tsx` still owns:
@@ -80,7 +81,9 @@ The DMAX drawer is central to the product and still crosses too many concerns in
 - user-facing error mapping;
 - drawer shell and resize behavior.
 
-Extracting it reduces risk before calendar/planning/mindmap or config/debug work, because the drawer appears across nearly every route. It also creates a better boundary for future agent/chat experience improvements.
+Extracting it reduces risk before calendar/planning or config/debug work,
+because the drawer appears across nearly every route. It also creates a better
+boundary for future agent/chat experience improvements.
 
 ### In Scope
 

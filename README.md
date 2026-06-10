@@ -320,7 +320,13 @@ GOOGLE_OAUTH_REDIRECT_URI=http://localhost:3088/api/config/google-calendar/oauth
 Then open `/config`, connect Google, and add the calendar IDs that should appear
 in `/calendar`. The config UI supports multiple Google accounts: connect each
 account via OAuth, then enable the calendars DMAX should read/write from that
-account. Those enabled selections are stored as DMAX calendar sources.
+account. Those enabled selections are stored as DMAX calendar sources. If
+Google reports that a token has expired or been revoked, disconnect that
+account in `/config` and reconnect it; reloading calendars cannot repair a
+revoked refresh token. OAuth callback errors are redirected back to `/config`
+and shown as the route-level error banner. The backend token exchange uses a
+bounded timeout and retry loop, but local network filters still must allow POST
+requests to `https://oauth2.googleapis.com/token`.
 
 Media uploads and generated chat audio replies default to local files under `data/media` with metadata in SQLite.
 Override with `DMAX_MEDIA_STORAGE_DIR` and `DMAX_MEDIA_MAX_UPLOAD_BYTES` when

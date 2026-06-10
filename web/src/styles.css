@@ -8435,6 +8435,10 @@ button.task-notes-panel:hover {
   gap: 6px;
 }
 
+.mindmap-toolbar-close {
+  margin-left: auto;
+}
+
 .mindmap-inline-error {
   min-width: 0;
   color: #9e2f24;
@@ -8453,7 +8457,7 @@ button.task-notes-panel:hover {
 
 .mindmap-modal {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: 1fr;
   min-width: 0;
   min-height: 0;
   border: 1px solid #dfe4dc;
@@ -8462,28 +8466,13 @@ button.task-notes-panel:hover {
   box-shadow: 0 24px 64px rgba(16, 23, 20, 0.2);
 }
 
-.mindmap-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid #dfe4dc;
-  padding: 14px 16px;
-}
-
-.mindmap-modal-header h2 {
-  margin: 0;
-  font-size: 18px;
-}
-
 .mindmap-node {
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   align-items: center;
   width: 100%;
-  min-width: 180px;
   min-height: 54px;
   overflow: visible;
   border: 1px solid #d8ded6;
@@ -8492,6 +8481,10 @@ button.task-notes-panel:hover {
   background: #ffffff;
   color: #17211c;
   box-shadow: 0 6px 16px rgba(16, 23, 20, 0.06);
+  cursor: default;
+}
+
+.mindmap-node.draggable {
   cursor: grab;
 }
 
@@ -8514,18 +8507,88 @@ button.task-notes-panel:hover {
   content: "";
 }
 
+.react-flow__node-mindmap.selected .mindmap-node,
 .mindmap-node.selected {
+  border-color: #145847;
+  box-shadow: 0 0 0 2px rgba(39, 128, 111, 0.2), 0 10px 24px rgba(16, 23, 20, 0.12);
+}
+
+.react-flow__node-mindmap.selected .mindmap-node::after,
+.mindmap-node.selected::after {
+  position: absolute;
+  inset: -6px;
+  border: 2px solid rgba(39, 128, 111, 0.72);
+  border-radius: 12px;
+  pointer-events: none;
+  content: "";
+}
+
+.mindmap-node.topic-central {
+  min-height: 62px;
+  border-color: #111c18;
+  border-radius: 8px;
+  padding: 14px 18px;
+  background: #111c18;
+  color: #ffffff;
+  box-shadow: 0 10px 26px rgba(16, 23, 20, 0.16);
+}
+
+.mindmap-node.topic-central::before {
+  display: none;
+}
+
+.mindmap-node.topic-central .mindmap-node-label,
+.mindmap-node.topic-central .mindmap-node-input {
+  font-size: 18px;
+  font-weight: 850;
+}
+
+.mindmap-node.topic-main {
+  min-height: 56px;
+  border-width: 1.5px;
   border-color: #27806f;
-  box-shadow: 0 0 0 2px rgba(39, 128, 111, 0.12), 0 8px 22px rgba(16, 23, 20, 0.08);
+  padding: 11px 15px 11px 14px;
+  background: #f4fbf7;
+}
+
+.mindmap-node.topic-main::before {
+  width: 5px;
+  background: #27806f;
+}
+
+.mindmap-node.topic-main .mindmap-node-label,
+.mindmap-node.topic-main .mindmap-node-input {
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.mindmap-node.topic-sub {
+  min-height: 44px;
+  border-color: #d7ddd5;
+  border-radius: 7px;
+  padding: 7px 11px 7px 10px;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(16, 23, 20, 0.045);
+}
+
+.mindmap-node.topic-sub::before {
+  width: 3px;
+  background: #b7c3bd;
+}
+
+.mindmap-node.topic-sub .mindmap-node-label,
+.mindmap-node.topic-sub .mindmap-node-input {
+  font-size: 13px;
+  font-weight: 760;
 }
 
 .mindmap-node.kind-initiative_root {
-  border-color: #9dbc72;
-  background: #f7faed;
+  border-color: #111c18;
+  background: #111c18;
 }
 
 .mindmap-node.kind-initiative_root::before {
-  background: #8cab45;
+  background: #111c18;
 }
 
 .mindmap-node.kind-branch {
@@ -8557,30 +8620,43 @@ button.task-notes-panel:hover {
   background: #b48bb7;
 }
 
-.mindmap-node-icon {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border-radius: 7px;
-  background: rgba(16, 23, 20, 0.055);
-  color: #43524a;
-}
-
 .mindmap-node-collapse {
   position: absolute;
-  z-index: 3;
-  right: 6px;
-  bottom: 6px;
+  z-index: 6;
+  top: 50%;
   display: grid;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   place-items: center;
-  border: 1px solid rgba(16, 23, 20, 0.12);
+  border: 1px solid rgba(39, 128, 111, 0.28);
   border-radius: 999px;
   padding: 0;
-  background: rgba(255, 255, 255, 0.88);
-  color: #66726b;
+  background: rgba(255, 255, 255, 0.94);
+  color: #6f7b74;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
+.mindmap-node-collapse.side-left {
+  left: -10px;
+}
+
+.mindmap-node-collapse.side-right {
+  right: -10px;
+}
+
+.mindmap-node-collapse:hover,
+.mindmap-node-collapse:focus-visible {
+  border-color: rgba(39, 128, 111, 0.46);
+  color: #27806f;
+}
+
+.mindmap-node-collapse.is-collapsed {
+  border-color: rgba(39, 128, 111, 0.38);
+  background: rgba(244, 251, 247, 0.96);
+  color: #27806f;
 }
 
 .mindmap-node-delete {
@@ -8614,23 +8690,27 @@ button.task-notes-panel:hover {
   white-space: normal;
 }
 
-.mindmap-node-label[role="button"] {
+.mindmap-node.draggable .mindmap-node-label[role="button"] {
   cursor: grab;
 }
 
 .mindmap-node-input {
+  display: block;
   min-width: 0;
   width: 100%;
-  min-height: 38px;
-  border: 1px solid #b8c7bd;
-  border-radius: 6px;
-  padding: 4px 6px;
+  min-height: 1.25em;
+  border: 0;
+  padding: 0;
+  outline: 0;
   resize: none;
-  background: #ffffff;
-  color: #17211c;
+  overflow: hidden;
+  background: transparent;
+  color: inherit;
+  field-sizing: content;
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 800;
   line-height: 1.25;
+  text-align: left;
 }
 
 .mindmap-node-add {
@@ -8647,12 +8727,6 @@ button.task-notes-panel:hover {
   opacity: 0;
 }
 
-.mindmap-node-add.top {
-  top: -11px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
 .mindmap-node-add.right {
   top: 50%;
   right: -11px;
@@ -8665,12 +8739,6 @@ button.task-notes-panel:hover {
   transform: translateX(-50%);
 }
 
-.mindmap-node-add.left {
-  top: 50%;
-  left: -11px;
-  transform: translateY(-50%);
-}
-
 .mindmap-node:hover .mindmap-node-add,
 .mindmap-node.selected .mindmap-node-add,
 .mindmap-node:hover .mindmap-node-delete,
@@ -8681,8 +8749,11 @@ button.task-notes-panel:hover {
 }
 
 .mindmap-edge {
-  stroke: #a7b1aa;
-  stroke-width: 1.4;
+  fill: none;
+  stroke: #9fa7a2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
 }
 
 .mindmap-node .react-flow__handle {
