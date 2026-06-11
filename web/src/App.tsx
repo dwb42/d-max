@@ -4521,7 +4521,7 @@ function PlanningCanvasView(props: {
 
   const nodes = view?.nodes ?? [];
   const nodeByInitiative = useMemo(() => new Map(nodes.map((node) => [node.initiativeId, node])), [nodes]);
-  const canvasRange = useMemo(() => planningCanvasRange(view?.canvas.defaultStartDate ?? null, PLANNING_CANVAS_MONTH_COUNT), [view?.canvas.defaultStartDate]);
+  const canvasRange = useMemo(() => planningCanvasRange(PLANNING_CANVAS_MONTH_COUNT), []);
   const monthLabels = useMemo(() => planningCanvasMonths(canvasRange), [canvasRange]);
   const weekLabels = useMemo(() => planningCanvasWeeks(canvasRange), [canvasRange]);
   const weekendSpans = useMemo(() => planningCanvasWeekends(canvasRange), [canvasRange]);
@@ -5298,6 +5298,18 @@ function PlanningCanvasView(props: {
                 >
                 </div>
               ))}
+              {googleLaneRows.map((row) => (
+                <div
+                  key={`google-row-icon-${row}`}
+                  className="planning-canvas-google-row-icon-row"
+                  style={{ top: PLANNING_CANVAS_TIME_HEADER_HEIGHT + row * PLANNING_CANVAS_TIME_LANE_HEIGHT }}
+                  aria-hidden="true"
+                >
+                  <span className="planning-canvas-google-row-icon">
+                    <GoogleCalendarGlyph />
+                  </span>
+                </div>
+              ))}
               {childcareGapSpans.map((span) => (
                 <div
                   key={span.id}
@@ -5315,16 +5327,6 @@ function PlanningCanvasView(props: {
                   title={span.title}
                   aria-hidden="true"
                 />
-              ))}
-              {googleLaneRows.map((row) => (
-                <span
-                  key={`google-row-icon-${row}`}
-                  className="planning-canvas-google-row-icon"
-                  style={{ top: PLANNING_CANVAS_TIME_HEADER_HEIGHT + row * PLANNING_CANVAS_TIME_LANE_HEIGHT + (PLANNING_CANVAS_TIME_LANE_HEIGHT - 18) / 2 }}
-                  aria-hidden="true"
-                >
-                  <GoogleCalendarGlyph />
-                </span>
               ))}
               {googleTimeVisuals.map((visual) => (
                 <div
@@ -7390,7 +7392,8 @@ function formatInitiativeDateRangeForUi(project: Pick<Initiative, "startDate" | 
   return null;
 }
 
-const PLANNING_CANVAS_MONTH_COUNT = 10;
+const PLANNING_CANVAS_LOOKBACK_MONTHS = 1;
+const PLANNING_CANVAS_MONTH_COUNT = 11;
 const PLANNING_CANVAS_WEEK_WIDTH = 88;
 const PLANNING_CANVAS_MIN_ZOOM = 0.1;
 const PLANNING_CANVAS_MAX_ZOOM = 1.5;
@@ -7520,9 +7523,9 @@ function buildPlanningCanvasRelationGroups(
   return { byInitiativeId };
 }
 
-function planningCanvasRange(defaultStartDate: string | null, monthCount: number): PlanningCanvasRange {
-  const start = defaultStartDate ? parseDateOnlyUtc(defaultStartDate) ?? startOfUtcDay(new Date()) : startOfUtcDay(new Date());
-  const firstMonth = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+function planningCanvasRange(monthCount: number): PlanningCanvasRange {
+  const today = new Date();
+  const firstMonth = new Date(Date.UTC(today.getFullYear(), today.getMonth() - PLANNING_CANVAS_LOOKBACK_MONTHS, 1));
   const lastMonthEnd = new Date(Date.UTC(firstMonth.getUTCFullYear(), firstMonth.getUTCMonth() + monthCount, 0));
   const rangeStart = startOfUtcWeek(firstMonth);
   const rangeEnd = endOfUtcWeek(lastMonthEnd);

@@ -61,9 +61,10 @@ confirmation.
 
 ## Freestyle Mindmaps
 
-Use `getInitiativeMindmap` plus the freestyle mindmap tools for
-planning-canvas thoughts, clusters, rough structure, and visual idea sorting
-inside an initiative. Use node keys returned by `getInitiativeMindmap`.
+Use `summarizeInitiativeMindmap` or `getInitiativeMindmap` plus the freestyle
+mindmap tools for planning-canvas thoughts, clusters, rough structure, and
+visual idea sorting inside an initiative. Use node keys returned by
+`getInitiativeMindmap`.
 `createMindmapFreestyleNode` creates only freestyle notes; omitted
 `parentNodeKey` goes under `branch:freestyle`, while `parentNodeKey=null`
 creates a floating note. `updateMindmapFreestyleNode` can rename, move,
@@ -71,6 +72,11 @@ resize, collapse/expand, or reparent freestyle nodes only. Derived root,
 branch, task, and media nodes are read-only context for these tools. Do not
 convert freestyle mindmap nodes into tasks, initiatives, markdown sections, or
 checklist items unless Dietrich explicitly asks for that semantic conversion.
+For complex restructuring, use `draftMindmapChanges` to persist a concrete patch
+preview first, then use `commitMindmapChangeDraft confirmed=true` only after
+Dietrich explicitly confirms the preview. Draft patches may create/rename/
+reparent/delete freestyle nodes and add/remove node annotations such as
+priority, warning, timestamp, note, or source_ref.
 
 ## Confirmation
 

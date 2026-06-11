@@ -80,7 +80,8 @@ SQLite tables:
 
 ```text
 categories, initiatives, initiative_relations,
-planning_canvases, planning_canvas_nodes, graph_layout_nodes,
+planning_canvases, planning_canvas_nodes, graph_layout_nodes, graph_node_annotations,
+mindmap_change_drafts,
 tasks,
 task_checklist_items,
 calendar_entries, calendar_sources, calendar_event_bindings, calendar_event_visibility,
@@ -188,8 +189,9 @@ persisted node `y` controls the visual row. Canvas layout does not create a
 separate relationship model; parent-child hierarchy and `initiative_relations`
 are read from the domain tables and rendered as lines when both endpoints are
 placed on the canvas. The canvas background uses week-sized columns around the
-current default ten-month range and lightly darker weekend bands inside each
-week. It shows a red vertical today line without a text pill.
+current rolling eleven-month range, starting at the previous calendar month and
+lightly darker weekend bands inside each week. It shows a red vertical today line
+without a text pill.
 Project timeline bars/markers are the primary canvas objects; project cards are
 not rendered on the canvas. Timeline bars use category color, but projects with
 `project_phase = planning` render in a lighter category-derived color than
@@ -252,6 +254,13 @@ deleting a freestyle subtree returns a confirmation envelope unless
 `confirmed=true`. UI-created freestyle nodes may have a deliberately blank
 label while inline editing starts; omitted labels still default to
 `Neuer Gedanke` in the repository.
+`graph_node_annotations` stores lightweight annotations on existing mindmap
+nodes (`priority`, `warning`, `timestamp`, `note`, `source_ref`) separately
+from node structure. `mindmap_change_drafts` stores proposed dialog/long-content
+mindmap patch sets with rationale and warnings. The agent can summarize a
+mindmap, draft changes for preview, and commit a draft only after explicit
+confirmation; committed structural changes are still limited to freestyle
+nodes, while annotations may be attached to existing mindmap nodes.
 Tasks have a deliberately small
 `open`/`done` status model; legacy non-`done` task statuses are migrated to
 `open`. `task_checklist_items` stores simple checklist items
@@ -393,9 +402,10 @@ TTS fails.
   Initiative relation tools can list, create, delete, and graph directed
   predecessor/successor links; natural language like "B follows A" maps to A
   precedes B.
-  Initiative mindmap tools can read the complete initiative mindmap and mutate
-  freestyle nodes only. Browser/API mindmap routes additionally support
-  snapshot replacement for UI undo/redo.
+  Initiative mindmap tools can read and summarize the complete initiative
+  mindmap, draft proposed changes for dialog preview, commit confirmed drafts,
+  and mutate freestyle nodes only. Browser/API mindmap routes additionally
+  support snapshot replacement for UI undo/redo.
   Checklist tools can list, create, update, delete, and reorder items inside a
   task. Media tools can list, link, update, remove, and reorder existing media
   attachments for categories, initiatives, and tasks; browser/API upload creates
@@ -567,17 +577,20 @@ Implemented behavior:
   detail in a new tab, while dragging it places it on the canvas. Unplaced
   projects with status `completed` or `archived` are hidden from the parking
   lot, but placed projects with those statuses remain visible on the canvas.
-  Weekend portions of each week are shaded slightly darker than weekdays. Dated
-  project spans render as category-colored time bars or start/end markers on
-  snapped visual lanes. Projects in `projectPhase = planning` render lighter
-  than `doing` projects; completed projects render muted with a strike-through
-  label. Clicking a placed timeline opens the initiative detail in a new tab,
-  while the pencil control opens the compact edit modal. Dragging a time bar
-  shifts the project date range; dragging the left or right handle changes the
-  start or end date, and dragging vertically moves the bar between rows unless
-  it is the parent handle of a parent-only group. Parent-only groups move
-  vertically together by dragging the parent timeline; groups with predecessor
-  or successor links move vertically together by dragging the relation line.
+  The visible time range starts at the previous calendar month and spans eleven
+  calendar months total, keeping a short past context while preserving the
+  planning horizon. Weekend portions of each week are shaded slightly darker than
+  weekdays. Dated project spans render as category-colored time bars or start/end
+  markers on snapped visual lanes. Projects in `projectPhase = planning` render
+  lighter than `doing` projects; completed projects render muted with a
+  strike-through label. Clicking a placed timeline opens the initiative detail in
+  a new tab, while the pencil control opens the compact edit modal. Dragging a
+  time bar shifts the project date range; dragging the left or right handle
+  changes the start or end date, and dragging vertically moves the bar between
+  rows unless it is the parent handle of a parent-only group. Parent-only groups
+  move vertically together by dragging the parent timeline; groups with
+  predecessor or successor links move vertically together by dragging the
+  relation line.
   These group moves update only `planning_canvas_nodes.y`, not project dates.
   Hovering a bar reveals edit, predecessor, and successor controls. The canvas
   always renders visible parent-child and predecessor/successor lines between

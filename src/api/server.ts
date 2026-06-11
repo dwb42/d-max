@@ -1004,7 +1004,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "PATCH" && initiativeMatch) {
       const body = updateInitiativeBody.parse(await readJson(req));
       const initiative = initiatives.update({ id: Number(initiativeMatch[1]), ...body });
-      if (initiative.type === "project") {
+      if (initiative.type === "project" && shouldSyncProjectCalendarBinding(body)) {
         await new CalendarService(db).syncLinkedLocalEntity({
           localEntityType: "initiative_project_span",
           localEntityId: initiative.id
@@ -2370,6 +2370,15 @@ function datePart(value: string): string {
 
 function googleMarkerDescription(localEntityType: "calendar_entry" | "initiative_project_span", localEntityId: number): string {
   return `Created by DMAX\nLinked DMAX object: ${localEntityType}:${localEntityId}`;
+}
+
+function shouldSyncProjectCalendarBinding(input: z.infer<typeof updateInitiativeBody>): boolean {
+  return (
+    Object.prototype.hasOwnProperty.call(input, "name") ||
+    Object.prototype.hasOwnProperty.call(input, "startDate") ||
+    Object.prototype.hasOwnProperty.call(input, "endDate") ||
+    Object.prototype.hasOwnProperty.call(input, "isLocked")
+  );
 }
 
 function projectCalendarBindingForApi(initiativeId: number) {

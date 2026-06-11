@@ -278,6 +278,7 @@ const promptTemplateSpecs: Array<{
       "Category: #{{category_id}} {{category_name}} ({{category_color}})",
       "Initiative memory markdown:",
       "{{initiative_markdown}}",
+      "Mindmap summary: {{mindmap_summary}}",
       "Predecessors ({{predecessor_count}}):",
       "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}}",
       "Successors ({{successor_count}}):",
@@ -314,6 +315,7 @@ const promptTemplateSpecs: Array<{
       "Category: #{{category_id}} {{category_name}} ({{category_color}})",
       "Initiative memory markdown:",
       "{{initiative_markdown}}",
+      "Mindmap summary: {{mindmap_summary}}",
       "Predecessors ({{predecessor_count}}):",
       "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}}",
       "Successors ({{successor_count}}):",
@@ -352,6 +354,7 @@ const promptTemplateSpecs: Array<{
       "Category: #{{category_id}} {{category_name}} ({{category_color}})",
       "Initiative memory markdown:",
       "{{initiative_markdown}}",
+      "Mindmap summary: {{mindmap_summary}}",
       "Predecessors ({{predecessor_count}}):",
       "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}}",
       "Successors ({{successor_count}}):",
@@ -1448,6 +1451,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       `Category: ${category ? `#${category.id} ${category.name} (${category.color})` : "unknown"}`,
       categoryBackground ? `Category background:\n${categoryBackground.text}` : "",
       `Initiative memory markdown:\n${initiativeMarkdown.text}`,
+      formatMindmapContextSummary(db, initiative.id),
       `Parent initiative: ${parentInitiative ? formatCompactInitiative(parentInitiative) : "none"}`,
       `Child initiatives (${childInitiatives.length}):`,
       ...childInitiatives.slice(0, detailContextLimits.childInitiatives).map(formatCompactInitiative),
@@ -1479,13 +1483,13 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       description: detailDescriptionForContext(context.type, initiative.type),
       lines,
       payload: {
-        dataSources: ["initiatives", "categories", "initiative_relations", "media_links", "entity_participants", "tasks"],
+        dataSources: ["initiatives", "categories", "initiative_relations", "graph_layout_nodes", "graph_node_annotations", "mindmap_change_drafts", "media_links", "entity_participants", "tasks"],
         current: [`initiative #${initiative.id} ${initiative.name} (${initiative.type})`],
         parents: [
           category ? `category #${category.id} ${category.name}` : "category not found",
           parentInitiative ? `parent initiative #${parentInitiative.id} ${parentInitiative.name}` : "no parent initiative"
         ],
-        children: [`${childInitiatives.length} child initiatives`, `${initiativeTasks.length} tasks`, `${initiativeMedia.length} media attachments`, `${initiativeParticipants.length} participants`],
+        children: [`${childInitiatives.length} child initiatives`, `${initiativeTasks.length} tasks`, `${initiativeMedia.length} media attachments`, `${initiativeParticipants.length} participants`, "mindmap summary counts"],
         siblings: [`${sameCategoryInitiatives.length} other initiatives in the same category`],
         neighbors: [`${predecessors.length} predecessors`, `${successors.length} successors`],
         limits: [
@@ -1686,7 +1690,8 @@ function buildPromptSections(type: ConversationContext["type"], description: str
     "- Changing an existing initiative's type is a lifecycle decision and requires confirmation.",
     "- A repeated request is not explicit confirmation for a lifecycle change.",
     "- A requiresConfirmation tool result means the change was not applied.",
-    "- Initiative freestyle mindmaps are inspectable through getInitiativeMindmap and editable only through freestyle mindmap node tools; do not convert freestyle nodes into tasks/initiatives unless asked.",
+    "- Initiative mindmaps are inspectable through summarizeInitiativeMindmap/getInitiativeMindmap. For complex restructuring, use draftMindmapChanges to show a patch preview and commitMindmapChangeDraft only after explicit confirmation.",
+    "- Mindmap structural edits through the agent are limited to freestyle nodes; derived root, branch, task, and media nodes are read-only context. Do not convert freestyle nodes into tasks/initiatives unless asked.",
     "",
     "Life area/category description guidance:",
     "- Categories are life areas and have a Markdown description field named description.",
@@ -1719,7 +1724,8 @@ function buildPromptSections(type: ConversationContext["type"], description: str
     "- Changing an existing initiative's type is a lifecycle decision and requires confirmation.",
     "- A repeated request is not explicit confirmation for a lifecycle change.",
     "- A requiresConfirmation tool result means the change was not applied.",
-    "- Initiative freestyle mindmaps are inspectable through getInitiativeMindmap and editable only through freestyle mindmap node tools; do not convert freestyle nodes into tasks/initiatives unless asked.",
+    "- Initiative mindmaps are inspectable through summarizeInitiativeMindmap/getInitiativeMindmap. For complex restructuring, use draftMindmapChanges to show a patch preview and commitMindmapChangeDraft only after explicit confirmation.",
+    "- Mindmap structural edits through the agent are limited to freestyle nodes; derived root, branch, task, and media nodes are read-only context. Do not convert freestyle nodes into tasks/initiatives unless asked.",
     "",
     "Life area/category description guidance:",
     "- Categories are life areas and have a Markdown description field named description.",
@@ -2377,6 +2383,36 @@ function formatInitiativeRelation(relation: InitiativeRelationWithInitiatives): 
 function formatInitiativeRelationEndpoint(relation: InitiativeRelationWithInitiatives, endpoint: "predecessor" | "successor"): string {
   const initiative = endpoint === "predecessor" ? relation.predecessor : relation.successor;
   return `- #${initiative.id} [${formatInitiativeType(initiative.type)}] ${initiative.name}; status: ${initiative.status}${formatInitiativeProjectPhase(initiative)}${formatInitiativeDateRange(initiative)}`;
+}
+
+function formatMindmapContextSummary(db: Database.Database, initiativeId: number): string {
+  const scopeKey = `initiative:${initiativeId}`;
+  const counts = db
+    .prepare(
+      `select
+        count(*) as node_count,
+        sum(case when node_kind = 'freestyle' then 1 else 0 end) as freestyle_count,
+        sum(case when collapsed = 1 then 1 else 0 end) as collapsed_count
+       from graph_layout_nodes
+       where scope_key = ?`
+    )
+    .get(scopeKey) as { node_count: number; freestyle_count: number | null; collapsed_count: number | null } | undefined;
+  const annotationCounts = db
+    .prepare(
+      `select annotation_type as annotationType, count(*) as count
+       from graph_node_annotations
+       where scope_key = ?
+       group by annotation_type
+       order by annotation_type asc`
+    )
+    .all(scopeKey) as Array<{ annotationType: string; count: number }>;
+  const pendingDrafts = db
+    .prepare("select count(*) as count from mindmap_change_drafts where initiative_id = ? and status = 'draft'")
+    .get(initiativeId) as { count: number } | undefined;
+  const annotationSummary = annotationCounts.length > 0
+    ? annotationCounts.map((entry) => `${entry.annotationType}: ${entry.count}`).join(", ")
+    : "none";
+  return `Mindmap summary: ${counts?.node_count ?? 0} nodes, ${counts?.freestyle_count ?? 0} freestyle, ${counts?.collapsed_count ?? 0} collapsed; annotations: ${annotationSummary}; pending drafts: ${pendingDrafts?.count ?? 0}. Use summarizeInitiativeMindmap/getInitiativeMindmap for detailed mindmap questions.`;
 }
 
 function formatPlanningCanvasSummary(db: Database.Database): string {

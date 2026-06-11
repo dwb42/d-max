@@ -7,6 +7,9 @@ const CONTEXT_RELEVANT_TABLES = [
   "categories",
   "initiatives",
   "initiative_relations",
+  "graph_layout_nodes",
+  "graph_node_annotations",
+  "mindmap_change_drafts",
   "planning_canvases",
   "planning_canvas_nodes",
   "tasks",
@@ -28,7 +31,7 @@ const CONTEXT_RELEVANT_TABLES = [
   "calendar_event_visibility"
 ];
 
-const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "6d325fe76980541020b2091fb63cb7d86748dc946d4c78ce033ba90ab001afd2";
+const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "3695244b5dd1808589ab3164f3160b32e7818493354087ee8200a896002dc02d";
 
 describe("context resolver schema synchronization", () => {
   let db: Database.Database;

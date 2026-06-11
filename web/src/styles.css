@@ -7635,14 +7635,23 @@ button.task-notes-panel:hover {
   touch-action: none;
 }
 
-.planning-canvas-google-row-icon {
+.planning-canvas-google-row-icon-row {
   position: absolute;
-  left: 8px;
+  left: 0;
+  right: 0;
   z-index: 6;
+  height: var(--planning-canvas-time-lane-height);
+  pointer-events: none;
+}
+
+.planning-canvas-google-row-icon {
+  position: sticky;
+  left: 8px;
   display: inline-grid;
   place-items: center;
   width: 18px;
   height: 18px;
+  margin-top: calc((var(--planning-canvas-time-lane-height) - 18px) / 2);
   border: 1px solid rgba(16, 23, 20, 0.12);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.9);

@@ -13,6 +13,8 @@ const STATE_MUTATING_TOOLS = new Set<ToolName>([
   "createMindmapFreestyleNode",
   "updateMindmapFreestyleNode",
   "deleteMindmapFreestyleNode",
+  "draftMindmapChanges",
+  "commitMindmapChangeDraft",
   "createTask",
   "updateTask",
   "completeTask",
@@ -85,6 +87,15 @@ export function stateEventFromToolResult(name: ToolName, input: unknown, result:
       entityType: "planning_canvas_node",
       entityId: numberValue(dataRecord?.id),
       initiativeId: numberValue(dataRecord?.initiativeId) ?? numberValue(inputRecord?.initiativeId)
+    };
+  }
+
+  if (name === "draftMindmapChanges" || name === "commitMindmapChangeDraft") {
+    return {
+      ...base,
+      entityType: "initiative",
+      entityId: numberValue(inputRecord?.initiativeId),
+      initiativeId: numberValue(inputRecord?.initiativeId)
     };
   }
 

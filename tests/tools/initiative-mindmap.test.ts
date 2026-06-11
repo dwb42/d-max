@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
 import { createToolRunner } from "../../src/mcp/tool-registry.js";
 import { CategoryRepository } from "../../src/repositories/categories.js";
+import { InitiativeMindmapRepository } from "../../src/repositories/initiative-mindmap.js";
 import { InitiativeRepository } from "../../src/repositories/initiatives.js";
 import { MediaAssetRepository } from "../../src/repositories/media-assets.js";
 import { MediaLinkRepository } from "../../src/repositories/media-links.js";
@@ -196,5 +197,97 @@ describe("initiative mindmap tools", () => {
       expect(update, nodeKey).toMatchObject({ ok: false, error: expect.stringContaining("Only freestyle") });
       expect(deleteResult, nodeKey).toMatchObject({ ok: false, error: expect.stringContaining("Only freestyle") });
     }
+  });
+
+  it("drafts mindmap patches and commits them only after confirmation", async () => {
+    const runner = createToolRunner();
+
+    const draft = await runner.run(
+      "draftMindmapChanges",
+      {
+        initiativeId,
+        sourceKind: "mindmap_review",
+        summary: "Strukturiert Strategie und Risiko als Vorschau.",
+        rationale: "Der Nutzer will die Mindmap anders sortieren.",
+        patches: [
+          {
+            type: "create_node",
+            tempNodeKey: "draft:strategy",
+            parentNodeKey: "branch:freestyle",
+            label: "Strategische Richtung",
+            annotations: [{ annotationType: "priority", value: "high" }]
+          },
+          {
+            type: "create_node",
+            tempNodeKey: "draft:risk",
+            parentNodeKey: "draft:strategy",
+            label: "Risiko: Fokus zerfasert",
+            annotations: [{ annotationType: "warning", value: "Fokus pruefen" }]
+          }
+        ],
+        warnings: ["Nur Freestyle-Knoten werden erzeugt."]
+      },
+      { db }
+    );
+
+    expect(draft).toMatchObject({
+      ok: true,
+      data: {
+        status: "draft",
+        initiativeId,
+        patches: expect.arrayContaining([
+          expect.objectContaining({ type: "create_node", tempNodeKey: "draft:strategy" })
+        ])
+      }
+    });
+    expect(new InitiativeMindmapRepository(db).getView({ type: "initiative", initiativeId }).nodes.map((node) => node.label)).not.toContain("Strategische Richtung");
+
+    const draftId = (draft as { ok: true; data: { id: number } }).data.id;
+    const rejected = await runner.run("commitMindmapChangeDraft", { initiativeId, draftId }, { db });
+    expect(rejected).toMatchObject({ ok: false, error: expect.stringContaining("confirmed=true") });
+
+    const committed = await runner.run("commitMindmapChangeDraft", { initiativeId, draftId, confirmed: true }, { db });
+
+    expect(committed).toMatchObject({
+      ok: true,
+      data: {
+        draft: { status: "committed" },
+        createdNodeKeys: [expect.stringMatching(/^freestyle:/), expect.stringMatching(/^freestyle:/)],
+        createdAnnotationIds: [expect.any(Number), expect.any(Number)]
+      }
+    });
+    const view = new InitiativeMindmapRepository(db).getView({ type: "initiative", initiativeId });
+    expect(view.nodes.map((node) => node.label)).toEqual(expect.arrayContaining(["Strategische Richtung", "Risiko: Fokus zerfasert"]));
+  });
+
+  it("summarizes mindmaps with annotation and draft counts", async () => {
+    const runner = createToolRunner();
+    const freestyle = await runner.run("createMindmapFreestyleNode", { initiativeId, label: "Wichtiger Gedanke" }, { db });
+    const nodeKey = (freestyle as { ok: true; data: { nodeKey: string } }).data.nodeKey;
+    const draft = await runner.run(
+      "draftMindmapChanges",
+      {
+        initiativeId,
+        sourceKind: "dialog",
+        summary: "Warnung markieren.",
+        patches: [{ type: "add_annotation", nodeKey, annotationType: "warning", value: "Noch unklar" }]
+      },
+      { db }
+    );
+    await runner.run("commitMindmapChangeDraft", { initiativeId, draftId: (draft as { ok: true; data: { id: number } }).data.id, confirmed: true }, { db });
+
+    const summary = await runner.run("summarizeInitiativeMindmap", { initiativeId }, { db });
+
+    expect(summary).toMatchObject({
+      ok: true,
+      data: {
+        initiativeId,
+        freestyleNodeCount: expect.any(Number),
+        annotationsByType: {
+          warning: [expect.objectContaining({ nodeKey, value: "Noch unklar" })]
+        },
+        outline: expect.arrayContaining([expect.stringContaining("Wichtiger Gedanke")])
+      }
+    });
   });
 });

@@ -31,6 +31,7 @@ export function migrate(databasePath?: string): void {
     migrateMediaDomain(db);
     migrateWhoDomain(db);
     migrateAppChatResearchSummary(db);
+    migrateMindmapReviewDomain(db);
     db.exec(schema);
     ensureInboxCategory(db);
     migratePromptLogs(db);
@@ -732,6 +733,41 @@ function migrateWhoDomain(db: ReturnType<typeof openDatabase>): void {
 
   ensureColumn(db, "organizations", "markdown", "text not null default ''");
   ensureWhoSystemTypes(db);
+}
+
+function migrateMindmapReviewDomain(db: ReturnType<typeof openDatabase>): void {
+  db.exec(`
+    create table if not exists graph_node_annotations (
+      id integer primary key,
+      scope_key text not null,
+      node_key text not null,
+      annotation_type text not null check (annotation_type in ('priority', 'warning', 'timestamp', 'note', 'source_ref')),
+      value text not null,
+      payload_json text,
+      created_at text not null,
+      updated_at text not null,
+      foreign key (scope_key, node_key) references graph_layout_nodes(scope_key, node_key) on delete cascade
+    );
+
+    create table if not exists mindmap_change_drafts (
+      id integer primary key,
+      initiative_id integer not null references initiatives(id) on delete cascade,
+      status text not null default 'draft' check (status in ('draft', 'committed', 'discarded')),
+      source_kind text not null check (source_kind in ('dialog', 'long_content', 'mindmap_review', 'manual')),
+      source_ref_json text,
+      summary text not null,
+      rationale text,
+      patches_json text not null,
+      warnings_json text not null default '[]',
+      committed_at text,
+      created_at text not null,
+      updated_at text not null
+    );
+
+    create index if not exists idx_graph_node_annotations_node on graph_node_annotations(scope_key, node_key, annotation_type);
+    create index if not exists idx_graph_node_annotations_type on graph_node_annotations(annotation_type, scope_key);
+    create index if not exists idx_mindmap_change_drafts_initiative on mindmap_change_drafts(initiative_id, status, id);
+  `);
 }
 
 function ensureWhoSystemTypes(db: ReturnType<typeof openDatabase>): void {

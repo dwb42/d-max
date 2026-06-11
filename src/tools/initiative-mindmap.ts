@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { defineTool } from "../core/tool-definitions.js";
 import type { ConfirmationRequest, ToolDefinition } from "../core/tool-definitions.js";
+import { MindmapReviewService } from "../mindmap/mindmap-review-service.js";
 import { InitiativeMindmapRepository, type GraphLayoutNode, type InitiativeMindmapView } from "../repositories/initiative-mindmap.js";
 
 const mindmapCoordinate = z.number().finite().min(-100000).max(100000);
@@ -35,6 +36,71 @@ const deleteMindmapFreestyleNodeInput = z.object({
   confirmed: z.boolean().optional()
 });
 
+const graphNodeAnnotationTypeSchema = z.enum(["priority", "warning", "timestamp", "note", "source_ref"]);
+
+const graphNodeAnnotationInput = z.object({
+  annotationType: graphNodeAnnotationTypeSchema,
+  value: z.string().trim().min(1),
+  payload: z.unknown().nullable().optional()
+});
+
+const mindmapPatchSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("create_node"),
+    tempNodeKey: z.string().trim().min(1),
+    parentNodeKey: z.string().trim().min(1).nullable().optional(),
+    label: z.string().trim().min(1),
+    annotations: z.array(graphNodeAnnotationInput).max(10).optional()
+  }),
+  z.object({
+    type: z.literal("rename_node"),
+    nodeKey: z.string().trim().min(1),
+    label: z.string().trim().min(1)
+  }),
+  z.object({
+    type: z.literal("reparent_node"),
+    nodeKey: z.string().trim().min(1),
+    parentNodeKey: z.string().trim().min(1).nullable()
+  }),
+  z.object({
+    type: z.literal("delete_node"),
+    nodeKey: z.string().trim().min(1)
+  }),
+  z.object({
+    type: z.literal("add_annotation"),
+    nodeKey: z.string().trim().min(1),
+    annotationType: graphNodeAnnotationTypeSchema,
+    value: z.string().trim().min(1),
+    payload: z.unknown().nullable().optional()
+  }),
+  z.object({
+    type: z.literal("remove_annotation"),
+    nodeKey: z.string().trim().min(1),
+    annotationType: graphNodeAnnotationTypeSchema.optional(),
+    value: z.string().trim().min(1).optional()
+  })
+]);
+
+const summarizeInitiativeMindmapInput = z.object({
+  initiativeId: z.number().int().positive()
+});
+
+const draftMindmapChangesInput = z.object({
+  initiativeId: z.number().int().positive(),
+  sourceKind: z.enum(["dialog", "long_content", "mindmap_review", "manual"]).default("dialog"),
+  sourceRef: z.unknown().nullable().optional(),
+  summary: z.string().trim().min(1).describe("Short human-readable summary of what this draft changes."),
+  rationale: z.string().trim().min(1).nullable().optional(),
+  patches: z.array(mindmapPatchSchema).min(1).max(80),
+  warnings: z.array(z.string().trim().min(1)).max(20).optional()
+});
+
+const commitMindmapChangeDraftInput = z.object({
+  initiativeId: z.number().int().positive(),
+  draftId: z.number().int().positive(),
+  confirmed: z.boolean().optional()
+});
+
 export const initiativeMindmapTools: ToolDefinition<any>[] = [
   defineTool({
     name: "getInitiativeMindmap",
@@ -53,6 +119,66 @@ export const initiativeMindmapTools: ToolDefinition<any>[] = [
         };
       } catch (error) {
         return { ok: false, error: error instanceof Error ? error.message : "Failed to load initiative mindmap" };
+      }
+    }
+  }),
+  defineTool({
+    name: "summarizeInitiativeMindmap",
+    description:
+      "Summarize an initiative mindmap for dialog. Returns compact structure, depth, top-level clusters, outline, and node annotations such as priority, warning, timestamp, note, or source_ref.",
+    inputSchema: summarizeInitiativeMindmapInput,
+    run: (input, context) => {
+      if (!context.db) {
+        return { ok: false, error: "Database context is required" };
+      }
+
+      try {
+        return {
+          ok: true,
+          data: new MindmapReviewService(context.db).summarizeInitiativeMindmap(input.initiativeId)
+        };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "Failed to summarize initiative mindmap" };
+      }
+    }
+  }),
+  defineTool({
+    name: "draftMindmapChanges",
+    description:
+      "Persist a proposed initiative mindmap patch preview. Use this before changing complex mindmaps. The patches are not applied until commitMindmapChangeDraft is called after explicit user confirmation.",
+    inputSchema: draftMindmapChangesInput,
+    run: (input, context) => {
+      if (!context.db) {
+        return { ok: false, error: "Database context is required" };
+      }
+
+      try {
+        return {
+          ok: true,
+          data: new MindmapReviewService(context.db).draftMindmapChanges({ ...input, sourceKind: input.sourceKind ?? "dialog" })
+        };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "Failed to draft mindmap changes" };
+      }
+    }
+  }),
+  defineTool({
+    name: "commitMindmapChangeDraft",
+    description:
+      "Apply a previously drafted initiative mindmap patch after explicit user confirmation. Requires confirmed=true. Applies only validated freestyle-node changes and annotations.",
+    inputSchema: commitMindmapChangeDraftInput,
+    run: (input, context) => {
+      if (!context.db) {
+        return { ok: false, error: "Database context is required" };
+      }
+
+      try {
+        return {
+          ok: true,
+          data: new MindmapReviewService(context.db).commitMindmapChangeDraft(input)
+        };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "Failed to commit mindmap change draft" };
       }
     }
   }),

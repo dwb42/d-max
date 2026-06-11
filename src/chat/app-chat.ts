@@ -441,7 +441,7 @@ const OPENCLAW_TOOL_CONTEXT = [
   "Known d-max tool surface:",
   "- Categories: listCategories, createCategory, updateCategory",
   "- Initiatives: listInitiatives, getInitiative, createInitiative, updateInitiative, archiveInitiative, updateInitiativeMarkdown",
-  "- Initiative freestyle mindmaps: getInitiativeMindmap, createMindmapFreestyleNode, updateMindmapFreestyleNode, deleteMindmapFreestyleNode. Use node keys from getInitiativeMindmap; do not convert freestyle nodes into tasks/initiatives unless asked.",
+  "- Initiative mindmaps: summarizeInitiativeMindmap, getInitiativeMindmap, draftMindmapChanges, commitMindmapChangeDraft, createMindmapFreestyleNode, updateMindmapFreestyleNode, deleteMindmapFreestyleNode. Use draftMindmapChanges for complex restructuring and commit only after explicit confirmation; do not convert freestyle nodes into tasks/initiatives unless asked.",
   "- Tasks: listTasks, createTask, updateTask, completeTask, deleteTask. Task status is only open or done.",
   "- Task checklists: listTaskChecklistItems, createTaskChecklistItem, updateTaskChecklistItem, deleteTaskChecklistItem, reorderTaskChecklistItems",
   "- Media: listMediaAttachments, attachMediaToEntity, updateMediaAttachment, deleteMediaAttachment, reorderMediaAttachments"

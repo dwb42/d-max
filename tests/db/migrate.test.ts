@@ -72,6 +72,8 @@ describe("migrate", () => {
       const categoryColumns = db.prepare("pragma table_info(categories)").all() as Array<{ name: string }>;
       const mediaAssetColumns = db.prepare("pragma table_info(media_assets)").all() as Array<{ name: string }>;
       const mediaLinkColumns = db.prepare("pragma table_info(media_links)").all() as Array<{ name: string }>;
+      const graphAnnotationColumns = db.prepare("pragma table_info(graph_node_annotations)").all() as Array<{ name: string }>;
+      const mindmapDraftColumns = db.prepare("pragma table_info(mindmap_change_drafts)").all() as Array<{ name: string }>;
       const appChatMessageColumns = db.prepare("pragma table_info(app_chat_messages)").all() as Array<{ name: string }>;
       const partyColumns = db.prepare("pragma table_info(parties)").all() as Array<{ name: string }>;
       const peopleColumns = db.prepare("pragma table_info(people)").all() as Array<{ name: string }>;
@@ -101,6 +103,8 @@ describe("migrate", () => {
       expect(mediaAssetColumns.some((column) => column.name === "sha256")).toBe(true);
       expect(mediaLinkColumns.some((column) => column.name === "entity_type")).toBe(true);
       expect(mediaLinkColumns.some((column) => column.name === "caption")).toBe(true);
+      expect(graphAnnotationColumns.some((column) => column.name === "annotation_type")).toBe(true);
+      expect(mindmapDraftColumns.some((column) => column.name === "patches_json")).toBe(true);
       expect(appChatMessageColumns.some((column) => column.name === "audio_generation_status")).toBe(true);
       expect(appChatMessageColumns.some((column) => column.name === "audio_generated_from_message_id")).toBe(true);
       expect(partyColumns.some((column) => column.name === "display_name")).toBe(true);
