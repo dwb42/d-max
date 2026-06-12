@@ -8460,19 +8460,29 @@ button.task-notes-panel:hover {
   inset: 0;
   z-index: 90;
   display: grid;
-  padding: 18px;
-  background: rgba(16, 23, 20, 0.34);
+  padding: 0;
+  background: #f7f9f6;
 }
 
 .mindmap-modal {
   display: grid;
   grid-template-rows: 1fr;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
   min-width: 0;
   min-height: 0;
-  border: 1px solid #dfe4dc;
-  border-radius: 8px;
+  border: 0;
+  border-radius: 0;
   background: #ffffff;
-  box-shadow: 0 24px 64px rgba(16, 23, 20, 0.2);
+  box-shadow: none;
+}
+
+.mindmap-modal .mindmap-canvas-wrap {
+  height: 100vh;
+  height: 100dvh;
+  border: 0;
+  border-radius: 0;
 }
 
 .mindmap-node {
@@ -8506,6 +8516,76 @@ button.task-notes-panel:hover {
   box-shadow: 0 14px 30px rgba(16, 23, 20, 0.16);
   cursor: grabbing;
   transform: scale(1.015);
+}
+
+.mindmap-node.drag-root {
+  opacity: 0.94;
+  box-shadow: 0 16px 32px rgba(16, 23, 20, 0.18);
+}
+
+.mindmap-node.drag-ghost {
+  border-style: dashed;
+  opacity: 0.38;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.mindmap-node.drag-ghost .mindmap-node-collapse,
+.mindmap-node.drag-ghost .mindmap-node-delete,
+.mindmap-node.drag-ghost .mindmap-node-add {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mindmap-node.drop-into {
+  border-color: #145847;
+  background: #edf8f3;
+  box-shadow: inset 0 0 0 2px rgba(39, 128, 111, 0.36), 0 0 0 6px rgba(39, 128, 111, 0.13), 0 14px 30px rgba(16, 23, 20, 0.16);
+}
+
+.mindmap-node.drop-into::after {
+  position: absolute;
+  top: 50%;
+  z-index: 8;
+  width: 34px;
+  height: 3px;
+  border-radius: 999px;
+  background: #27806f;
+  box-shadow: 0 0 0 3px rgba(39, 128, 111, 0.14);
+  pointer-events: none;
+  content: "";
+  transform: translateY(-50%);
+}
+
+.mindmap-node.drop-into.side-left::after {
+  left: -42px;
+}
+
+.mindmap-node.drop-into.side-right::after,
+.mindmap-node.drop-into:not(.side-left)::after {
+  right: -42px;
+}
+
+.mindmap-node.drop-before::after,
+.mindmap-node.drop-after::after {
+  position: absolute;
+  right: -18px;
+  left: -18px;
+  z-index: 7;
+  height: 3px;
+  border-radius: 999px;
+  background: #27806f;
+  box-shadow: 0 0 0 3px rgba(39, 128, 111, 0.14);
+  pointer-events: none;
+  content: "";
+}
+
+.mindmap-node.drop-before::after {
+  top: -10px;
+}
+
+.mindmap-node.drop-after::after {
+  bottom: -10px;
 }
 
 .mindmap-node::before {
@@ -8572,23 +8652,23 @@ button.task-notes-panel:hover {
 }
 
 .mindmap-node.topic-sub {
-  min-height: 44px;
+  min-height: 30px;
   border-color: #d7ddd5;
-  border-radius: 7px;
-  padding: 7px 11px 7px 10px;
+  border-radius: 5px;
+  padding: 4px 7px;
   background: #ffffff;
-  box-shadow: 0 4px 12px rgba(16, 23, 20, 0.045);
+  box-shadow: 0 3px 8px rgba(16, 23, 20, 0.035);
 }
 
 .mindmap-node.topic-sub::before {
-  width: 3px;
-  background: #b7c3bd;
+  display: none;
 }
 
 .mindmap-node.topic-sub .mindmap-node-label,
 .mindmap-node.topic-sub .mindmap-node-input {
-  font-size: 13px;
-  font-weight: 760;
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.2;
 }
 
 .mindmap-node.kind-initiative_root {
@@ -8714,12 +8794,22 @@ button.task-notes-panel:hover {
   resize: none;
   overflow: hidden;
   background: transparent;
+  caret-color: #0f6f5b;
   color: inherit;
   field-sizing: content;
   font-size: 14px;
   font-weight: 800;
   line-height: 1.25;
   text-align: left;
+}
+
+.mindmap-node-input:focus {
+  outline: 0;
+  box-shadow: inset 0 -2px 0 rgba(15, 111, 91, 0.72);
+}
+
+.mindmap-node-input::selection {
+  background: rgba(39, 128, 111, 0.22);
 }
 
 .mindmap-node-add {

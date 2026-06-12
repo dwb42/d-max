@@ -69,10 +69,31 @@ describe("mindmap radial layout", () => {
     const first = layout.nodesByKey.get("freestyle:a")!;
     const second = layout.nodesByKey.get("freestyle:b")!;
 
-    expect(second.y - (first.y + first.height)).toBe(6);
+    expect(second.y - (first.y + first.height)).toBe(3);
   });
 
-  it("adds more vertical separation between different parent clusters", () => {
+  it("does not reserve wrapped height for medium labels that fit on one line", () => {
+    const mindmap = mindmapWith([
+      node("initiative:1", "initiative_root", "Central", null),
+      node("freestyle:parent", "freestyle", "Gemeinschaft & Menschen", "initiative:1", { x: 10000 }),
+      node("freestyle:singles", "freestyle", "Singles, Paare, Familien, Ältere", "freestyle:parent", { y: 0 }),
+      node("freestyle:kultur", "freestyle", "Kultur: aktiv, verbindlich, großzügig", "freestyle:parent", { y: 100 }),
+      node("freestyle:besucher", "freestyle", "Besucher / temporäre Mitwirkende", "freestyle:parent", { y: 200 })
+    ]);
+
+    const layout = computeRadialMindmapLayout(mindmap, "freestyle");
+    const singles = layout.nodesByKey.get("freestyle:singles")!;
+    const kultur = layout.nodesByKey.get("freestyle:kultur")!;
+    const besucher = layout.nodesByKey.get("freestyle:besucher")!;
+
+    expect(singles.height).toBe(30);
+    expect(kultur.height).toBe(30);
+    expect(besucher.height).toBe(30);
+    expect(kultur.y - (singles.y + singles.height)).toBe(3);
+    expect(besucher.y - (kultur.y + kultur.height)).toBe(3);
+  });
+
+  it("keeps adjacent one-child clusters compact when they do not collide", () => {
     const mindmap = mindmapWith([
       node("initiative:1", "initiative_root", "Central", null),
       node("freestyle:section", "freestyle", "Section", "initiative:1", { x: 10000 }),
@@ -88,8 +109,9 @@ describe("mindmap radial layout", () => {
     const plains = layout.nodesByKey.get("freestyle:plains")!;
     const chill = layout.nodesByKey.get("freestyle:chill")!;
 
-    expect(plains.y - (ian.y + ian.height)).toBe(6);
-    expect(chill.y - (plains.y + plains.height)).toBeGreaterThanOrEqual(42);
+    expect(plains.y - (ian.y + ian.height)).toBe(3);
+    expect(chill.y - (plains.y + plains.height)).toBeLessThanOrEqual(4);
+    expect(overlaps(plains, chill)).toBe(false);
   });
 
   it("spaces sibling cluster parents uniformly", () => {
@@ -98,10 +120,13 @@ describe("mindmap radial layout", () => {
       node("freestyle:section", "freestyle", "Section", "initiative:1", { x: -10000 }),
       node("freestyle:first", "freestyle", "First cluster", "freestyle:section", { y: 0 }),
       node("freestyle:first-child", "freestyle", "First child", "freestyle:first", { y: 0 }),
+      node("freestyle:first-child-2", "freestyle", "Second first child", "freestyle:first", { y: 100 }),
       node("freestyle:second", "freestyle", "Second cluster", "freestyle:section", { y: 100 }),
       node("freestyle:second-child", "freestyle", "Second child", "freestyle:second", { y: 0 }),
+      node("freestyle:second-child-2", "freestyle", "Second second child", "freestyle:second", { y: 100 }),
       node("freestyle:third", "freestyle", "Third cluster", "freestyle:section", { y: 200 }),
-      node("freestyle:third-child", "freestyle", "Third child", "freestyle:third", { y: 0 })
+      node("freestyle:third-child", "freestyle", "Third child", "freestyle:third", { y: 0 }),
+      node("freestyle:third-child-2", "freestyle", "Second third child", "freestyle:third", { y: 100 })
     ]);
 
     const layout = computeRadialMindmapLayout(mindmap, "freestyle");
@@ -109,8 +134,8 @@ describe("mindmap radial layout", () => {
     const second = layout.nodesByKey.get("freestyle:second")!;
     const third = layout.nodesByKey.get("freestyle:third")!;
 
-    expect(second.y - (first.y + first.height)).toBe(76);
-    expect(third.y - (second.y + second.height)).toBe(76);
+    expect(second.y - (first.y + first.height)).toBe(36);
+    expect(third.y - (second.y + second.height)).toBe(36);
   });
 
   it("keeps visible siblings compact when one sibling has its own child", () => {
@@ -128,8 +153,8 @@ describe("mindmap radial layout", () => {
     const middle = layout.nodesByKey.get("freestyle:middle")!;
     const last = layout.nodesByKey.get("freestyle:last")!;
 
-    expect(middle.y - (first.y + first.height)).toBe(6);
-    expect(last.y - (middle.y + middle.height)).toBe(6);
+    expect(middle.y - (first.y + first.height)).toBe(3);
+    expect(last.y - (middle.y + middle.height)).toBe(3);
   });
 
   it("uses long labels when laying out siblings so visible nodes do not overlap", () => {
@@ -177,8 +202,8 @@ describe("mindmap radial layout", () => {
 
     const intent = computeMindmapDropIntent(layout, {
       draggedNodeKey: "freestyle:a",
-      x: target.x,
-      y: target.y
+      x: target.x + target.width / 2 - layout.nodesByKey.get("freestyle:a")!.width / 2,
+      y: target.y + target.height / 2 - layout.nodesByKey.get("freestyle:a")!.height / 2
     });
     const snapshot = intent ? applyMindmapDropIntent(mindmap, intent) : null;
 
@@ -186,12 +211,41 @@ describe("mindmap radial layout", () => {
     expect(snapshot?.find((candidate) => candidate.nodeKey === "freestyle:a")).toMatchObject({ parentNodeKey: "freestyle:b" });
   });
 
+  it("appends a reparented node as the target parent's last child", () => {
+    const mindmap = mindmapWith([
+      node("initiative:1", "initiative_root", "Central", null),
+      node("freestyle:dragged", "freestyle", "Dragged", "initiative:1", { x: 10000, y: 0 }),
+      node("freestyle:target", "freestyle", "Target", "initiative:1", { x: 10000, y: 100, collapsed: true }),
+      node("freestyle:first-child", "freestyle", "First child", "freestyle:target", { y: 0 }),
+      node("freestyle:second-child", "freestyle", "Second child", "freestyle:target", { y: 100 })
+    ]);
+    const layout = computeRadialMindmapLayout(mindmap, "freestyle");
+    const target = layout.nodesByKey.get("freestyle:target")!;
+    const dragged = layout.nodesByKey.get("freestyle:dragged")!;
+
+    const intent = computeMindmapDropIntent(layout, {
+      draggedNodeKey: "freestyle:dragged",
+      x: target.x + target.width / 2 - dragged.width / 2,
+      y: target.y + target.height / 2 - dragged.height / 2
+    });
+    const snapshot = intent ? applyMindmapDropIntent(mindmap, intent) : null;
+    const orderedChildren = snapshot
+      ?.filter((candidate) => candidate.parentNodeKey === "freestyle:target")
+      .sort((a, b) => a.y - b.y)
+      .map((candidate) => candidate.nodeKey);
+    const targetSnapshot = snapshot?.find((candidate) => candidate.nodeKey === "freestyle:target");
+
+    expect(intent).toMatchObject({ type: "reparent", targetNodeKey: "freestyle:target", placement: "into" });
+    expect(targetSnapshot?.collapsed).toBe(false);
+    expect(orderedChildren).toEqual(["freestyle:first-child", "freestyle:second-child", "freestyle:dragged"]);
+  });
+
   it("computes a sibling reorder when dragging between siblings", () => {
     const mindmap = mindmapWith([
       node("initiative:1", "initiative_root", "Central", null),
-      node("freestyle:a", "freestyle", "A", "initiative:1", { y: 0 }),
-      node("freestyle:b", "freestyle", "B", "initiative:1", { y: 100 }),
-      node("freestyle:c", "freestyle", "C", "initiative:1", { y: 200 })
+      node("freestyle:a", "freestyle", "A", "initiative:1", { x: 10000, y: 0 }),
+      node("freestyle:b", "freestyle", "B", "initiative:1", { x: 10000, y: 100 }),
+      node("freestyle:c", "freestyle", "C", "initiative:1", { x: 10000, y: 200 })
     ]);
     const layout = computeRadialMindmapLayout(mindmap, "freestyle");
     const first = layout.nodesByKey.get("freestyle:a")!;
@@ -210,6 +264,91 @@ describe("mindmap radial layout", () => {
 
     expect(intent).toMatchObject({ type: "reorder", insertionIndex: 1 });
     expect(ordered).toEqual(["freestyle:a", "freestyle:c", "freestyle:b"]);
+  });
+
+  it("reorders only the target visual side for top-level topics", () => {
+    const mindmap = mindmapWith([
+      node("initiative:1", "initiative_root", "Central", null),
+      node("freestyle:left-a", "freestyle", "Left A", "initiative:1", { x: -10000, y: 0 }),
+      node("freestyle:left-b", "freestyle", "Left B", "initiative:1", { x: -10000, y: 100 }),
+      node("freestyle:right-a", "freestyle", "Right A", "initiative:1", { x: 10000, y: 0 }),
+      node("freestyle:right-b", "freestyle", "Right B", "initiative:1", { x: 10000, y: 100 })
+    ]);
+    const layout = computeRadialMindmapLayout(mindmap, "freestyle");
+    const target = layout.nodesByKey.get("freestyle:right-a")!;
+    const dragged = layout.nodesByKey.get("freestyle:right-b")!;
+
+    const intent = computeMindmapDropIntent(layout, {
+      draggedNodeKey: "freestyle:right-b",
+      x: target.x + target.width / 2 - dragged.width / 2,
+      y: target.y + 1 - dragged.height / 2
+    });
+    const snapshot = intent ? applyMindmapDropIntent(mindmap, intent) : null;
+    const rightOrder = snapshot
+      ?.filter((candidate) => candidate.parentNodeKey === "initiative:1" && candidate.x > 0)
+      .sort((a, b) => a.y - b.y)
+      .map((candidate) => candidate.nodeKey);
+    const leftY = new Map(snapshot
+      ?.filter((candidate) => candidate.parentNodeKey === "initiative:1" && candidate.x < 0)
+      .map((candidate) => [candidate.nodeKey, candidate.y]));
+
+    expect(intent).toMatchObject({ type: "reorder", targetNodeKey: "freestyle:right-a", placement: "before" });
+    expect(rightOrder).toEqual(["freestyle:right-b", "freestyle:right-a"]);
+    expect(leftY.get("freestyle:left-a")).toBe(0);
+    expect(leftY.get("freestyle:left-b")).toBe(100);
+  });
+
+  it("reorders top-level freestyle branch nodes before a same-side sibling", () => {
+    const mindmap = mindmapWith([
+      node("initiative:1", "initiative_root", "Central", null),
+      node("branch:freestyle", "branch", "Freestyle", "initiative:1"),
+      node("freestyle:a", "freestyle", "A", "branch:freestyle", { x: -10000, y: 0 }),
+      node("freestyle:b", "freestyle", "B", "branch:freestyle", { x: -10000, y: 100 }),
+      node("freestyle:c", "freestyle", "C", "branch:freestyle", { x: -10000, y: 200 })
+    ]);
+    const layout = computeRadialMindmapLayout(mindmap, "freestyle");
+    const target = layout.nodesByKey.get("freestyle:a")!;
+    const dragged = layout.nodesByKey.get("freestyle:c")!;
+
+    const intent = computeMindmapDropIntent(layout, {
+      draggedNodeKey: "freestyle:c",
+      x: target.x + target.width / 2 - dragged.width / 2,
+      y: target.y + 1 - dragged.height / 2
+    });
+    const snapshot = intent ? applyMindmapDropIntent(mindmap, intent) : null;
+    const ordered = snapshot
+      ?.filter((candidate) => candidate.parentNodeKey === "branch:freestyle")
+      .sort((a, b) => a.y - b.y)
+      .map((candidate) => candidate.nodeKey);
+
+    expect(intent).toMatchObject({ type: "reorder", targetNodeKey: "freestyle:a", placement: "before" });
+    expect(ordered).toEqual(["freestyle:c", "freestyle:a", "freestyle:b"]);
+  });
+
+  it("applies reorder placement by target key when visual siblings and snapshot siblings differ", () => {
+    const mindmap = mindmapWith([
+      node("initiative:1", "initiative_root", "Central", null),
+      node("freestyle:outside", "freestyle", "Outside", "freestyle:other", { y: 0 }),
+      node("freestyle:a", "freestyle", "A", "branch:freestyle", { y: 100 }),
+      node("freestyle:b", "freestyle", "B", "branch:freestyle", { y: 200 }),
+      node("freestyle:c", "freestyle", "C", "branch:freestyle", { y: 300 })
+    ]);
+
+    const snapshot = applyMindmapDropIntent(mindmap, {
+      type: "reorder",
+      nodeKey: "freestyle:c",
+      parentNodeKey: "branch:freestyle",
+      insertionIndex: 2,
+      targetNodeKey: "freestyle:a",
+      placement: "before",
+      siblingNodeKeys: ["freestyle:outside", "freestyle:a", "freestyle:b"]
+    });
+    const ordered = snapshot
+      ?.filter((candidate) => candidate.parentNodeKey === "branch:freestyle")
+      .sort((a, b) => a.y - b.y)
+      .map((candidate) => candidate.nodeKey);
+
+    expect(ordered).toEqual(["freestyle:c", "freestyle:a", "freestyle:b"]);
   });
 
   it("computes a sibling reorder below the last sibling even when dropped near the parent branch", () => {

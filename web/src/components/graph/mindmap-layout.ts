@@ -34,14 +34,16 @@ export type MindmapLayout = {
 export type FreestyleSnapshot = Array<Pick<GraphLayoutNode, "nodeKey" | "parentNodeKey" | "label" | "x" | "y" | "width" | "height" | "collapsed">>;
 
 export type MindmapDropIntent =
-  | { type: "reparent"; nodeKey: string; parentNodeKey: string; insertionIndex: number | null; side?: MindmapSide }
-  | { type: "reorder"; nodeKey: string; parentNodeKey: string | null; insertionIndex: number; side?: MindmapSide }
+  | { type: "reparent"; nodeKey: string; parentNodeKey: string; insertionIndex: number | null; side?: MindmapSide; targetNodeKey: string; placement: "into"; siblingNodeKeys?: string[] }
+  | { type: "reorder"; nodeKey: string; parentNodeKey: string | null; insertionIndex: number; side?: MindmapSide; targetNodeKey: string; placement: "before" | "after"; siblingNodeKeys?: string[] }
   | { type: "side"; nodeKey: string; side: MindmapSide };
 
 export type MindmapDropInput = {
   draggedNodeKey: string;
   x: number;
   y: number;
+  centerX?: number;
+  centerY?: number;
 };
 
 export type MindmapSiblingCreationHint = {
@@ -54,6 +56,7 @@ const MIN_NODE_WIDTH = 86;
 const MIN_EMPTY_NODE_WIDTH = 180;
 const MAX_NODE_WIDTH = 380;
 const BASE_NODE_HEIGHT = 56;
+const SUB_NODE_HEIGHT = 30;
 const NODE_TEXT_AVERAGE_CHAR_WIDTH = 7.2;
 const NODE_HORIZONTAL_TEXT_PADDING = 32;
 const ROOT_MAX_WIDTH = 340;
@@ -61,9 +64,8 @@ const ROOT_MIN_WIDTH = 180;
 const MAIN_GAP_X = 132;
 const CHILD_GAP_X = 82;
 const MAIN_GAP_Y = 42;
-const SIBLING_GAP_Y = 6;
-const SIBLING_GROUP_MIN_GAP_Y = 76;
-const DROP_OVERLAP_PADDING = 18;
+const SIBLING_GAP_Y = 3;
+const DROP_INTO_PADDING = 2;
 const SIDE_HINT_ABSOLUTE_X = 10_000;
 const SIDE_HINT_THRESHOLD_X = 5_000;
 const ORDER_STEP_Y = 100;
@@ -73,9 +75,10 @@ export function rootNodeKey(mindmap: InitiativeMindmapData): string {
   return root?.nodeKey ?? (mindmap.scope.type === "initiative" ? `initiative:${mindmap.scope.initiativeId}` : "root");
 }
 
-export function measureMindmapNode(node: GraphLayoutNode): MindmapMeasuredNode {
+export function measureMindmapNode(node: GraphLayoutNode, topicLevel: MindmapTopicLevel = "main"): MindmapMeasuredNode {
   const label = node.label.trim();
-  if (!label) return { width: MIN_EMPTY_NODE_WIDTH, height: BASE_NODE_HEIGHT };
+  const baseHeight = node.nodeKind === "branch" ? 54 : topicLevel === "sub" ? SUB_NODE_HEIGHT : BASE_NODE_HEIGHT;
+  if (!label) return { width: MIN_EMPTY_NODE_WIDTH, height: baseHeight };
 
   const maxWidth = node.nodeKind === "initiative_root" ? ROOT_MAX_WIDTH : MAX_NODE_WIDTH;
   const minWidth = node.nodeKind === "initiative_root" ? ROOT_MIN_WIDTH : MIN_NODE_WIDTH;
@@ -85,9 +88,9 @@ export function measureMindmapNode(node: GraphLayoutNode): MindmapMeasuredNode {
   const preferredWidth = Math.min(singleLineWidth, maxWidth);
   const width = Math.round(Math.min(maxWidth, Math.max(minWidth, longestWordWidth, preferredWidth)));
   const estimatedCharsPerLine = Math.max(8, Math.floor((width - NODE_HORIZONTAL_TEXT_PADDING) / NODE_TEXT_AVERAGE_CHAR_WIDTH));
-  const estimatedLines = Math.min(4, Math.max(1, Math.ceil(node.label.length / estimatedCharsPerLine)));
-  const baseHeight = node.nodeKind === "branch" ? 54 : BASE_NODE_HEIGHT;
-
+  const estimatedLines = singleLineWidth <= maxWidth
+    ? 1
+    : Math.min(4, Math.max(1, Math.ceil(node.label.length / estimatedCharsPerLine)));
   return { width, height: baseHeight + (estimatedLines - 1) * 18 };
 }
 
@@ -113,7 +116,8 @@ export function computeRadialMindmapLayout(mindmap: InitiativeMindmapData, mode:
     childrenByParent.set(parentKey, sortMindmapSiblings(children));
   }
 
-  const measured = new Map(visibleNodes.map((node) => [node.nodeKey, measureMindmapNode(node)]));
+  const depths = mindmapNodeDepths(rootKey, childrenByParent);
+  const measured = new Map(visibleNodes.map((node) => [node.nodeKey, measureMindmapNode(node, topicLevelFromDepth(depths.get(node.nodeKey) ?? 0))]));
   const subtreeHeights = new Map<string, number>();
 
   const calculateSubtreeHeight = (node: GraphLayoutNode): number => {
@@ -200,25 +204,27 @@ export function computeMindmapDropIntent(layout: MindmapLayout, input: MindmapDr
   }
 
   const center = {
-    x: input.x + dragged.width / 2,
-    y: input.y + dragged.height / 2
+    x: input.centerX ?? input.x + dragged.width / 2,
+    y: input.centerY ?? input.y + dragged.height / 2
   };
   const descendantKeys = descendantsIncluding(layout.nodes, dragged.nodeKey);
+
+  const edgeReorder = siblingEdgeReorderIntent(layout, dragged, center, descendantKeys);
+  if (edgeReorder) return edgeReorder;
+
+  const slotReorder = siblingSlotReorderIntent(layout, dragged, center, descendantKeys);
+  if (slotReorder) return slotReorder;
+
   const dropTarget = layout.nodes
     .filter((node) => node.nodeKey !== dragged.nodeKey && !descendantKeys.has(node.nodeKey) && canParentFreestyleNode(node.graphNode))
-    .find((node) => pointInNode(center, node, DROP_OVERLAP_PADDING));
+    .find((node) => pointInNode(center, node, DROP_INTO_PADDING));
 
   if (dropTarget) {
-    const siblingReorder = siblingDropReorderIntent(layout, dragged, dropTarget, center);
-    if (siblingReorder) return siblingReorder;
-
     const parentNodeKey = dropTarget.nodeKey;
     const side = parentNodeKey === layout.rootNodeKey ? sideFromCenter(center.x) : dropTarget.side ?? undefined;
-    return { type: "reparent", nodeKey: dragged.nodeKey, parentNodeKey, insertionIndex: null, side };
+    const siblingNodeKeys = targetSiblingNodeKeys(layout, parentNodeKey, side);
+    return { type: "reparent", nodeKey: dragged.nodeKey, parentNodeKey, insertionIndex: null, side, targetNodeKey: dropTarget.nodeKey, placement: "into", siblingNodeKeys };
   }
-
-  const reorder = reorderIntent(layout, dragged, center);
-  if (reorder) return reorder;
 
   if (dragged.parentNodeKey === layout.rootNodeKey) {
     const nextSide = sideFromCenter(center.x);
@@ -228,6 +234,27 @@ export function computeMindmapDropIntent(layout: MindmapLayout, input: MindmapDr
   }
 
   return null;
+}
+
+export function mindmapWithFreestyleSnapshot(mindmap: InitiativeMindmapData, snapshot: FreestyleSnapshot): InitiativeMindmapData {
+  const snapshotByKey = new Map(snapshot.map((node) => [node.nodeKey, node]));
+  const snapshotKeys = new Set(snapshotByKey.keys());
+  const derivedNodes = mindmap.nodes.filter((node) => node.nodeKind !== "freestyle");
+  const freestyleNodes = snapshot.map((snapshotNode) => {
+    const current = mindmap.nodes.find((node) => node.nodeKey === snapshotNode.nodeKey);
+    if (!current) {
+      throw new Error(`Mindmap preview snapshot includes unknown node key: ${snapshotNode.nodeKey}`);
+    }
+    return {
+      ...current,
+      ...snapshotNode,
+      nodeKind: "freestyle" as const,
+      entityType: null,
+      entityId: null
+    };
+  });
+  const remainingFreestyleNodes = mindmap.nodes.filter((node) => node.nodeKind === "freestyle" && !snapshotKeys.has(node.nodeKey));
+  return { ...mindmap, nodes: [...derivedNodes, ...freestyleNodes, ...remainingFreestyleNodes] };
 }
 
 export function applyMindmapDropIntent(mindmap: InitiativeMindmapData, intent: MindmapDropIntent): FreestyleSnapshot | null {
@@ -244,10 +271,16 @@ export function applyMindmapDropIntent(mindmap: InitiativeMindmapData, intent: M
   } else if (intent.side) {
     nextDragged.x = sideHintX(intent.side);
   }
+  if (intent.type === "reparent") {
+    const targetParent = nextNodes.find((node) => node.nodeKey === intent.parentNodeKey);
+    if (targetParent) {
+      targetParent.collapsed = false;
+    }
+  }
 
   const parentNodeKey = intent.type === "side" ? nextDragged.parentNodeKey : intent.parentNodeKey;
-  const siblings = sortMindmapSiblings(nextNodes.filter((node) => node.nodeKind === "freestyle" && node.parentNodeKey === parentNodeKey && node.nodeKey !== nextDragged.nodeKey));
-  const insertionIndex = intent.type === "side" ? siblingInsertionIndex(siblings, nextDragged) : intent.insertionIndex ?? siblings.length;
+  const siblings = reorderableSnapshotSiblings(nextNodes, parentNodeKey, nextDragged.nodeKey, intent.type === "side" ? undefined : intent.siblingNodeKeys);
+  const insertionIndex = snapshotInsertionIndex(siblings, nextDragged, intent);
   const orderedSiblings = [...siblings.slice(0, insertionIndex), nextDragged, ...siblings.slice(insertionIndex)];
   orderedSiblings.forEach((node, index) => {
     node.y = index * ORDER_STEP_Y;
@@ -306,6 +339,10 @@ export function freestyleSnapshot(mindmap: InitiativeMindmapData): FreestyleSnap
     }));
 }
 
+export function mindmapLayoutSubtreeNodeKeys(layout: MindmapLayout, nodeKey: string): Set<string> {
+  return descendantsIncluding(layout.nodes, nodeKey);
+}
+
 function visibleMindmapNodeKeys(mindmap: InitiativeMindmapData, mode: MindmapMode): Set<string> {
   const rootKey = rootNodeKey(mindmap);
   const visible = new Set(
@@ -341,6 +378,27 @@ function countMindmapChildren(mindmap: InitiativeMindmapData, mode: MindmapMode)
   }
 
   return counts;
+}
+
+function mindmapNodeDepths(rootKey: string, childrenByParent: Map<string | null, GraphLayoutNode[]>): Map<string, number> {
+  const depths = new Map<string, number>([[rootKey, 0]]);
+  const queue: string[] = [rootKey];
+  while (queue.length > 0) {
+    const parentKey = queue.shift()!;
+    const parentDepth = depths.get(parentKey) ?? 0;
+    for (const child of childrenByParent.get(parentKey) ?? []) {
+      if (depths.has(child.nodeKey)) continue;
+      depths.set(child.nodeKey, parentDepth + 1);
+      queue.push(child.nodeKey);
+    }
+  }
+  return depths;
+}
+
+function topicLevelFromDepth(depth: number): MindmapTopicLevel {
+  if (depth <= 0) return "central";
+  if (depth === 1) return "main";
+  return "sub";
 }
 
 function effectiveParentNodeKey(node: GraphLayoutNode, rootKey: string, visibleNodeKeys: Set<string>, mode: MindmapMode): string | null {
@@ -441,7 +499,7 @@ function siblingListGap(
     if (!previousHasChildren || !nextHasChildren) continue;
     const previousExtra = Math.max(0, (subtreeHeights.get(previous.nodeKey) ?? measured.get(previous.nodeKey)!.height) - measured.get(previous.nodeKey)!.height) / 2;
     const nextExtra = Math.max(0, (subtreeHeights.get(next.nodeKey) ?? measured.get(next.nodeKey)!.height) - measured.get(next.nodeKey)!.height) / 2;
-    gap = Math.max(gap, SIBLING_GROUP_MIN_GAP_Y, Math.ceil(previousExtra + SIBLING_GAP_Y + nextExtra));
+    gap = Math.max(gap, Math.ceil(previousExtra + SIBLING_GAP_Y + nextExtra));
   }
   return gap;
 }
@@ -540,11 +598,38 @@ function pointInNode(point: { x: number; y: number }, node: MindmapLayoutNode, p
   return point.x >= node.x - padding && point.x <= node.x + node.width + padding && point.y >= node.y - padding && point.y <= node.y + node.height + padding;
 }
 
-function reorderIntent(layout: MindmapLayout, dragged: MindmapLayoutNode, center: { x: number; y: number }): MindmapDropIntent | null {
-  const siblings = layout.nodes
-    .filter((node) => node.nodeKey !== dragged.nodeKey && node.parentNodeKey === dragged.parentNodeKey && node.side === dragged.side)
-    .sort((a, b) => a.y - b.y || a.x - b.x);
+function siblingEdgeReorderIntent(layout: MindmapLayout, dragged: MindmapLayoutNode, center: { x: number; y: number }, descendantKeys: Set<string>): MindmapDropIntent | null {
+  const dropTarget = layout.nodes
+    .filter((node) => node.nodeKey !== dragged.nodeKey && !descendantKeys.has(node.nodeKey) && node.parentNodeKey === dragged.parentNodeKey && canReorderAgainstSibling(layout, dragged, node))
+    .find((node) => pointInNode(center, node, 0));
+  if (!dropTarget) return null;
+
+  const relativeY = center.y - dropTarget.y;
+  const beforeTarget = relativeY < dropTarget.height * 0.28;
+  const afterTarget = relativeY > dropTarget.height * 0.72;
+  if (!beforeTarget && !afterTarget) return null;
+
+  const siblings = visualReorderSiblings(layout, dragged, dropTarget.side);
+  const targetIndex = siblings.findIndex((node) => node.nodeKey === dropTarget.nodeKey);
+  if (targetIndex === -1) return null;
+
+  return {
+    type: "reorder",
+    nodeKey: dragged.nodeKey,
+    parentNodeKey: dragged.actualParentNodeKey,
+    insertionIndex: beforeTarget ? targetIndex : targetIndex + 1,
+    side: dropTarget.side ?? dragged.side ?? undefined,
+    targetNodeKey: dropTarget.nodeKey,
+    placement: beforeTarget ? "before" : "after",
+    siblingNodeKeys: siblings.map((node) => node.nodeKey)
+  };
+}
+
+function siblingSlotReorderIntent(layout: MindmapLayout, dragged: MindmapLayoutNode, center: { x: number; y: number }, descendantKeys: Set<string>): MindmapDropIntent | null {
+  const side = dragged.parentNodeKey === layout.rootNodeKey ? sideFromCenter(center.x) : dragged.side;
+  const siblings = visualReorderSiblings(layout, dragged, side).filter((node) => !descendantKeys.has(node.nodeKey));
   if (siblings.length === 0) return null;
+  if (siblings.some((node) => pointInNode(center, node, 0))) return null;
 
   const parent = dragged.parentNodeKey ? layout.nodesByKey.get(dragged.parentNodeKey) : null;
   const horizontalNodes = parent ? [...siblings, parent] : siblings;
@@ -557,44 +642,73 @@ function reorderIntent(layout: MindmapLayout, dragged: MindmapLayoutNode, center
   if (center.y < minY || center.y > maxY) return null;
 
   let insertionIndex = siblings.length;
+  let targetNodeKey = siblings.at(-1)!.nodeKey;
+  let placement: "before" | "after" = "after";
   for (let index = 0; index < siblings.length; index += 1) {
     if (center.y < siblings[index].y + siblings[index].height / 2) {
       insertionIndex = index;
+      targetNodeKey = siblings[index].nodeKey;
+      placement = "before";
       break;
     }
   }
-  return { type: "reorder", nodeKey: dragged.nodeKey, parentNodeKey: dragged.actualParentNodeKey, insertionIndex, side: dragged.side ?? undefined };
-}
-
-function siblingDropReorderIntent(
-  layout: MindmapLayout,
-  dragged: MindmapLayoutNode,
-  dropTarget: MindmapLayoutNode,
-  center: { x: number; y: number }
-): MindmapDropIntent | null {
-  if (dropTarget.parentNodeKey !== dragged.parentNodeKey || dropTarget.side !== dragged.side) return null;
-
-  const relativeY = center.y - dropTarget.y;
-  const beforeTarget = relativeY < dropTarget.height * 0.35;
-  const afterTarget = relativeY > dropTarget.height * 0.65;
-  if (!beforeTarget && !afterTarget) return null;
-
-  const siblings = layout.nodes
-    .filter((node) => node.nodeKey !== dragged.nodeKey && node.parentNodeKey === dragged.parentNodeKey && node.side === dragged.side)
-    .sort((a, b) => a.y - b.y || a.x - b.x);
-  const targetIndex = siblings.findIndex((node) => node.nodeKey === dropTarget.nodeKey);
-  if (targetIndex === -1) return null;
 
   return {
     type: "reorder",
     nodeKey: dragged.nodeKey,
     parentNodeKey: dragged.actualParentNodeKey,
-    insertionIndex: beforeTarget ? targetIndex : targetIndex + 1,
-    side: dragged.side ?? undefined
+    insertionIndex,
+    side: side ?? undefined,
+    targetNodeKey,
+    placement,
+    siblingNodeKeys: siblings.map((node) => node.nodeKey)
   };
 }
 
 function siblingInsertionIndex(siblings: GraphLayoutNode[], dragged: GraphLayoutNode): number {
   const index = siblings.findIndex((node) => node.y > dragged.y || (node.y === dragged.y && node.x > dragged.x));
   return index === -1 ? siblings.length : index;
+}
+
+function snapshotInsertionIndex(siblings: GraphLayoutNode[], dragged: GraphLayoutNode, intent: MindmapDropIntent): number {
+  if (intent.type === "side") {
+    return siblingInsertionIndex(siblings, dragged);
+  }
+  if (intent.type === "reorder") {
+    const targetIndex = siblings.findIndex((node) => node.nodeKey === intent.targetNodeKey);
+    if (targetIndex !== -1) {
+      return intent.placement === "before" ? targetIndex : targetIndex + 1;
+    }
+  }
+  return intent.insertionIndex ?? siblings.length;
+}
+
+function canReorderAgainstSibling(layout: MindmapLayout, dragged: MindmapLayoutNode, target: MindmapLayoutNode): boolean {
+  if (target.parentNodeKey !== dragged.parentNodeKey) return false;
+  if (dragged.parentNodeKey === layout.rootNodeKey) return Boolean(target.side);
+  return target.side === dragged.side;
+}
+
+function visualReorderSiblings(layout: MindmapLayout, dragged: MindmapLayoutNode, side: MindmapSide | null): MindmapLayoutNode[] {
+  return layout.nodes
+    .filter((node) => node.nodeKey !== dragged.nodeKey && node.parentNodeKey === dragged.parentNodeKey && (dragged.parentNodeKey === layout.rootNodeKey ? node.side === side : node.side === dragged.side))
+    .sort((a, b) => a.y - b.y || a.x - b.x);
+}
+
+function targetSiblingNodeKeys(layout: MindmapLayout, parentNodeKey: string | null, side?: MindmapSide): string[] {
+  return layout.nodes
+    .filter((node) => node.parentNodeKey === parentNodeKey && (!side || parentNodeKey !== layout.rootNodeKey || node.side === side))
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+    .map((node) => node.nodeKey);
+}
+
+function reorderableSnapshotSiblings(nodes: GraphLayoutNode[], parentNodeKey: string | null, draggedNodeKey: string, siblingNodeKeys?: string[]): GraphLayoutNode[] {
+  const candidates = nodes.filter((node) => node.nodeKind === "freestyle" && node.parentNodeKey === parentNodeKey && node.nodeKey !== draggedNodeKey);
+  if (!siblingNodeKeys) return sortMindmapSiblings(candidates);
+
+  const candidateByKey = new Map(candidates.map((node) => [node.nodeKey, node]));
+  const ordered = siblingNodeKeys
+    .map((nodeKey) => candidateByKey.get(nodeKey))
+    .filter((node): node is GraphLayoutNode => Boolean(node));
+  return ordered.length > 0 ? ordered : sortMindmapSiblings(candidates);
 }

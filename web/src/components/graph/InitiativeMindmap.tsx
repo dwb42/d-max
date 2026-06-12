@@ -17,9 +17,11 @@ import {
   computeMindmapDropIntent,
   computeRadialMindmapLayout,
   freestyleSnapshot,
+  mindmapWithFreestyleSnapshot,
   rootNodeKey,
   siblingCreationHint,
   type FreestyleSnapshot,
+  type MindmapDropIntent,
   type MindmapLayout,
   type MindmapMode,
   type MindmapSide,
@@ -37,6 +39,8 @@ type MindmapNodeData = {
   canAddSibling: boolean;
   draggable: boolean;
   editing: boolean;
+  dragState?: "root" | "ghost";
+  dropState?: "into" | "before" | "after";
   onAddAdjacent: (nodeKey: string, side: MindmapCreateSide) => void;
   onDelete: (nodeKey: string) => void;
   onRename: (nodeKey: string, label: string) => Promise<void>;
@@ -47,6 +51,16 @@ type MindmapNodeData = {
 type MindmapNode = Node<MindmapNodeData, "mindmap">;
 type MindmapEdge = Edge<{ side: MindmapSide }, "mindmap">;
 type MindmapCreateSide = "right" | "bottom";
+type MindmapFlowElements = { nodes: MindmapNode[]; edges: MindmapEdge[] };
+type MindmapDropPreview = MindmapFlowElements & { intent: MindmapDropIntent };
+type MindmapDropPoint = { centerX: number; centerY: number };
+type MindmapDragState = {
+  rootNodeId: string;
+  subtreeNodeIds: Set<string>;
+  originRootPosition: { x: number; y: number };
+  originPositions: Map<string, { x: number; y: number }>;
+  originNodes: MindmapNode[];
+};
 
 const CANVAS_MARGIN_X = 88;
 const CANVAS_MARGIN_Y = 72;
@@ -263,10 +277,9 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
     layoutRef.current = layout;
   }, [layout]);
 
-  const { nodes, edges } = useMemo(() => {
-    if (!layout) return { nodes: [] as MindmapNode[], edges: [] as MindmapEdge[] };
+  const layoutToFlowElements = useCallback((sourceLayout: MindmapLayout): MindmapFlowElements => {
     return {
-      nodes: layout.nodes.map((layoutNode) => ({
+      nodes: sourceLayout.nodes.map((layoutNode) => ({
         id: layoutNode.nodeKey,
         type: "mindmap" as const,
         position: { x: layoutNode.x + CANVAS_MARGIN_X, y: layoutNode.y + CANVAS_MARGIN_Y },
@@ -283,9 +296,9 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
           topicLevel: layoutNode.topicLevel,
           side: layoutNode.side,
           preview: Boolean(props.preview),
-          childCount: layout.childCounts.get(layoutNode.nodeKey) ?? 0,
+          childCount: sourceLayout.childCounts.get(layoutNode.nodeKey) ?? 0,
           canAddChild: !props.preview && layoutNode.graphNode.moveSupport.freestyleParent && layoutNode.graphNode.nodeKind !== "media",
-          canAddSibling: !props.preview && layoutNode.nodeKey !== layout.rootNodeKey,
+          canAddSibling: !props.preview && layoutNode.nodeKey !== sourceLayout.rootNodeKey,
           draggable: !props.preview && layoutNode.graphNode.nodeKind === "freestyle",
           editing: editingNodeKey === layoutNode.nodeKey,
           onAddAdjacent: createAdjacent,
@@ -295,8 +308,8 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
           onToggleCollapse: toggleCollapse
         }
       })),
-      edges: layout.edges.map((edge) => {
-        const targetNode = layout.nodesByKey.get(edge.targetNodeKey);
+      edges: sourceLayout.edges.map((edge) => {
+        const targetNode = sourceLayout.nodesByKey.get(edge.targetNodeKey);
         const side = targetNode?.side ?? "right";
         return {
           id: edge.id,
@@ -311,18 +324,44 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
         };
       })
     };
-  }, [createAdjacent, deleteNode, editingNodeKey, layout, props.preview, renameNode, selectedNodeKey, toggleCollapse]);
+  }, [createAdjacent, deleteNode, editingNodeKey, props.preview, renameNode, selectedNodeKey, toggleCollapse]);
 
-  const applySemanticDrop = useCallback(async (_event: unknown, node: Node): Promise<boolean> => {
-    if (props.preview || busy) return false;
+  const { nodes, edges } = useMemo(() => {
+    return layout ? layoutToFlowElements(layout) : { nodes: [] as MindmapNode[], edges: [] as MindmapEdge[] };
+  }, [layout, layoutToFlowElements]);
+
+  const computeDropIntentForNode = useCallback((node: Node, dropPoint?: MindmapDropPoint): MindmapDropIntent | null => {
+    if (props.preview || busy) return null;
     const current = mindmapRef.current;
     const currentLayout = layoutRef.current;
-    if (!current || !currentLayout) return false;
-    const intent = computeMindmapDropIntent(currentLayout, {
+    if (!current || !currentLayout) return null;
+    return computeMindmapDropIntent(currentLayout, {
       draggedNodeKey: node.id,
       x: Math.round(node.position.x - CANVAS_MARGIN_X),
-      y: Math.round(node.position.y - CANVAS_MARGIN_Y)
+      y: Math.round(node.position.y - CANVAS_MARGIN_Y),
+      centerX: dropPoint ? Math.round(dropPoint.centerX) : undefined,
+      centerY: dropPoint ? Math.round(dropPoint.centerY) : undefined
     });
+  }, [busy, props.preview]);
+
+  const getDropPreview = useCallback((node: Node, dropPoint?: MindmapDropPoint): MindmapDropPreview | null => {
+    const current = mindmapRef.current;
+    if (!current) return null;
+    const intent = computeDropIntentForNode(node, dropPoint);
+    if (!intent) return null;
+    const snapshot = applyMindmapDropIntent(current, intent);
+    if (!snapshot) return null;
+    const previewMindmap = mindmapWithFreestyleSnapshot(current, snapshot);
+    const previewLayout = computeRadialMindmapLayout(previewMindmap, mode);
+    const previewElements = layoutToFlowElements(previewLayout);
+    return { ...previewElements, intent };
+  }, [computeDropIntentForNode, layoutToFlowElements, mode]);
+
+  const applySemanticDrop = useCallback(async (_event: unknown, node: Node, displayedIntent?: MindmapDropIntent | null): Promise<boolean> => {
+    if (props.preview || busy) return false;
+    const current = mindmapRef.current;
+    if (!current) return false;
+    const intent = displayedIntent ?? computeDropIntentForNode(node);
     if (!intent) return false;
     const snapshot = applyMindmapDropIntent(current, intent);
     if (!snapshot) return false;
@@ -341,7 +380,7 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
     } finally {
       setBusy(false);
     }
-  }, [busy, props.initiativeId, props.preview, pushUndoSnapshot]);
+  }, [busy, computeDropIntentForNode, props.initiativeId, props.preview, pushUndoSnapshot]);
 
   const [centerRequest, setCenterRequest] = useState(0);
 
@@ -541,6 +580,7 @@ function InitiativeMindmapCanvas(props: { initiativeId: number; preview?: boolea
             canvasElementRef.current?.focus();
             setSelectedNodeKey(null);
           }}
+          getDropPreview={getDropPreview}
           onNodeDragStop={applySemanticDrop}
           centerRequest={centerRequest}
         />
@@ -556,16 +596,26 @@ function MindmapFlow(props: {
   centerRequest: number;
   onNodeClick: (event: ReactMouseEvent, node: Node) => void;
   onPaneClick: () => void;
-  onNodeDragStop: (event: unknown, node: Node) => Promise<boolean>;
+  getDropPreview: (node: Node, dropPoint?: MindmapDropPoint) => MindmapDropPreview | null;
+  onNodeDragStop: (event: unknown, node: Node, intent?: MindmapDropIntent | null) => Promise<boolean>;
 }) {
   const flow = useReactFlow();
   const [flowNodes, setFlowNodes] = useState(props.nodes);
+  const [flowEdges, setFlowEdges] = useState(props.edges);
   const didInitialFitViewRef = useRef(false);
   const previousCenterRequestRef = useRef(props.centerRequest);
+  const dragStateRef = useRef<MindmapDragState | null>(null);
+  const activeIntentRef = useRef<MindmapDropIntent | null>(null);
 
   useEffect(() => {
+    if (dragStateRef.current) return;
     setFlowNodes(props.nodes);
   }, [props.nodes]);
+
+  useEffect(() => {
+    if (dragStateRef.current) return;
+    setFlowEdges(props.edges);
+  }, [props.edges]);
 
   useEffect(() => {
     const shouldFitInitially = !didInitialFitViewRef.current && props.nodes.length > 0;
@@ -580,10 +630,42 @@ function MindmapFlow(props: {
     setFlowNodes((currentNodes) => applyNodeChanges(changes, currentNodes) as MindmapNode[]);
   }, []);
 
+  const handleNodeDragStart = useCallback((_event: unknown, node: Node) => {
+    const subtreeNodeIds = mindmapSubtreeNodeIdsFromEdges(props.edges, node.id);
+    const originPositions = new Map(flowNodes.map((candidate) => [candidate.id, { ...candidate.position }]));
+    const dragState: MindmapDragState = {
+      rootNodeId: node.id,
+      subtreeNodeIds,
+      originRootPosition: { ...node.position },
+      originPositions,
+      originNodes: flowNodes
+    };
+    dragStateRef.current = dragState;
+    activeIntentRef.current = null;
+    setFlowNodes(decorateMindmapDragNodes(applyMindmapGhostPositions(flowNodes, dragState, node), dragState, null));
+  }, [flowNodes, props.edges]);
+
+  const handleNodeDrag = useCallback((event: unknown, node: Node) => {
+    const dragState = dragStateRef.current;
+    if (!dragState) return;
+    const preview = props.getDropPreview(node, mindmapDropPointFromEvent(flow, event));
+    const nextIntent = preview?.intent ?? null;
+    if (nextIntent?.type !== "side" || !activeIntentRef.current || activeIntentRef.current.type === "side") {
+      activeIntentRef.current = nextIntent;
+    }
+    const baseNodes = preview?.nodes ?? props.nodes;
+    const baseEdges = preview?.edges ?? props.edges;
+    const previewNodes = preview?.intent.type === "reparent"
+      ? baseNodes
+      : applyMindmapGhostPositions(baseNodes, dragState, node);
+    setFlowNodes(decorateMindmapDragNodes(previewNodes, dragState, preview?.intent ?? null));
+    setFlowEdges(baseEdges);
+  }, [flow, props.edges, props.getDropPreview, props.nodes]);
+
   return (
     <ReactFlow
       nodes={flowNodes}
-      edges={props.edges}
+      edges={flowEdges}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       nodesDraggable={!props.preview}
@@ -599,9 +681,18 @@ function MindmapFlow(props: {
       onPaneClick={() => {
         props.onPaneClick();
       }}
+      onNodeDragStart={handleNodeDragStart}
+      onNodeDrag={handleNodeDrag}
       onNodeDragStop={(event, node) => {
-        void props.onNodeDragStop(event, node).then((accepted) => {
-          if (!accepted) setFlowNodes(props.nodes);
+        const finalPreview = props.getDropPreview(node, mindmapDropPointFromEvent(flow, event));
+        const intent = activeIntentRef.current ?? finalPreview?.intent;
+        dragStateRef.current = null;
+        activeIntentRef.current = null;
+        void props.onNodeDragStop(event, node, intent).then((accepted) => {
+          if (!accepted) {
+            setFlowNodes(props.nodes);
+            setFlowEdges(props.edges);
+          }
         });
       }}
       proOptions={{ hideAttribution: true }}
@@ -610,6 +701,77 @@ function MindmapFlow(props: {
       {!props.preview ? <Controls showInteractive={false} /> : null}
     </ReactFlow>
   );
+}
+
+function mindmapSubtreeNodeIdsFromEdges(edges: MindmapEdge[], rootNodeId: string): Set<string> {
+  const result = new Set([rootNodeId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const edge of edges) {
+      if (result.has(edge.source) && !result.has(edge.target)) {
+        result.add(edge.target);
+        changed = true;
+      }
+    }
+  }
+  return result;
+}
+
+function mindmapDropPointFromEvent(flow: ReturnType<typeof useReactFlow>, event: unknown): MindmapDropPoint | undefined {
+  if (!event || typeof event !== "object" || !("clientX" in event) || !("clientY" in event)) return undefined;
+  const pointer = flow.screenToFlowPosition({
+    x: Number((event as MouseEvent).clientX),
+    y: Number((event as MouseEvent).clientY)
+  });
+  return {
+    centerX: pointer.x - CANVAS_MARGIN_X,
+    centerY: pointer.y - CANVAS_MARGIN_Y
+  };
+}
+
+function applyMindmapGhostPositions(nodes: MindmapNode[], dragState: MindmapDragState, draggedNode: Node): MindmapNode[] {
+  const deltaX = draggedNode.position.x - dragState.originRootPosition.x;
+  const deltaY = draggedNode.position.y - dragState.originRootPosition.y;
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  for (const originNode of dragState.originNodes) {
+    if (dragState.subtreeNodeIds.has(originNode.id) && !nodeById.has(originNode.id)) {
+      nodeById.set(originNode.id, originNode);
+    }
+  }
+  return Array.from(nodeById.values()).map((node) => {
+    if (!dragState.subtreeNodeIds.has(node.id)) return node;
+    if (node.id === dragState.rootNodeId) {
+      return { ...node, position: { ...draggedNode.position } };
+    }
+    const origin = dragState.originPositions.get(node.id) ?? node.position;
+    return {
+      ...node,
+      position: {
+        x: origin.x + deltaX,
+        y: origin.y + deltaY
+      }
+    };
+  });
+}
+
+function decorateMindmapDragNodes(nodes: MindmapNode[], dragState: MindmapDragState | null, intent: MindmapDropIntent | null): MindmapNode[] {
+  return nodes.map((node) => {
+    const dragRole = !dragState || !dragState.subtreeNodeIds.has(node.id)
+      ? undefined
+      : node.id === dragState.rootNodeId ? "root" : "ghost";
+    const dropState = intent?.type === "reparent" && node.id === intent.targetNodeKey
+      ? "into"
+      : intent?.type === "reorder" && node.id === intent.targetNodeKey ? intent.placement : undefined;
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        dragState: dragRole,
+        dropState
+      }
+    };
+  });
 }
 
 function MindmapNodeComponent(props: NodeProps<MindmapNode>) {
@@ -648,7 +810,7 @@ function MindmapNodeComponent(props: NodeProps<MindmapNode>) {
 
   return (
     <div
-      className={`mindmap-node kind-${graphNode.nodeKind} topic-${props.data.topicLevel}${props.data.draggable ? " draggable" : ""}${props.selected ? " selected" : ""}`}
+      className={`mindmap-node kind-${graphNode.nodeKind} topic-${props.data.topicLevel}${props.data.side ? ` side-${props.data.side}` : ""}${props.data.draggable ? " draggable" : ""}${props.selected ? " selected" : ""}${props.data.dragState ? ` drag-${props.data.dragState}` : ""}${props.data.dropState ? ` drop-${props.data.dropState}` : ""}`}
       onDoubleClick={startEditingFromNode}
       title={editable ? "Doppelklick zum Umbenennen" : undefined}
     >
@@ -670,10 +832,13 @@ function MindmapNodeComponent(props: NodeProps<MindmapNode>) {
       ) : null}
       {editing ? (
         <textarea
-          className="mindmap-node-input nodrag"
+          className="mindmap-node-input nodrag nopan"
           autoFocus
           value={draft}
           disabled={saving}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onDoubleClick={(event) => event.stopPropagation()}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={() => void save()}
           onKeyDown={(event) => {

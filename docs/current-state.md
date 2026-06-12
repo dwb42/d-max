@@ -1,6 +1,6 @@
 # d-max Current State
 
-Date: 2026-06-10
+Date: 2026-06-12
 
 Short handoff for fresh Codex/OpenClaw sessions. This file describes the
 implemented repository state; older plans are historical unless this file or
@@ -243,8 +243,18 @@ the measured subtree extents when needed so neighboring child groups do not
 collide. Persisted freestyle `x`/`y` values remain available to API/tool
 callers and are used by the browser as lightweight side/order hints after
 semantic drag-reorder or reparent actions, not as the rendered default
-coordinates. The browser/API repository reads and writes this table for
-initiative mindmaps.
+coordinates.
+Mindmap drag semantics are intentionally split: dragging near the upper/lower
+edge of a same-parent visible sibling reorders before/after that sibling, while
+dragging with the pointer over another valid node's body reparents the dragged
+freestyle subtree under that node as its last child. Reparent preview opens a
+collapsed target parent in the non-persisted preview and shows the future child
+position before drop. Reorder persistence applies placement by
+`targetNodeKey + before/after` rather than by a fragile numeric layout index,
+because visible layout siblings and stored freestyle snapshot siblings can
+differ for top-level `branch:freestyle` nodes. Reparenting never targets the
+dragged node or its descendants. The browser/API repository reads and writes
+this table for initiative mindmaps.
 OpenClaw/d-max tools can read full
 initiative mindmaps and can create, update, move/reparent, collapse/expand, and
 delete freestyle nodes. Agent tool mutations are intentionally restricted to
@@ -677,7 +687,15 @@ Implemented behavior:
   freestyle snapshots. `Tab` or the right `+` creates a subtopic; `Enter` or
   the bottom `+` creates a sibling immediately after the selected node; double
   click edits a node label; pressing `Enter` in the editor closes edit mode and
-  returns focus to the mindmap so another `Enter` creates the sibling. Selected
+  returns focus to the mindmap so another `Enter` creates the sibling. While a
+  node is edited, the textarea keeps a visible caret, supports precise click
+  placement, and allows normal double-click word selection. During drag,
+  reordered nodes keep their subtree as a ghost preview; same-parent reorder
+  shows a before/after line, and reparenting highlights the future parent with
+  a drop-into state while rendering the future child position. The full-screen
+  mindmap modal fills the viewport. Subtopic nodes from depth two onward use
+  compact spacing, normal font weight, reduced padding, and no left accent bar;
+  central and first-level topic nodes remain visually stronger. Selected
   nodes have a visible ring. Non-root parent nodes show a small side-aware
   collapse control at the child-branch junction; expanded parents show a
   subtle minus control, while collapsed parents show the number of hidden child
