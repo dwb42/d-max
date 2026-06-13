@@ -4,11 +4,16 @@ import {
   computeMindmapDropIntent,
   computeRadialMindmapLayout,
   measureMindmapNode,
+  MINDMAP_LAYOUT_PROFILE_NAME,
   siblingCreationHint
 } from "../../web/src/components/graph/mindmap-layout.js";
 import type { GraphLayoutNode, InitiativeMindmap } from "../../web/src/types.js";
 
 describe("mindmap radial layout", () => {
+  it("uses the Compact Subtree Spacing v1 profile", () => {
+    expect(MINDMAP_LAYOUT_PROFILE_NAME).toBe("Compact Subtree Spacing v1");
+  });
+
   it("keeps the central topic centered", () => {
     const mindmap = mindmapWith([
       node("initiative:1", "initiative_root", "Central", null)
@@ -93,7 +98,7 @@ describe("mindmap radial layout", () => {
     expect(besucher.y - (kultur.y + kultur.height)).toBe(3);
   });
 
-  it("keeps adjacent one-child clusters compact when they do not collide", () => {
+  it("keeps adjacent one-child clusters separated by their subtree extents", () => {
     const mindmap = mindmapWith([
       node("initiative:1", "initiative_root", "Central", null),
       node("freestyle:section", "freestyle", "Section", "initiative:1", { x: 10000 }),
@@ -110,7 +115,7 @@ describe("mindmap radial layout", () => {
     const chill = layout.nodesByKey.get("freestyle:chill")!;
 
     expect(plains.y - (ian.y + ian.height)).toBe(3);
-    expect(chill.y - (plains.y + plains.height)).toBeLessThanOrEqual(4);
+    expect(chill.y - (plains.y + plains.height)).toBe(3);
     expect(overlaps(plains, chill)).toBe(false);
   });
 

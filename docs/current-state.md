@@ -237,13 +237,17 @@ deterministic radial auto-layout implemented in
 visible main topics are balanced left/right, and subtopics grow outward on
 their inherited side. Layout is recomputed from the visible hierarchy and node
 label measurements so content edits and collapsed branches reflow without
-overlap. Siblings with the same parent use compact uniform vertical spacing;
-adjacent parent clusters use a larger uniform spacing that is increased from
-the measured subtree extents when needed so neighboring child groups do not
-collide. Persisted freestyle `x`/`y` values remain available to API/tool
-callers and are used by the browser as lightweight side/order hints after
-semantic drag-reorder or reparent actions, not as the rendered default
-coordinates.
+overlap. The active vertical spacing contract is named
+`Compact Subtree Spacing v1` in `mindmap-layout.ts`: direct same-parent
+siblings use a `3px` visual gap; placement reserves each child's full measured
+subtree height; no additional cluster padding is added beyond that direct
+sibling gap. This keeps dense sibling lists compact while still preventing
+neighboring child groups from colliding. The corresponding regression tests pin
+the `3px` direct gap, subtree-based non-overlap, and the current `36px`
+visible gap between equal two-child cluster parents. Persisted freestyle `x`/`y`
+values remain available to API/tool callers and are used by the browser as
+lightweight side/order hints after semantic drag-reorder or reparent actions,
+not as the rendered default coordinates.
 Mindmap drag semantics are intentionally split: dragging near the upper/lower
 edge of a same-parent visible sibling reorders before/after that sibling, while
 dragging with the pointer over another valid node's body reparents the dragged
@@ -693,8 +697,11 @@ Implemented behavior:
   reordered nodes keep their subtree as a ghost preview; same-parent reorder
   shows a before/after line, and reparenting highlights the future parent with
   a drop-into state while rendering the future child position. The full-screen
-  mindmap modal fills the viewport. Subtopic nodes from depth two onward use
-  compact spacing, normal font weight, reduced padding, and no left accent bar;
+  mindmap modal fills the viewport. The active vertical spacing profile is
+  `Compact Subtree Spacing v1`: direct same-parent siblings have a `3px` gap,
+  subtree extents are reserved to avoid overlaps, and no extra cluster padding
+  is added. Subtopic nodes from depth two onward use compact spacing, normal
+  font weight, reduced padding, and no left accent bar;
   central and first-level topic nodes remain visually stronger. Selected
   nodes have a visible ring. Non-root parent nodes show a small side-aware
   collapse control at the child-branch junction; expanded parents show a

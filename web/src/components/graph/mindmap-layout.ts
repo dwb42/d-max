@@ -52,6 +52,8 @@ export type MindmapSiblingCreationHint = {
   y?: number;
 };
 
+export const MINDMAP_LAYOUT_PROFILE_NAME = "Compact Subtree Spacing v1";
+
 const MIN_NODE_WIDTH = 86;
 const MIN_EMPTY_NODE_WIDTH = 180;
 const MAX_NODE_WIDTH = 380;
@@ -64,6 +66,8 @@ const ROOT_MIN_WIDTH = 180;
 const MAIN_GAP_X = 132;
 const CHILD_GAP_X = 82;
 const MAIN_GAP_Y = 42;
+// Compact Subtree Spacing v1: reserve subtree extents, but add no extra
+// cluster padding beyond the direct same-parent sibling gap.
 const SIBLING_GAP_Y = 3;
 const DROP_INTO_PADDING = 2;
 const SIDE_HINT_ABSOLUTE_X = 10_000;
@@ -134,7 +138,7 @@ export function computeRadialMindmapLayout(mindmap: InitiativeMindmapData, mode:
     for (const child of children) {
       calculateSubtreeHeight(child);
     }
-    const childGap = siblingListGap(children, measured, subtreeHeights, childrenByParent);
+    const childGap = siblingListGap();
     let childHeight = 0;
     children.forEach((child, index) => {
       childHeight += subtreeHeights.get(child.nodeKey) ?? measured.get(child.nodeKey)!.height;
@@ -463,45 +467,29 @@ function placeNodeTree(
   if (node.collapsed) return;
   const children = childrenByParent.get(node.nodeKey) ?? [];
   let totalHeight = 0;
-  const childGap = siblingListGap(children, measured, subtreeHeights, childrenByParent);
+  const childGap = siblingListGap();
   children.forEach((child, index) => {
-    totalHeight += measured.get(child.nodeKey)!.height;
+    totalHeight += subtreeHeights.get(child.nodeKey) ?? measured.get(child.nodeKey)!.height;
     if (index > 0) {
       totalHeight += childGap;
     }
   });
   let cursorY = centerY - totalHeight / 2;
   children.forEach((child, index) => {
-    const childHeight = measured.get(child.nodeKey)!.height;
-    const childCenterY = cursorY + childHeight / 2;
+    const childSubtreeHeight = subtreeHeights.get(child.nodeKey) ?? measured.get(child.nodeKey)!.height;
+    const childCenterY = cursorY + childSubtreeHeight / 2;
     const childAnchorX = side === "right" ? x + size.width + CHILD_GAP_X : x - CHILD_GAP_X;
     sides.set(child.nodeKey, side);
     placeNodeTree(child, node.nodeKey, side, childAnchorX, childCenterY, measured, subtreeHeights, childrenByParent, sides, placed, false);
-    cursorY += childHeight;
+    cursorY += childSubtreeHeight;
     if (index < children.length - 1) {
       cursorY += childGap;
     }
   });
 }
 
-function siblingListGap(
-  siblings: GraphLayoutNode[],
-  measured: Map<string, MindmapMeasuredNode>,
-  subtreeHeights: Map<string, number>,
-  childrenByParent: Map<string | null, GraphLayoutNode[]>
-): number {
-  let gap = SIBLING_GAP_Y;
-  for (let index = 1; index < siblings.length; index += 1) {
-    const previous = siblings[index - 1];
-    const next = siblings[index];
-    const previousHasChildren = (childrenByParent.get(previous.nodeKey) ?? []).length > 0;
-    const nextHasChildren = (childrenByParent.get(next.nodeKey) ?? []).length > 0;
-    if (!previousHasChildren || !nextHasChildren) continue;
-    const previousExtra = Math.max(0, (subtreeHeights.get(previous.nodeKey) ?? measured.get(previous.nodeKey)!.height) - measured.get(previous.nodeKey)!.height) / 2;
-    const nextExtra = Math.max(0, (subtreeHeights.get(next.nodeKey) ?? measured.get(next.nodeKey)!.height) - measured.get(next.nodeKey)!.height) / 2;
-    gap = Math.max(gap, Math.ceil(previousExtra + SIBLING_GAP_Y + nextExtra));
-  }
-  return gap;
+function siblingListGap(): number {
+  return SIBLING_GAP_Y;
 }
 
 function assignMainTopicSides(mainTopics: GraphLayoutNode[], subtreeHeights: Map<string, number>, measured: Map<string, MindmapMeasuredNode>): Map<string, MindmapSide> {
