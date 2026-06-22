@@ -23,6 +23,7 @@
     "setup": "node scripts/run-ts-or-built.mjs scripts/setup-db.ts dist/scripts/setup-db.js",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest --config vitest.config.ts",
+    "check:mindmap-dom-layout": "tsx scripts/check-mindmap-dom-layout.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc"
   },

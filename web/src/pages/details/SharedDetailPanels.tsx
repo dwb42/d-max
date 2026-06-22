@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { DragEvent, FormEvent, ReactNode } from "react";
-import { Building2, CalendarDays, CheckCircle2, Circle, ExternalLink, FileText, Image, Mic2, Paperclip, Pencil, Plus, RefreshCw, Trash2, Upload, Users, X } from "lucide-react";
+import type { ClipboardEvent, DragEvent, FormEvent, ReactNode } from "react";
+import { Building2, CalendarDays, CheckCircle2, Circle, ClipboardPaste, ExternalLink, FileText, Image, Mic2, Paperclip, Pencil, Plus, RefreshCw, Trash2, Upload, Users, X } from "lucide-react";
 import { ConfirmModal, EditModal, RelationItem, RelationList, SectionBlock } from "../../components/ui/index.js";
 import { reanalyzeMediaAsset, updateMediaAssetAnalysis } from "../../api.js";
 import type { EntityParticipant, Initiative, MediaAttachment, MediaAsset, MediaEntityType, Organization, ParticipantRoleType, Person, Task } from "../../types.js";
@@ -295,6 +295,37 @@ function MediaAttachmentsPanel(props: {
     }
   };
 
+  const uploadClipboardFiles = async (files: File[]) => {
+    if (files.length === 0 || busy) {
+      setError(files.length === 0 ? "Die Zwischenablage enthält keine unterstützte Datei." : null);
+      return;
+    }
+    await uploadFiles(files);
+  };
+
+  const pasteFromClipboard = async () => {
+    if (busy) return;
+    if (!navigator.clipboard?.read) {
+      setError("Direktes Lesen der Zwischenablage wird hier nicht unterstützt. Klicke in die Medienfläche und füge mit Cmd/Ctrl+V ein.");
+      return;
+    }
+    setError(null);
+    try {
+      const files = await clipboardItemsToFiles(await navigator.clipboard.read());
+      await uploadClipboardFiles(files);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Zwischenablage konnte nicht gelesen werden.");
+    }
+  };
+
+  const handlePaste = (event: ClipboardEvent<HTMLElement>) => {
+    if (isEditablePasteTarget(event.target)) return;
+    const files = filesFromClipboardData(event.clipboardData);
+    if (files.length === 0) return;
+    event.preventDefault();
+    void uploadClipboardFiles(files);
+  };
+
   const reorderAttachments = async (targetId: number, placeAfter: boolean) => {
     if (!draggedLinkId || draggedLinkId === targetId || busy) return;
     setBusy(true);
@@ -313,6 +344,9 @@ function MediaAttachmentsPanel(props: {
   return (
     <section
       className={`${props.surface === "section" ? "section-block" : "panel"} media-panel ${dragActive ? "drag-active" : ""}`}
+      tabIndex={0}
+      aria-label="Medienbereich"
+      onPaste={handlePaste}
       onDragOver={(event) => {
         if (draggedLinkId || event.dataTransfer.types.includes("application/x-dmax-media-link")) {
           return;
@@ -335,6 +369,9 @@ function MediaAttachmentsPanel(props: {
           <h2>Medien</h2>
           <span>{props.attachments.length} Dateien</span>
         </div>
+        <button type="button" className="icon-button" disabled={busy} onClick={() => void pasteFromClipboard()} title="Aus Zwischenablage einfügen">
+          <ClipboardPaste size={17} />
+        </button>
         <button type="button" className="icon-button" disabled={busy} onClick={() => fileInputRef.current?.click()} title="Dateien hinzufügen">
           <Upload size={17} />
         </button>
@@ -353,7 +390,7 @@ function MediaAttachmentsPanel(props: {
 
       <button type="button" className="media-drop-empty" disabled={busy} onClick={() => fileInputRef.current?.click()}>
         <Paperclip size={18} />
-        <span>{busy ? "Upload und Analyse laufen..." : "Dateien hier ablegen oder auswählen"}</span>
+        <span>{busy ? "Upload und Analyse laufen..." : "Dateien hier ablegen, auswählen oder einfügen"}</span>
       </button>
 
       {props.attachments.length > 0 ? (
@@ -416,6 +453,81 @@ function MediaAttachmentsPanel(props: {
       ) : null}
     </section>
   );
+}
+
+function filesFromClipboardData(data: DataTransfer): File[] {
+  const files = Array.from(data.items)
+    .filter((item) => item.kind === "file" && isSupportedClipboardMimeType(item.type))
+    .map((item, index) => {
+      const file = item.getAsFile();
+      return file ? normalizeClipboardFile(file, item.type, index) : null;
+    })
+    .filter((file): file is File => Boolean(file));
+
+  if (files.length > 0) {
+    return files;
+  }
+
+  return Array.from(data.files)
+    .filter((file) => isSupportedClipboardMimeType(file.type))
+    .map((file, index) => normalizeClipboardFile(file, file.type, index));
+}
+
+async function clipboardItemsToFiles(items: ClipboardItem[]): Promise<File[]> {
+  const files: File[] = [];
+  for (const item of items) {
+    const mimeType = item.types.find(isSupportedClipboardMimeType);
+    if (!mimeType) continue;
+    const blob = await item.getType(mimeType);
+    files.push(new File([blob], clipboardFileName(mimeType, files.length), {
+      type: blob.type || mimeType,
+      lastModified: Date.now()
+    }));
+  }
+  return files;
+}
+
+function normalizeClipboardFile(file: File, fallbackMimeType: string, index: number): File {
+  if (file.name.trim()) {
+    return file;
+  }
+  return new File([file], clipboardFileName(file.type || fallbackMimeType, index), {
+    type: file.type || fallbackMimeType || "application/octet-stream",
+    lastModified: file.lastModified || Date.now()
+  });
+}
+
+function clipboardFileName(mimeType: string, index: number): string {
+  const suffix = index > 0 ? `-${index + 1}` : "";
+  return `clipboard-${timestampForFileName()}${suffix}.${extensionForMimeType(mimeType)}`;
+}
+
+function timestampForFileName(): string {
+  return new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
+}
+
+function extensionForMimeType(mimeType: string): string {
+  if (mimeType === "image/jpeg") return "jpg";
+  if (mimeType === "image/svg+xml") return "svg";
+  if (mimeType === "application/pdf") return "pdf";
+  if (mimeType === "text/markdown") return "md";
+  if (mimeType === "text/plain") return "txt";
+  const subtype = mimeType.split("/")[1]?.split("+")[0]?.trim();
+  return subtype || "bin";
+}
+
+function isSupportedClipboardMimeType(mimeType: string): boolean {
+  return mimeType.startsWith("image/")
+    || mimeType.startsWith("audio/")
+    || mimeType.startsWith("video/")
+    || mimeType === "application/pdf"
+    || mimeType === "text/plain"
+    || mimeType === "text/markdown";
+}
+
+function isEditablePasteTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
 function MediaAttachmentCard(props: {

@@ -244,10 +244,14 @@ subtree height; no additional cluster padding is added beyond that direct
 sibling gap. This keeps dense sibling lists compact while still preventing
 neighboring child groups from colliding. The corresponding regression tests pin
 the `3px` direct gap, subtree-based non-overlap, and the current `36px`
-visible gap between equal two-child cluster parents. Persisted freestyle `x`/`y`
-values remain available to API/tool callers and are used by the browser as
-lightweight side/order hints after semantic drag-reorder or reparent actions,
-not as the rendered default coordinates.
+visible gap between equal two-child cluster parents. A separate optional
+Playwright DOM guard, `npm run check:mindmap-dom-layout`, checks the live
+desktop `/initiatives/9` mindmap for visible node overlaps and compact subtree
+gaps under the reference parent `Gründerkreis / der harte Kern`. It is
+intentionally not part of default `npm test` so normal development stays fast.
+Persisted freestyle `x`/`y` values remain available to API/tool callers and are
+used by the browser as lightweight side/order hints after semantic drag-reorder
+or reparent actions, not as the rendered default coordinates.
 Mindmap drag semantics are intentionally split: dragging near the upper/lower
 edge of a same-parent visible sibling reorders before/after that sibling, while
 dragging with the pointer over another valid node's body reparents the dragged

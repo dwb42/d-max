@@ -89,9 +89,7 @@ export function InitiativeDetailView(props: {
         actions={<TaskCreateInlineForm label="Maßnahme hinzufügen" onCreateTask={(title) => props.onCreateTask(initiativeId, title)} />}
         className="initiative-tasks-section"
       >
-        {props.detail.tasks.length === 0 ? (
-          <EmptyState title="Noch keine Maßnahmen" description="Lege die nächste konkrete Aktion direkt hier an." />
-        ) : (
+        {props.detail.tasks.length > 0 ? (
           <TasksView
             tasks={props.detail.tasks}
             initiatives={[props.detail.initiative]}
@@ -102,7 +100,7 @@ export function InitiativeDetailView(props: {
             groupByCompletionStatus
             onReorderTasks={(taskIds) => void props.onReorderTasks?.(initiativeId, taskIds)}
           />
-        )}
+        ) : null}
       </SectionBlock>
       <ParticipantsPanel
         entityType="initiative"
