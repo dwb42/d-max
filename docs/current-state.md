@@ -1,6 +1,6 @@
 # d-max Current State
 
-Date: 2026-06-12
+Date: 2026-06-22
 
 Short handoff for fresh Codex/OpenClaw sessions. This file describes the
 implemented repository state; older plans are historical unless this file or
@@ -329,19 +329,25 @@ not yet expose hide controls.
 connects those assets to d-max entities. Binary media files are stored outside
 SQLite under `DMAX_MEDIA_STORAGE_DIR` (`data/media` by default, gitignored).
 Current first-class attachment UI is implemented for initiative and task detail
-pages. Assets can be images, audio, video, documents, or other allowed files;
-the API serves files through `/api/media/assets/:id/file` rather than exposing
-filesystem paths. Immediately after upload, d-max attempts to derive text for
-the asset: text/Markdown files are excerpted locally, audio/video files are
-transcribed with the configured OpenAI transcription model, and images/PDFs are
-summarized through the configured OpenAI media-analysis model when
-`OPENAI_API_KEY` is available. Analysis failures do not reject the upload; the
-asset stores a short status summary instead. Stored analysis text can be edited
-from the media modal, and media can be re-analyzed with an optional user focus
-prompt. OpenClaw/app chat receives media metadata plus truncated derived text
-(`summary`, `text_excerpt`, `transcript`) through context/tools; it does not
-receive or read raw binary files directly. The `media_links.entity_type` schema
-already includes `category`, `initiative`, `task`, `calendar_entry`, and
+pages. The shared media panel accepts normal file-picker uploads, drag/drop
+files, and pasted clipboard files such as screenshots via `Cmd/Ctrl+V` when the
+media area is focused; it also exposes a clipboard action that uses
+`navigator.clipboard.read()` when the browser permits direct clipboard reads.
+Clipboard files without a browser-provided name receive a generated
+`clipboard-YYYYMMDD-HHMMSS.ext` filename before going through the same upload
+pipeline. Assets can be images, audio, video, documents, or other allowed
+files; the API serves files through `/api/media/assets/:id/file` rather than
+exposing filesystem paths. Immediately after upload, d-max attempts to derive
+text for the asset: text/Markdown files are excerpted locally, audio/video
+files are transcribed with the configured OpenAI transcription model, and
+images/PDFs are summarized through the configured OpenAI media-analysis model
+when `OPENAI_API_KEY` is available. Analysis failures do not reject the upload;
+the asset stores a short status summary instead. Stored analysis text can be
+edited from the media modal, and media can be re-analyzed with an optional user
+focus prompt. OpenClaw/app chat receives media metadata plus truncated derived
+text (`summary`, `text_excerpt`, `transcript`) through context/tools; it does
+not receive or read raw binary files directly. The `media_links.entity_type`
+schema already includes `category`, `initiative`, `task`, `calendar_entry`, and
 `app_chat_message` for forward compatibility, but current first-class API/tool
 validation supports attachment operations only for categories, initiatives, and
 tasks. Browser upload UI exists for initiatives and tasks only.
@@ -557,6 +563,10 @@ Implemented behavior:
   not require manual reload.
 - Agent/tool state writes emit `app_state_events`; the browser subscribes via
   SSE and refetches visible state without a manual page reload.
+- Shared `RichText` rendering supports headings, ordered/unordered lists, bold
+  text, links, and GitHub-style Markdown tables, including tables embedded
+  after paragraph text in the same Markdown block. Wide tables render in a
+  horizontal scroll wrapper so detail pages and chat messages stay contained.
 - `/categories`: canonical life-area list page. It shows compact scan rows with
   category name, subtle emoji/color identity, description preview, and related
   counts. Creating a life area starts from the page action and opens an
@@ -671,7 +681,7 @@ Implemented behavior:
   summary, `projectPhase` for `type=project`, and start/end dates for
   `type=project`), markdown initiative memory rendered as UI, an initiative
   mindmap preview/full-screen modal, media attachments with
-  upload/preview/caption/remove controls, linked tasks, and a bottom
+  upload/paste/preview/caption/remove controls, linked tasks, and a bottom
   `Relations` panel. `Relations` shows Parent, Children, Predecessors, and
   Successors in a two-by-two grid, starts collapsed when the initiative has no
   relations, and uses compact list rows with `I`/`P` markers for idea/project
@@ -681,10 +691,11 @@ Implemented behavior:
   selectors). Each relation group can also create a new `idea` or `project` and
   immediately attach it as parent, child, predecessor, or successor. Media
   attachments open a modal for images, PDFs, text documents, audio, video, and
-  generic documents. Linked task rows show due dates when present, use only the
-  left completion toggle for open/done, and expose a right-side delete action
-  with a confirmation dialog explaining that notes, checklist, and media links
-  are removed too.
+  generic documents. The Maßnahmen section keeps its create action visible but
+  renders no heavy empty-state card when there are no tasks yet. Linked task
+  rows show due dates when present, use only the left completion toggle for
+  open/done, and expose a right-side delete action with a confirmation dialog
+  explaining that notes, checklist, and media links are removed too.
   The mindmap uses React Flow with deterministic radial auto-layout. It renders
   derived initiative root,
   Freestyle/Maßnahmen/Medien branches, task nodes, media nodes, and freestyle
@@ -721,9 +732,10 @@ Implemented behavior:
   Due-date editing uses the native date input/picker path as directly as the
   browser allows. Notes/description appear before checklist. Empty checklist and
   participant states are lightweight. Participant add/link opens in an
-  `EditModal`. Media attachments support upload/preview/caption/remove controls
-  and the shared media modal. Checklist items can be created, renamed, checked
-  off, deleted, and reordered in the task detail view only.
+  `EditModal`. Media attachments support upload, clipboard paste,
+  preview/caption/remove controls, and the shared media modal. Checklist items
+  can be created, renamed, checked off, deleted, and reordered in the task
+  detail view only.
 - `/drive`: LiveKit room creation, browser mic publishing, audio meter,
   start/end controls.
 - `/prompts`: debug view for prompts sent to OpenClaw. It shows the final

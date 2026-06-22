@@ -253,6 +253,8 @@ Displays a markdown description/context field.
 Default mode:
 
 - rendered markdown
+- Markdown table rendering through shared `RichText`, with wide tables
+  contained by horizontal scroll
 - concise empty state
 - optional heading only when it adds orientation
 - click-to-edit surface when editing is available
@@ -262,6 +264,23 @@ Default mode:
 Edit mode:
 
 - modal/drawer/full editor depending on length and complexity
+
+### `MediaAttachmentsPanel`
+
+Shared media attachment section for initiative and task detail pages.
+
+Should support:
+
+- file picker upload;
+- drag/drop upload;
+- clipboard paste upload from focused media area;
+- clipboard action button for browsers that support direct clipboard reads;
+- preview, caption edit, delete, reorder, modal inspection, analysis edit, and
+  re-analysis.
+
+Should not be reimplemented route-locally. Clipboard files without names should
+receive timestamped `clipboard-...` filenames and then use the same API upload
+path as ordinary files.
 
 ## Relationship components
 

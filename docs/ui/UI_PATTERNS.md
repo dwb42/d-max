@@ -264,6 +264,8 @@ Long text fields should not look like raw textareas by default.
 Default mode:
 
 - rendered markdown
+- GitHub-style Markdown tables rendered as contained, horizontally scrollable
+  tables when needed
 - summary-first display for long content
 - expand/collapse for long content
 - subtle empty state if empty
@@ -282,6 +284,28 @@ Examples:
 - person context
 - category scope
 - meeting notes
+
+Markdown tables are allowed in long text and chat/detail rendering when they
+carry useful comparison structure. Keep table styling contained inside the
+shared `RichText` renderer; do not create route-local table renderers for
+ordinary Markdown content.
+
+## 4a. Media attachment pattern
+
+Use the shared media attachment panel for initiative and task detail pages.
+
+Supported add paths:
+
+- file picker upload;
+- drag/drop files onto the media area;
+- clipboard paste (`Cmd/Ctrl+V`) when the media area is focused;
+- clipboard action button when the browser supports direct clipboard reads.
+
+Clipboard files should flow through the same upload/analyze/link pipeline as
+normal files. If the browser provides no filename, generate a stable
+timestamped `clipboard-...` name before upload. Keep the paste affordance inside
+the existing media section header; do not add separate page-level paste panels
+or duplicate media upload zones.
 
 ## 5. Relationship display pattern
 

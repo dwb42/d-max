@@ -328,9 +328,12 @@ and shown as the route-level error banner. The backend token exchange uses a
 bounded timeout and retry loop, but local network filters still must allow POST
 requests to `https://oauth2.googleapis.com/token`.
 
-Media uploads and generated chat audio replies default to local files under `data/media` with metadata in SQLite.
-Override with `DMAX_MEDIA_STORAGE_DIR` and `DMAX_MEDIA_MAX_UPLOAD_BYTES` when
-needed. Uploaded media is analyzed immediately when possible:
+Media uploads and generated chat audio replies default to local files under
+`data/media` with metadata in SQLite. Override with `DMAX_MEDIA_STORAGE_DIR`
+and `DMAX_MEDIA_MAX_UPLOAD_BYTES` when needed. Initiative and task detail pages
+can attach media by file picker, drag/drop, or pasting a clipboard file such as
+a screenshot into the focused media area. Uploaded media is analyzed immediately
+when possible:
 text/Markdown locally, audio/video through `OPENAI_TRANSCRIBE_MODEL`, and
 images/PDFs through `OPENAI_MEDIA_ANALYSIS_MODEL` when `OPENAI_API_KEY` is set.
 Stored analysis text can be edited in the media modal, and media analysis can
