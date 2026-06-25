@@ -1,4 +1,4 @@
-# d-max Memory Map
+# DMAX Memory Map
 
 Date: 2026-05-14
 
@@ -22,10 +22,10 @@ This file defines where Markdown-based memory and configuration belongs.
 
 | File | Role | Store Here | Do Not Store Here |
 | --- | --- | --- | --- |
-| `openclaw/workspace/AGENTS.md` | Runtime behavior for d-max agent | Conversation behavior, initiative/task workflow, app/voice behavior | Repo engineering rules, setup docs |
+| `openclaw/workspace/AGENTS.md` | Runtime behavior for DMAX agent | Conversation behavior, initiative/task workflow, app/voice behavior | Repo engineering rules, setup docs |
 | `openclaw/workspace/TOOLS.md` | Runtime tool-use policy | Durable state rules, confirmation rules, initiative markdown guidance | Architecture history, implementation details |
 | `openclaw/workspace/USER.md` | Minimal user context | Stable facts about Dietrich | Sensitive dossier-like notes |
-| `openclaw/workspace/SOUL.md` | Minimal product tone | Short desired feel of d-max | Detailed prompts or product plans |
+| `openclaw/workspace/SOUL.md` | Minimal product tone | Short desired feel of DMAX | Detailed prompts or product plans |
 | `openclaw/workspace/IDENTITY.md` | Optional agent identity | Empty or very short identity metadata | Product architecture |
 | `openclaw/workspace/HEARTBEAT.md` | Optional heartbeat tasks | Only active heartbeat tasks | General todo lists |
 
@@ -41,7 +41,8 @@ This file defines where Markdown-based memory and configuration belongs.
   `docs/agent/DMAX_CONTEXT_RESPONSE_CONTRACTS.md`.
 - Durable initiative memory lives in `initiatives.markdown`; durable
   organization description/context memory lives in `organizations.markdown`.
-  There is no person Markdown memory field yet.
+  People have a lightweight free-text `people.description`; there is still no
+  person Markdown memory field.
 - Treat `docs/archive/` as historical background only. Do not rely on archived
   specs or handoffs as current behavior without checking code and
   `docs/current-state.md`.

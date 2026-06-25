@@ -33,6 +33,9 @@ export function migrate(databasePath?: string): void {
     migrateAppChatResearchSummary(db);
     migrateMindmapReviewDomain(db);
     db.exec(schema);
+    migrateGmailPartyVisibility(db);
+    cleanupStaleGmailPartyLinks(db);
+    cleanupNonDirectGmailPartyLinks(db);
     ensureInboxCategory(db);
     migratePromptLogs(db);
     migrateStateEvents(db);
@@ -41,6 +44,84 @@ export function migrate(databasePath?: string): void {
   } finally {
     db.close();
   }
+}
+
+function migrateGmailPartyVisibility(db: ReturnType<typeof openDatabase>): void {
+  db.exec(`
+    create table if not exists gmail_message_party_visibility (
+      id integer primary key,
+      message_id integer not null references gmail_messages(id) on delete cascade,
+      party_id integer not null references parties(id) on delete cascade,
+      status text not null check (status in ('archived', 'trashed')),
+      created_at text not null,
+      updated_at text not null,
+      unique(message_id, party_id)
+    );
+    create index if not exists idx_gmail_message_party_visibility_party on gmail_message_party_visibility(party_id, status, message_id);
+  `);
+}
+
+function cleanupStaleGmailPartyLinks(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "gmail_message_party_links") || !tableExists(db, "party_contact_points")) {
+    return;
+  }
+  db.exec(`
+    delete from gmail_message_party_links
+    where contact_point_id is not null
+      and not exists (
+        select 1
+        from party_contact_points cp
+        where cp.id = gmail_message_party_links.contact_point_id
+          and cp.type = 'email'
+          and lower(cp.normalized_value) = lower(gmail_message_party_links.matched_email)
+      );
+  `);
+}
+
+function cleanupNonDirectGmailPartyLinks(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "gmail_message_party_links") || !tableExists(db, "gmail_messages") || !tableExists(db, "gmail_mailboxes")) {
+    return;
+  }
+  db.exec(`
+    delete from gmail_message_party_links
+    where not exists (
+      select 1
+      from gmail_messages gm
+      where gm.id = gmail_message_party_links.message_id
+        and (
+          (
+            exists (
+              select 1
+              from json_each(gm.from_json) sender
+              where lower(json_extract(sender.value, '$.email')) = lower(gmail_message_party_links.matched_email)
+            )
+            and exists (
+              select 1
+              from gmail_mailboxes mb
+              where lower(coalesce(nullif(mb.email_address, ''), mb.account_label)) in (
+                select lower(json_extract(recipient.value, '$.email')) from json_each(gm.to_json) recipient
+                union select lower(json_extract(recipient.value, '$.email')) from json_each(gm.cc_json) recipient
+                union select lower(json_extract(recipient.value, '$.email')) from json_each(gm.bcc_json) recipient
+              )
+            )
+          )
+          or (
+            exists (
+              select 1
+              from gmail_mailboxes mb
+              where lower(coalesce(nullif(mb.email_address, ''), mb.account_label)) in (
+                select lower(json_extract(sender.value, '$.email')) from json_each(gm.from_json) sender
+              )
+            )
+            and lower(gmail_message_party_links.matched_email) in (
+              select lower(json_extract(recipient.value, '$.email')) from json_each(gm.to_json) recipient
+              union select lower(json_extract(recipient.value, '$.email')) from json_each(gm.cc_json) recipient
+              union select lower(json_extract(recipient.value, '$.email')) from json_each(gm.bcc_json) recipient
+            )
+          )
+        )
+    );
+  `);
 }
 
 function recoverScratchMigrationTables(db: ReturnType<typeof openDatabase>): void {
@@ -621,6 +702,7 @@ function migrateWhoDomain(db: ReturnType<typeof openDatabase>): void {
       salutation text not null default 'unknown' check (salutation in ('mr', 'mrs', 'unknown')),
       academic_title text,
       name_suffix text,
+      description text,
       created_at text not null,
       updated_at text not null
     );
@@ -732,7 +814,47 @@ function migrateWhoDomain(db: ReturnType<typeof openDatabase>): void {
   `);
 
   ensureColumn(db, "organizations", "markdown", "text not null default ''");
+  ensureColumn(db, "people", "description", "text");
   ensureWhoSystemTypes(db);
+  normalizePersonPartyDisplayNames(db);
+}
+
+function normalizePersonPartyDisplayNames(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "people") || !tableExists(db, "parties")) {
+    return;
+  }
+
+  const rows = db
+    .prepare(
+      `select p.id, p.display_name, pe.first_name, pe.last_name
+       from parties p
+       join people pe on pe.party_id = p.id
+       where p.type = 'person'`
+    )
+    .all() as Array<{ id: number; display_name: string; first_name: string | null; last_name: string | null }>;
+  const updatePerson = db.prepare("update people set first_name = ?, last_name = ?, updated_at = ? where party_id = ?");
+  const updateParty = db.prepare("update parties set display_name = ?, updated_at = ? where id = ? and type = 'person'");
+  const now = nowIso();
+
+  for (const row of rows) {
+    let firstName = row.first_name?.trim() || null;
+    let lastName = row.last_name?.trim() || null;
+    if (!firstName && !lastName) {
+      const parts = row.display_name.trim().split(/\s+/).filter(Boolean);
+      if (parts.length > 1) {
+        firstName = parts.slice(0, -1).join(" ");
+        lastName = parts[parts.length - 1] ?? null;
+      } else {
+        firstName = parts[0] ?? null;
+      }
+      updatePerson.run(firstName, lastName, now, row.id);
+    }
+
+    const derivedName = [firstName, lastName].filter(Boolean).join(" ");
+    if (derivedName && derivedName !== row.display_name) {
+      updateParty.run(derivedName, now, row.id);
+    }
+  }
 }
 
 function migrateMindmapReviewDomain(db: ReturnType<typeof openDatabase>): void {

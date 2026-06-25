@@ -35,17 +35,19 @@ describe("party repositories", () => {
       firstName: "Dietrich",
       lastName: "Weger",
       salutation: "mr",
-      academicTitle: "Dr."
+      academicTitle: "Dr.",
+      description: "Kontakt fuer DMAX."
     });
     const organization = organizations.create({ name: "DMAX Labs", organizationType: "company", markdown: "## Context" });
 
     expect(person).toMatchObject({
       type: "person",
-      displayName: "Dr. Dietrich Weger",
       salutation: "mr",
       firstName: "Dietrich",
-      lastName: "Weger"
+      lastName: "Weger",
+      description: "Kontakt fuer DMAX."
     });
+    expect(people.update({ id: person.id, description: "" }).description).toBeNull();
     expect(organization).toMatchObject({ type: "organization", displayName: "DMAX Labs", name: "DMAX Labs", markdown: "## Context" });
     expect(people.list().map((entry) => entry.id)).toContain(person.id);
     expect(organizations.list().map((entry) => entry.id)).toContain(organization.id);
@@ -134,8 +136,40 @@ describe("party repositories", () => {
     );
   });
 
+  it("includes contact points and active party relationships on entity participants", () => {
+    const category = new CategoryRepository(db).create({ name: "Business" });
+    const initiative = new InitiativeRepository(db).create({ categoryId: category.id, name: "Partner outreach" });
+    const people = new PersonRepository(db);
+    const organizations = new OrganizationRepository(db);
+    const relationships = new PartyRelationshipRepository(db);
+    const relationshipTypes = new RelationshipTypeRepository(db);
+    const contactPoints = new PartyContactPointRepository(db);
+    const participants = new EntityParticipantRepository(db);
+    const person = people.create({ firstName: "Ewa", lastName: "Okolski" });
+    const organization = organizations.create({ name: "Kulturland" });
+    const worksFor = relationshipTypes.findByKey("works_for")!;
+
+    contactPoints.create({ partyId: person.id, type: "email", value: "ewa@example.org", isPrimary: true, isPreferred: true });
+    relationships.create({ fromPartyId: person.id, toPartyId: organization.id, relationshipTypeId: worksFor.id });
+    participants.create({ partyId: person.id, entityType: "initiative", entityId: initiative.id, roleLabel: "Kontaktperson" });
+
+    const [participant] = participants.list({ entityType: "initiative", entityId: initiative.id });
+
+    expect(participant.contactPoints).toEqual([
+      expect.objectContaining({ type: "email", value: "ewa@example.org", isPrimary: true, isPreferred: true })
+    ]);
+    expect(participant.relationships).toEqual([
+      expect.objectContaining({
+        fromPartyId: person.id,
+        toPartyId: organization.id,
+        relationshipType: expect.objectContaining({ key: "works_for" }),
+        toParty: expect.objectContaining({ displayName: "Kulturland" })
+      })
+    ]);
+  });
+
   it("stores contact points and postal addresses", () => {
-    const person = new PersonRepository(db).create({ displayName: "Herr Weger", salutation: "mr" });
+    const person = new PersonRepository(db).create({ firstName: "Dietrich", lastName: "Weger", salutation: "mr" });
     const contactPoints = new PartyContactPointRepository(db);
     const addresses = new PartyAddressRepository(db);
 

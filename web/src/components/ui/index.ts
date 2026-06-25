@@ -8,5 +8,6 @@ export { ErrorState } from "./ErrorState.js";
 export { InlineEditableText } from "./InlineEditableText.js";
 export { MetadataGrid } from "./MetadataGrid.js";
 export { RelationGroup, RelationItem, RelationList } from "./RelationList.js";
+export type { RelationEmptyMode } from "./RelationList.js";
 export { RichText, renderInlineMarkup } from "./RichText.js";
 export { SectionBlock, SectionHeader } from "./SectionBlock.js";

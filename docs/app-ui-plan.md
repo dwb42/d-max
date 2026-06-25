@@ -1,4 +1,4 @@
-# d-max App UI Notes
+# DMAX App UI Notes
 
 Active UI notes. Implemented state belongs in `docs/current-state.md`.
 Canonical UI rules live in `docs/ui/`. The forward-looking post-refactor
@@ -11,7 +11,7 @@ technical roadmap lives in `docs/architecture/DMAX_NEXT_WORK_PLAN.md`.
 - Canonical entity detail and list pages are complete. Route-level list
   compositions live under `web/src/pages/lists/`; canonical detail compositions
   live under `web/src/pages/details/`.
-- Contextual d-max chat stays in a drawer from list/detail contexts.
+- Contextual DMAX chat stays in a drawer from list/detail contexts.
 - Direct UI actions use API routes; natural-language turns route through
   OpenClaw and tools.
 - Current primary navigation is organized around life areas, ideas, projects,
@@ -22,7 +22,9 @@ technical roadmap lives in `docs/architecture/DMAX_NEXT_WORK_PLAN.md`.
   dashboards. `/people` and `/organizations` use canonical list pages with
   create actions behind modals. `/people/:id` and `/organizations/:id` use the
   canonical detail pattern for identity, contact points, addresses,
-  relationships, and DMAX contexts.
+  relationships, and DMAX contexts. `/people/:id` reserves the main content
+  column for person-specific email communication and keeps contact,
+  description, addresses, DMAX contexts, and metadata in the right sidebar.
 - Initiative and task detail pages expose people/organization participation
   through a compact `Beteiligte` panel. Role display should preserve both a
   configured role type and an additional free-text role label when both exist.

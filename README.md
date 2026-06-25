@@ -1,4 +1,4 @@
-# d-max
+# DMAX
 
 Agentic initiative, task, and initiative-memory system for Dietrich.
 
@@ -83,10 +83,16 @@ Set the provider secrets the enabled features need, for example
 `OPENAI_API_KEY` is only required for direct API-key fallback paths or media
 analysis/transcription features that still use OpenAI APIs directly.
 `DMAX_WEB_BASE_URL` and `GOOGLE_OAUTH_REDIRECT_URI` must point at the public
-domain.
+domain. The same Google OAuth client and redirect URI are used for Google
+Calendar, Gmail mailbox OAuth, and the optional Google Workspace/gog import;
+enable the scopes required by the features you connect.
+For Gmail mailboxes, DMAX currently requests `gmail.readonly`, `gmail.compose`,
+and `gmail.modify`: readonly powers local message sync, compose powers draft
+creation/sending, and modify powers archive/trash actions from party detail
+pages. Gmail tokens stay in runtime OAuth token storage, not in SQLite.
 
 Google Workspace file access for the OpenClaw Google Workspace subagent uses `gog`
-inside `dmax-openclaw`, not a d-max database tool. Its config should live in
+inside `dmax-openclaw`, not a DMAX database tool. Its config should live in
 the OpenClaw state volume via `XDG_CONFIG_HOME=/app/data/openclaw-state/xdg-config`.
 For local development, `/config` can start the Google Workspace OAuth flow and
 import the resulting refresh token into `gog`. For the encrypted file keyring in

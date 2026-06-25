@@ -1,4 +1,4 @@
-# Codex Instructions For d-max
+# Codex Instructions For DMAX
 
 ## Freshness
 
@@ -25,13 +25,13 @@ Code is authoritative when Markdown disagrees.
 
 ## Product Boundaries
 
-d-max is Dietrich's agentic initiative, task, relationship, and initiative-memory system:
+DMAX is Dietrich's agentic initiative, task, relationship, and initiative-memory system:
 
 ```text
-Telegram d-max-dev -> local OpenClaw -> d-max tools -> local SQLite
-Telegram d-max -> VPS dmax-api container -> dmax-openclaw gateway -> d-max tools -> production SQLite
-Browser contextual chat -> d-max API -> dmax-openclaw gateway -> tools -> SQLite
-Browser /drive -> LiveKit -> d-max voice agent -> xAI realtime
+Telegram d-max-dev -> local OpenClaw -> DMAX tools -> local SQLite
+Telegram d-max -> VPS dmax-api container -> dmax-openclaw gateway -> DMAX tools -> production SQLite
+Browser contextual chat -> DMAX API -> dmax-openclaw gateway -> tools -> SQLite
+Browser /drive -> LiveKit -> DMAX voice agent -> xAI realtime
 ```
 
 Local OpenClaw currently uses `openai-codex/gpt-5.5`. Do not switch Telegram or
@@ -76,7 +76,8 @@ volume operations.
   spacing derived from measured subtree extents to avoid visible child-node
   collisions.
 - Organization description/context memory: durable markdown stored in
-  `organizations.markdown`. There is no person markdown field yet.
+  `organizations.markdown`. People have a lightweight free-text description in
+  `people.description`; there is no person markdown field yet.
 - Who dimension: people and organizations are first-class parties. People and
   organizations may participate in initiatives/tasks/calendar entries via
   `entity_participants`, and categories are not participant targets.
@@ -102,7 +103,7 @@ volume operations.
 - Browser Drive Mode currently bridges realtime audio only; durable voice tool
   commits are not wired.
 - Google Workspace file work is isolated in the `dmax-google-workspace`
-  OpenClaw subagent and uses `gog`, not d-max database tools. Workspace writes
+  OpenClaw subagent and uses `gog`, not DMAX database tools. Workspace writes
   require explicit target/change confirmation and OAuth/keyring state must stay
   outside the repo.
 - Add setup/dev/test scripts when needed.

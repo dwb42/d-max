@@ -71,6 +71,7 @@ import {
   createGoogleEventFromDmax,
   createGoogleOnlyEvent,
   createGoogleCalendarAuthUrl,
+  createGmailAuthUrl,
   createGoogleWorkspaceAuthUrl,
   createCalendarSource,
   createChatConversation,
@@ -82,6 +83,7 @@ import {
   createPartyContactPoint,
   createPartyAddress,
   createVoiceSession,
+  deletePartyRelationship,
   deleteInitiativeRelation,
   deleteEntityParticipant,
   deletePartyContactPoint,
@@ -99,6 +101,7 @@ import {
   fetchGoogleCalendarAccounts,
   fetchGoogleCalendars,
   fetchGoogleCalendarAuthStatus,
+  fetchGmailMailboxes,
   fetchGoogleWorkspaceAuthStatus,
   fetchHiddenCalendarEvents,
   fetchInitiativeGraph,
@@ -127,6 +130,7 @@ import {
   subscribeStateEvents,
   streamChatMessage,
   hideCalendarEvent,
+  syncGmailMailbox,
   transcribeVoiceMessage,
   updateCalendarSource,
   updateCategory,
@@ -136,6 +140,7 @@ import {
   updatePerson,
   updateInitiative,
   updateGoogleOnlyEvent,
+  updateGmailMailbox,
   updateMediaAssetAnalysis,
   updateMediaAttachment,
   updatePlanningCanvasNode,
@@ -144,6 +149,7 @@ import {
   updateTaskStatus,
   unhideCalendarEvent,
   unlinkCalendarBinding,
+  upsertGmailMailbox,
   uploadMediaAttachment
 } from "./api.js";
 import {
@@ -188,11 +194,13 @@ import {
   InitiativeDetailHeader,
   InitiativeDetailView,
   OrganizationDetailView,
+  PersonHeaderRelations,
   PersonDetailView,
+  personDisplayTitle,
+  personName,
   TaskDetailView,
   TaskHeaderTitle,
   categoryHeaderFacts,
-  personHeaderContext,
   taskHeaderFacts
 } from "./pages/details/index.js";
 import type {
@@ -212,6 +220,7 @@ import type {
   GoogleCalendarAccountStatus,
   GoogleCalendarAuthStatus,
   GoogleCalendarListItem,
+  GmailMailboxWithStatus,
   GoogleWorkspaceAuthStatus,
   ChatActivity,
   ChatResearchSummary,
@@ -601,7 +610,7 @@ function getRouteConversationContext(
   if (route.view === "person" && route.partyId) {
     return {
       context: { type: "person", partyId: route.partyId },
-      label: personDetail?.person.displayName ?? `Person ${route.partyId}`
+      label: personDetail?.person ? personName(personDetail.person) : `Person ${route.partyId}`
     };
   }
 
@@ -823,12 +832,14 @@ export default function App() {
 
   useEffect(() => {
     let active = true;
+    let timeoutId: number | null = null;
 
     async function loadOpenClawStatus() {
       try {
         const status = await fetchOpenClawStatus();
         if (active) {
           setOpenClawStatus(status);
+          timeoutId = window.setTimeout(loadOpenClawStatus, status.state === "ready" ? 15_000 : 2_000);
         }
       } catch (err) {
         if (active) {
@@ -837,21 +848,40 @@ export default function App() {
             detail: err instanceof Error ? err.message : "OpenClaw status request failed.",
             checkedAt: new Date().toISOString()
           });
+          timeoutId = window.setTimeout(loadOpenClawStatus, 2_000);
         }
       }
     }
 
     void loadOpenClawStatus();
-    const interval = window.setInterval(() => void loadOpenClawStatus(), 15_000);
     return () => {
       active = false;
-      window.clearInterval(interval);
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
     };
   }, []);
 
   useEffect(() => {
-    void prewarmOpenClaw().catch(() => undefined);
-  }, [agentTargetKey]);
+    let active = true;
+
+    async function prewarmAndRefreshStatus() {
+      try {
+        await prewarmOpenClaw(agentTarget.context);
+        const status = await fetchOpenClawStatus();
+        if (active) {
+          setOpenClawStatus(status);
+        }
+      } catch {
+        // The status polling effect owns user-visible availability state.
+      }
+    }
+
+    void prewarmAndRefreshStatus();
+    return () => {
+      active = false;
+    };
+  }, [agentTarget.context, agentTargetKey]);
 
   useEffect(() => {
     if (!agentDrawer.open || chatBusy) {
@@ -934,7 +964,7 @@ export default function App() {
       const activeContext = agentDrawer.open ? agentDrawer.context : null;
       const activeConversationId = agentDrawer.open ? agentDrawer.conversationId : null;
       if (!activeContext) {
-        throw new Error("Kein aktiver d-max Kontext geöffnet.");
+        throw new Error("Kein aktiver DMAX-Kontext geöffnet.");
       }
       setActiveActivityConversationId(activeConversationId ?? null);
       const result = await streamChatMessage(
@@ -1081,6 +1111,8 @@ export default function App() {
         conversations
       });
       setChatMessages(messages);
+      const status = await fetchOpenClawStatus();
+      setOpenClawStatus(status);
     } catch (err) {
       setError(contextualAgentErrorMessage(err));
     }
@@ -1259,7 +1291,7 @@ export default function App() {
       setOverview(data);
     } catch (err) {
       if (!options.silentErrors) {
-        setError(err instanceof Error ? err.message : "Failed to load d-max state.");
+        setError(err instanceof Error ? err.message : "Failed to load DMAX state.");
       }
     }
   }
@@ -1847,31 +1879,24 @@ export default function App() {
         />
       ) : (
         <EntityHeader
-          titleContent={(
-            <InlineEditableText
-              value={person?.displayName ?? "Person"}
-              label="Personenname"
-              required
-              disabled={!person}
-              className="entity-title-edit"
-              onSave={async (value) => {
-                if (!person) return;
-                await updatePerson(person.id, { displayName: value });
-                setPersonDetail(await fetchPersonDetail(person.id));
-                setPeopleList(await fetchPeople());
-              }}
+          title={person ? personDisplayTitle(person) : "Person"}
+          subtitleContent={person && personDetail ? (
+            <PersonHeaderRelations
+              person={person}
+              relationships={personDetail.relationships}
+              onOpenPerson={(partyId) => navigate(`/people/${partyId}`)}
+              onOpenOrganization={(partyId) => navigate(`/organizations/${partyId}`)}
             />
-          )}
-          subtitle={person ? personHeaderContext(person) : "Wird geladen"}
+          ) : person ? null : "Wird geladen"}
           secondaryActions={personDetail ? (
             <button
               type="button"
               className="small-button header-secondary-action"
               onClick={() => setPersonCoreModalOpen(true)}
-              title="Stammdaten bearbeiten"
+              title="Person anpassen"
             >
               <Pencil size={15} />
-              Stammdaten
+              Anpassen
             </button>
           ) : null}
         />
@@ -2242,6 +2267,8 @@ export default function App() {
             participantRoleTypes={participantRoleTypes}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
+            onOpenPerson={(partyId) => navigate(`/people/${partyId}`)}
+            onOpenOrganization={(partyId) => navigate(`/organizations/${partyId}`)}
             onCreateParticipant={async (input) => {
               await createEntityParticipant(input);
               if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
@@ -2430,6 +2457,9 @@ export default function App() {
             loadError={personLoadError}
             initiatives={overview?.initiatives ?? []}
             tasks={overview?.tasks ?? []}
+            people={peopleList ?? []}
+            organizations={organizationList ?? []}
+            relationshipTypes={relationshipTypes}
             coreModalOpen={personCoreModalOpen}
             onCloseCoreModal={() => setPersonCoreModalOpen(false)}
             onUpdatePerson={async (partyId, input) => {
@@ -2459,6 +2489,14 @@ export default function App() {
             }}
             onDeleteAddress={async (addressId) => {
               await deletePartyAddress(addressId);
+              if (route.partyId) setPersonDetail(await fetchPersonDetail(route.partyId));
+            }}
+            onCreateRelationship={async (input) => {
+              await createPartyRelationship(input);
+              if (route.partyId) setPersonDetail(await fetchPersonDetail(route.partyId));
+            }}
+            onDeleteRelationship={async (relationshipId) => {
+              await deletePartyRelationship(relationshipId);
               if (route.partyId) setPersonDetail(await fetchPersonDetail(route.partyId));
             }}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
@@ -2909,7 +2947,7 @@ function ChatView(props: {
               }
             }}
             rows={3}
-            placeholder="Nachricht an d-max"
+            placeholder="Nachricht an DMAX"
           />
         ) : null}
         {props.voicePhase === "recording" ? (
@@ -3102,7 +3140,7 @@ function AgentDrawer(props: {
   const [showOldChats, setShowOldChats] = useState(false);
 
   return (
-    <aside className="agent-drawer" aria-label="Contextual d-max chat">
+    <aside className="agent-drawer" aria-label="Contextual DMAX chat">
       <div className="agent-drawer-header">
         <div className="agent-context-title">
           <span>DMAX-Kontext</span>
@@ -4070,6 +4108,7 @@ function ConfigView() {
   const [accounts, setAccounts] = useState<GoogleCalendarAccountStatus[]>([]);
   const [globalStatus, setGlobalStatus] = useState<GoogleCalendarAuthStatus | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState<GoogleWorkspaceAuthStatus | null>(null);
+  const [gmailMailboxes, setGmailMailboxes] = useState<GmailMailboxWithStatus[]>([]);
   const [accountCalendars, setAccountCalendars] = useState<Record<string, { loading: boolean; calendars: GoogleCalendarListItem[]; error: string | null }>>({});
   const [newAccountLabel, setNewAccountLabel] = useState(initialGoogleAccount);
   const [addAccountOpen, setAddAccountOpen] = useState(false);
@@ -4088,16 +4127,18 @@ function ConfigView() {
   }, [accounts, newAccountLabel, sources]);
 
   async function loadConfig() {
-    const [nextSources, nextAccounts, nextGlobalStatus, nextWorkspaceStatus] = await Promise.all([
+    const [nextSources, nextAccounts, nextGlobalStatus, nextWorkspaceStatus, nextGmailMailboxes] = await Promise.all([
       fetchCalendarSources(),
       fetchGoogleCalendarAccounts(),
       fetchGoogleCalendarAuthStatus(),
-      fetchGoogleWorkspaceAuthStatus()
+      fetchGoogleWorkspaceAuthStatus(),
+      fetchGmailMailboxes()
     ]);
     setSources(nextSources);
     setAccounts(nextAccounts);
     setGlobalStatus(nextGlobalStatus);
     setWorkspaceStatus(nextWorkspaceStatus);
+    setGmailMailboxes(nextGmailMailboxes);
     await Promise.all(nextAccounts.filter((account) => account.status.connected).map((account) => loadAccountCalendars(account.accountLabel)));
   }
 
@@ -4141,6 +4182,17 @@ function ConfigView() {
       window.location.href = authUrl;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Google Workspace OAuth konnte nicht gestartet werden.");
+    }
+  }
+
+  async function connectGmailAccount(accountLabel: string) {
+    try {
+      setError(null);
+      await upsertGmailMailbox({ accountLabel: accountLabel.trim(), displayName: accountLabel.trim(), emailAddress: accountLabel.trim(), enabled: true, syncEnabled: true });
+      const authUrl = await createGmailAuthUrl({ loginHint: accountLabel.trim() });
+      window.location.href = authUrl;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gmail OAuth konnte nicht gestartet werden.");
     }
   }
 
@@ -4404,6 +4456,89 @@ function ConfigView() {
             </article>
           ))}
         </div>
+        </section>
+      </div>
+
+      <div className="config-section">
+        <div className="config-section-header">
+          <div>
+            <h2>Gmail-Postfächer</h2>
+            <p>Zentrale Postfächer fuer E-Mail-Verlauf, Plain-Text-Drafts und bestaetigten Versand.</p>
+          </div>
+        </div>
+        {globalStatus && !globalStatus.configured ? (
+          <div className="config-hint">
+            Setze `GOOGLE_OAUTH_CLIENT_ID` und `GOOGLE_OAUTH_CLIENT_SECRET`. Authorized redirect URI in Google:
+            <code>{globalStatus.redirectUri}</code>
+          </div>
+        ) : null}
+        <label className="config-field">
+          <span>Gmail-Konto</span>
+          <input
+            list="google-account-options"
+            value={newAccountLabel}
+            onChange={(event) => setNewAccountLabel(event.target.value)}
+            placeholder="name@gmail.com"
+          />
+        </label>
+        <div className="google-connect-action">
+          <button className="primary-action compact" type="button" disabled={!globalStatus?.configured || !newAccountLabel.trim()} onClick={() => void connectGmailAccount(newAccountLabel)}>
+            <Send size={16} />
+            Gmail-Postfach verbinden
+          </button>
+        </div>
+        <section className="config-subsection">
+          <div className="config-subsection-title">
+            <strong>Verbundene Gmail-Postfächer</strong>
+            <span>{gmailMailboxes.length} Postfächer</span>
+          </div>
+          {gmailMailboxes.length === 0 ? <EmptyState title="Noch kein Gmail-Postfach verbunden" /> : null}
+          <div className="config-source-list">
+            {gmailMailboxes.map((mailbox) => (
+              <article className="config-source-row gmail-mailbox-row" key={mailbox.id}>
+                <span className="calendar-category-dot" style={{ background: mailbox.authStatus.connected ? "#27806f" : "#9b5d42" }} />
+                <div>
+                  <strong>{mailbox.displayName}</strong>
+                  <span>{mailbox.accountLabel} · {mailbox.authStatus.connected ? "OAuth verbunden" : "OAuth fehlt"}</span>
+                  {mailbox.lastSyncError ? <span className="inline-error">{mailbox.lastSyncError}</span> : null}
+                </div>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={mailbox.syncEnabled}
+                    onChange={async (event) => {
+                      await updateGmailMailbox(mailbox.id, { syncEnabled: event.target.checked });
+                      await loadConfig();
+                    }}
+                  />
+                  Sync
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={mailbox.sendEnabled}
+                    onChange={async (event) => {
+                      await updateGmailMailbox(mailbox.id, { sendEnabled: event.target.checked });
+                      await loadConfig();
+                    }}
+                  />
+                  Senden
+                </label>
+                <button className="secondary-action compact" type="button" disabled={!mailbox.authStatus.connected || !mailbox.syncEnabled} onClick={async () => {
+                  await syncGmailMailbox(mailbox.id);
+                  await loadConfig();
+                }}>
+                  Sync
+                </button>
+                <button className="secondary-action compact" type="button" onClick={() => void connectGmailAccount(mailbox.accountLabel)}>
+                  OAuth
+                </button>
+                {!mailbox.authStatus.hasRequiredScope && mailbox.authStatus.connected ? (
+                  <span className="readonly-pill">Scopes fehlen</span>
+                ) : null}
+              </article>
+            ))}
+          </div>
         </section>
       </div>
 
@@ -6973,8 +7108,8 @@ function OnboardingView({ onCreateCategory, onNavigate }: { onCreateCategory: (n
     <section className="onboarding">
       <div>
         <span className="eyebrow">Fresh start</span>
-        <h2>Baue dein d-max Memory von null auf.</h2>
-        <p>Starte mit Kategorien oder Drive Mode. Projekte und Tasks entstehen weiter ueber d-max im passenden Kontext.</p>
+        <h2>Baue dein DMAX-Memory von null auf.</h2>
+        <p>Starte mit Kategorien oder Drive Mode. Projekte und Tasks entstehen weiter ueber DMAX im passenden Kontext.</p>
       </div>
       <div className="quick-actions">
         <button className="secondary-action" onClick={() => onNavigate("/drive")}>
@@ -7309,7 +7444,7 @@ function subtitleForView(view: View): string {
     organization: "Kontaktwege, Beziehungen und Beteiligungen.",
     initiative: "Memory, Massnahmen und Kontext.",
     task: "Status, Prioritaet, Notizen und Kontext.",
-    prompts: "Debug view for d-max prompts sent to OpenClaw.",
+    prompts: "Debug view for DMAX prompts sent to OpenClaw.",
     promptTemplates: "Kontextabhängige Vorlagen für DMAX und OpenClaw.",
     tasks: "Konkrete Maßnahmen über aktive Einträge hinweg."
   }[view];

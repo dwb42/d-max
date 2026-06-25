@@ -4,7 +4,8 @@ import { DescriptionBlock, EditModal, EmptyState, EntityDetailPage, ErrorState, 
 import { AddressBlock, ContactPointList } from "../../components/party/index.js";
 import type { AddressInput, ContactPointInput } from "../../components/party/index.js";
 import type { EntityParticipant, Initiative, Organization, OrganizationDetail, PartyRelationshipWithParties, Person, RelationshipType, Task } from "../../types.js";
-import { entityTypeLabel, formatDateTimeForUi, participantRoleSummary } from "./detailUtils.js";
+import { entityTypeLabel, formatDateTimeForUi, participantRoleSummary, personName } from "./detailUtils.js";
+import { PartyEmailSection } from "./PersonDetailPage.js";
 
 export function OrganizationDetailView(props: {
   detail: OrganizationDetail | null;
@@ -103,6 +104,7 @@ export function OrganizationDetailView(props: {
           onDelete={props.onDeleteAddress}
         />
       </div>
+      <PartyEmailSection partyId={organization.id} contactEmails={props.detail.contactPoints.filter((contactPoint) => contactPoint.type === "email").map((contactPoint) => contactPoint.value)} />
       <OrganizationRelationsSection
         organization={organization}
         people={props.people}
@@ -304,7 +306,7 @@ function OrganizationRelationsSection(props: {
     organizationRelationshipTypeId || (defaultOrganizationRelationshipType ? String(defaultOrganizationRelationshipType.id) : "");
 
   return (
-    <SectionBlock title="Beziehungen">
+    <>
       <div className="relation-section-stack">
         <RelationGroup
           title="Personen"
@@ -408,7 +410,7 @@ function OrganizationRelationsSection(props: {
             <select value={personId} onChange={(event) => setPersonId(event.target.value)} disabled={saving}>
               <option value="">Person auswählen</option>
               {availablePeople.map((person) => (
-                <option key={person.id} value={person.id}>{person.displayName}</option>
+                <option key={person.id} value={person.id}>{personName(person)}</option>
               ))}
             </select>
           </label>
@@ -486,7 +488,7 @@ function OrganizationRelationsSection(props: {
           </label>
         </EditModal>
       ) : null}
-    </SectionBlock>
+    </>
   );
 }
 

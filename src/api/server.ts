@@ -11,6 +11,8 @@ import { assertCanLinkExistingProjectSpan } from "../calendar/calendar-linking-r
 import { GoogleCalendarAuth } from "../calendar/google-calendar-auth.js";
 import { GoogleCalendarProvider } from "../calendar/google-calendar-provider.js";
 import { GoogleWorkspaceGogAuth } from "../google-workspace/gog-auth.js";
+import { GmailProvider } from "../gmail/gmail-provider.js";
+import { GmailRepository } from "../gmail/gmail-repository.js";
 import { CalendarEventBindingRepository } from "../repositories/calendar-event-bindings.js";
 import { CalendarEventVisibilityRepository } from "../repositories/calendar-event-visibility.js";
 import { CalendarEntryRepository } from "../repositories/calendar-entries.js";
@@ -74,6 +76,7 @@ const calendarEventVisibility = new CalendarEventVisibilityRepository(db);
 const calendarSources = new CalendarSourceRepository(db);
 const googleCalendarAuth = new GoogleCalendarAuth();
 const googleWorkspaceAuth = new GoogleWorkspaceGogAuth();
+const gmail = new GmailRepository(db);
 const initiatives = new InitiativeRepository(db);
 const initiativeRelations = new InitiativeRelationRepository(db);
 const initiativeMindmap = new InitiativeMindmapRepository(db);
@@ -425,6 +428,17 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/config/gmail/mailboxes") {
+      const mailboxes = gmail.listMailboxes();
+      sendJson(res, 200, {
+        mailboxes: mailboxes.map((mailbox) => ({
+          ...mailbox,
+          authStatus: googleCalendarAuth.gmailStatus(mailbox.accountLabel)
+        }))
+      });
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/config/google-calendar/auth-url") {
       const body = googleCalendarAuthUrlBody.parse(await readJson(req));
       sendJson(res, 200, { authUrl: googleCalendarAuth.createAuthorizationUrl(body.loginHint ?? null) });
@@ -434,6 +448,44 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/config/google-workspace/auth-url") {
       const body = googleCalendarAuthUrlBody.parse(await readJson(req));
       sendJson(res, 200, { authUrl: googleCalendarAuth.createWorkspaceAuthorizationUrl(body.loginHint ?? null) });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/config/gmail/auth-url") {
+      const body = googleCalendarAuthUrlBody.parse(await readJson(req));
+      sendJson(res, 200, { authUrl: googleCalendarAuth.createGmailAuthorizationUrl(body.loginHint ?? null) });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/config/gmail/mailboxes") {
+      const body = upsertGmailMailboxBody.parse(await readJson(req));
+      const mailbox = gmail.upsertMailbox(body);
+      sendJson(res, 200, { mailbox: { ...mailbox, authStatus: googleCalendarAuth.gmailStatus(mailbox.accountLabel) } });
+      return;
+    }
+
+    const gmailMailboxMatch = url.pathname.match(/^\/api\/config\/gmail\/mailboxes\/(\d+)$/);
+    if (req.method === "PATCH" && gmailMailboxMatch) {
+      const body = updateGmailMailboxBody.parse(await readJson(req));
+      const mailbox = gmail.updateMailbox(Number(gmailMailboxMatch[1]), body);
+      sendJson(res, 200, { mailbox: { ...mailbox, authStatus: googleCalendarAuth.gmailStatus(mailbox.accountLabel) } });
+      return;
+    }
+
+    const gmailMailboxSyncMatch = url.pathname.match(/^\/api\/config\/gmail\/mailboxes\/(\d+)\/sync$/);
+    if (req.method === "POST" && gmailMailboxSyncMatch) {
+      const mailbox = gmail.findMailboxById(Number(gmailMailboxSyncMatch[1]));
+      if (!mailbox) {
+        sendJson(res, 404, { error: "Gmail mailbox not found." });
+        return;
+      }
+      try {
+        const result = await new GmailProvider(googleCalendarAuth, gmail).syncMailbox(mailbox);
+        sendJson(res, 200, { result, mailbox: gmail.findMailboxById(mailbox.id) });
+      } catch (error) {
+        gmail.updateMailboxSyncState(mailbox.id, { lastSyncError: error instanceof Error ? error.message : "Gmail sync failed." });
+        throw error;
+      }
       return;
     }
 
@@ -454,6 +506,80 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/api/config/google-calendar/calendars") {
       sendJson(res, 200, { calendars: await new GoogleCalendarProvider().listCalendars(url.searchParams.get("accountLabel")) });
+      return;
+    }
+
+    const partyGmailMessagesMatch = url.pathname.match(/^\/api\/parties\/(\d+)\/gmail\/messages$/);
+    if (req.method === "GET" && partyGmailMessagesMatch) {
+      const partyId = Number(partyGmailMessagesMatch[1]);
+      if (!partyExists(partyId)) {
+        sendJson(res, 404, { error: "Party not found." });
+        return;
+      }
+      if (url.searchParams.get("sync") === "1") {
+        await syncGmailMailboxesForParty(partyId).catch((error: unknown) => {
+          console.warn("[gmail] party sync failed", { partyId, message: error instanceof Error ? error.message : String(error) });
+        });
+      }
+      sendJson(res, 200, { messages: gmail.listMessagesForParty(partyId, gmailLimitQuery.parse(url.searchParams.get("limit") ?? undefined)) });
+      return;
+    }
+
+    const partyGmailMessageActionMatch = url.pathname.match(/^\/api\/parties\/(\d+)\/gmail\/messages\/(\d+)\/(archive|trash)$/);
+    if (req.method === "POST" && partyGmailMessageActionMatch) {
+      const partyId = Number(partyGmailMessageActionMatch[1]);
+      const messageId = Number(partyGmailMessageActionMatch[2]);
+      const action = partyGmailMessageActionMatch[3] as "archive" | "trash";
+      if (!partyExists(partyId)) {
+        sendJson(res, 404, { error: "Party not found." });
+        return;
+      }
+      const message = gmail.findMessageById(messageId);
+      if (!message || !gmail.isMessageLinkedToParty(messageId, partyId)) {
+        sendJson(res, 404, { error: "Gmail message not found for this party." });
+        return;
+      }
+      const mailbox = gmail.findMailboxById(message.mailboxId);
+      if (!mailbox) {
+        sendJson(res, 404, { error: "Gmail mailbox not found." });
+        return;
+      }
+      const provider = new GmailProvider(googleCalendarAuth, gmail);
+      const result =
+        action === "archive"
+          ? await provider.archiveMessage(mailbox, message.gmailMessageId)
+          : await provider.trashMessage(mailbox, message.gmailMessageId);
+      gmail.updateMessageLabels(message.id, result.labelIds);
+      gmail.hideMessageForParty(message.id, partyId, action === "archive" ? "archived" : "trashed");
+      sendJson(res, 200, { messageId: message.id, gmailMessageId: message.gmailMessageId, action, labelIds: result.labelIds });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/gmail/drafts") {
+      const body = createGmailDraftBody.parse(await readJson(req));
+      const mailbox = gmail.findMailboxById(body.mailboxId);
+      if (!mailbox) {
+        sendJson(res, 404, { error: "Gmail mailbox not found." });
+        return;
+      }
+      const draft = await new GmailProvider(googleCalendarAuth, gmail).createDraft(mailbox, body);
+      sendJson(res, 200, { draft });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/gmail/drafts/send") {
+      const body = sendGmailDraftBody.parse(await readJson(req));
+      if (!body.confirmed) {
+        sendJson(res, 409, { error: "Explicit confirmation is required before sending a Gmail draft." });
+        return;
+      }
+      const mailbox = gmail.findMailboxById(body.mailboxId);
+      if (!mailbox) {
+        sendJson(res, 404, { error: "Gmail mailbox not found." });
+        return;
+      }
+      const sent = await new GmailProvider(googleCalendarAuth, gmail).sendDraft(mailbox, body.draftId);
+      sendJson(res, 200, { sent });
       return;
     }
 
@@ -480,9 +606,18 @@ const server = http.createServer(async (req, res) => {
       if (result.purpose === "workspace" && result.accountLabel) {
         googleWorkspaceAuth.importRefreshToken({ accountLabel: result.accountLabel, token: result.token });
       }
+      if (result.purpose === "gmail" && result.accountLabel) {
+        gmail.upsertMailbox({
+          accountLabel: result.accountLabel,
+          displayName: result.accountLabel,
+          emailAddress: result.accountLabel,
+          enabled: true,
+          syncEnabled: true
+        });
+      }
       GoogleCalendarProvider.clearEventListCache();
       const accountQuery = result.accountLabel ? `&account=${encodeURIComponent(result.accountLabel)}` : "";
-      const targetQuery = result.purpose === "workspace" ? "workspace=connected" : "google=connected";
+      const targetQuery = result.purpose === "workspace" ? "workspace=connected" : result.purpose === "gmail" ? "gmail=connected" : "google=connected";
       sendHtmlRedirect(res, `/config?${targetQuery}${accountQuery}`);
       return;
     }
@@ -1588,7 +1723,8 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`d-max api server listening on http://localhost:${port}`);
+  console.log(`DMAX API server listening on http://localhost:${port}`);
+  startGmailPollingJob();
   telegramBot = startTelegramBot({
     token: env.telegramBotToken,
     allowedUserIds: env.telegramAllowedUserIds,
@@ -1600,6 +1736,42 @@ server.listen(port, () => {
     );
   });
 });
+
+let gmailPollingInFlight = false;
+const gmailPollingIntervalMs = 10 * 60_000;
+
+function startGmailPollingJob(): void {
+  if (env.nodeEnv === "test") {
+    return;
+  }
+  const timer = setInterval(() => {
+    void pollGmailMailboxes();
+  }, gmailPollingIntervalMs);
+  timer.unref?.();
+}
+
+async function pollGmailMailboxes(): Promise<void> {
+  if (gmailPollingInFlight) {
+    return;
+  }
+  gmailPollingInFlight = true;
+  try {
+    for (const mailbox of gmail.listSyncEnabledMailboxes()) {
+      try {
+        await new GmailProvider(googleCalendarAuth, gmail).syncMailbox(mailbox);
+      } catch (error) {
+        gmail.updateMailboxSyncState(mailbox.id, { lastSyncError: error instanceof Error ? error.message : "Gmail sync failed." });
+        console.warn("[gmail] polling sync failed", {
+          mailboxId: mailbox.id,
+          accountLabel: mailbox.accountLabel,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  } finally {
+    gmailPollingInFlight = false;
+  }
+}
 
 process.on("SIGINT", () => shutdown());
 process.on("SIGTERM", () => shutdown());
@@ -1751,6 +1923,45 @@ const googleCalendarDisconnectBody = z.object({
   accountLabel: z.string().trim().min(1).nullable().optional()
 });
 
+const upsertGmailMailboxBody = z.object({
+  accountLabel: z.string().trim().min(1),
+  displayName: z.string().trim().min(1).nullable().optional(),
+  emailAddress: z.string().trim().min(1).nullable().optional(),
+  enabled: z.boolean().optional(),
+  syncEnabled: z.boolean().optional(),
+  sendEnabled: z.boolean().optional(),
+  signature: z.string().nullable().optional()
+});
+
+const updateGmailMailboxBody = z.object({
+  displayName: z.string().trim().min(1).nullable().optional(),
+  emailAddress: z.string().trim().min(1).nullable().optional(),
+  enabled: z.boolean().optional(),
+  syncEnabled: z.boolean().optional(),
+  sendEnabled: z.boolean().optional(),
+  signature: z.string().nullable().optional()
+});
+
+const gmailAddressList = z.array(z.string().trim().email()).min(1);
+const optionalGmailAddressList = z.array(z.string().trim().email()).optional();
+
+const createGmailDraftBody = z.object({
+  mailboxId: z.number().int().positive(),
+  to: gmailAddressList,
+  cc: optionalGmailAddressList,
+  bcc: optionalGmailAddressList,
+  subject: z.string().trim().min(1),
+  body: z.string().trim().min(1)
+});
+
+const sendGmailDraftBody = z.object({
+  mailboxId: z.number().int().positive(),
+  draftId: z.string().trim().min(1),
+  confirmed: z.boolean()
+});
+
+const gmailLimitQuery = z.coerce.number().int().positive().max(200).optional().transform((value) => value ?? 50);
+
 const createCategoryBody = z.object({
   name: z.string().trim().min(1),
   description: z.string().nullable().optional(),
@@ -1770,12 +1981,12 @@ const relationshipStatusBody = z.enum(["active", "inactive"]);
 const partyDateBody = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable();
 
 const createPersonBody = z.object({
-  displayName: z.string().trim().min(1).optional(),
   firstName: z.string().trim().min(1).nullable().optional(),
   lastName: z.string().trim().min(1).nullable().optional(),
   salutation: partySalutationBody.optional(),
   academicTitle: z.string().trim().min(1).nullable().optional(),
-  nameSuffix: z.string().trim().min(1).nullable().optional()
+  nameSuffix: z.string().trim().min(1).nullable().optional(),
+  description: z.string().nullable().optional()
 });
 
 const updatePersonBody = createPersonBody.partial();
@@ -2417,6 +2628,28 @@ function emitApiStateEvent(input: Omit<CreateStateEventInput, "source">): StateE
   return stateEvents.create({ source: "api", ...input });
 }
 
+function partyExists(partyId: number): boolean {
+  return Boolean(people.findById(partyId) || organizations.findById(partyId));
+}
+
+async function syncGmailMailboxesForParty(partyId: number): Promise<void> {
+  const partyEmails = partyContactPoints
+    .list({ partyId, type: "email" })
+    .map((contactPoint) => contactPoint.normalizedValue)
+    .filter((value): value is string => Boolean(value));
+  if (partyEmails.length === 0) {
+    return;
+  }
+  for (const mailbox of gmail.listSyncEnabledMailboxes()) {
+    try {
+      await new GmailProvider(googleCalendarAuth, gmail).syncMailbox(mailbox, { maxMessages: 100 });
+    } catch (error) {
+      gmail.updateMailboxSyncState(mailbox.id, { lastSyncError: error instanceof Error ? error.message : "Gmail sync failed." });
+      throw error;
+    }
+  }
+}
+
 function parseMediaEntityTarget(url: URL): { entityType: MediaEntityType; entityId: number; caption?: string | null } {
   const entityType = mediaEntityTypeBody.parse(url.searchParams.get("entityType"));
   const entityId = parseOptionalPositiveInt(url.searchParams.get("entityId"));
@@ -2548,7 +2781,7 @@ function sendHtmlRedirect(res: http.ServerResponse, path: string): void {
     location: target,
     "content-type": "text/html; charset=utf-8"
   });
-  res.end(`<!doctype html><meta http-equiv="refresh" content="0;url=${escapeHtml(target)}"><a href="${escapeHtml(target)}">Return to d-max</a>`);
+  res.end(`<!doctype html><meta http-equiv="refresh" content="0;url=${escapeHtml(target)}"><a href="${escapeHtml(target)}">Return to DMAX</a>`);
 }
 
 function escapeHtml(value: string): string {

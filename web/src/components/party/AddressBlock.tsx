@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Building2, Pencil, Plus, Trash2 } from "lucide-react";
 import type { PartyAddress } from "../../types.js";
 import { ConfirmModal, EditModal, ErrorState, RelationItem, RelationList, SectionBlock } from "../ui/index.js";
+import type { RelationEmptyMode } from "../ui/index.js";
 
 export type AddressInput = {
   label?: string | null;
@@ -22,6 +23,8 @@ export function AddressBlock(props: {
   emptyTitle?: string;
   emptyDescription?: string;
   addLabel?: string;
+  addIconOnly?: boolean;
+  emptyMode?: RelationEmptyMode;
   deleteDescription?: (address: PartyAddress) => ReactNode;
   onCreate: (partyId: number, input: AddressInput) => Promise<void>;
   onUpdate: (addressId: number, input: Partial<AddressInput>) => Promise<void>;
@@ -37,9 +40,16 @@ export function AddressBlock(props: {
       title="Anschriften"
       description={props.description === undefined ? "Postalische Orte und Rechnungsadressen." : props.description}
       actions={(
-        <button type="button" className="section-primary-action" onClick={() => setEditingAddress("new")} disabled={busyAction !== null}>
+        <button
+          type="button"
+          className={props.addIconOnly ? "icon-button compact" : "section-primary-action"}
+          onClick={() => setEditingAddress("new")}
+          disabled={busyAction !== null}
+          title={props.addLabel ?? "Anschrift hinzufügen"}
+          aria-label={props.addLabel ?? "Anschrift hinzufügen"}
+        >
           <Plus size={15} />
-          {props.addLabel ?? "Anschrift hinzufügen"}
+          {props.addIconOnly ? null : props.addLabel ?? "Anschrift hinzufügen"}
         </button>
       )}
     >
@@ -47,6 +57,7 @@ export function AddressBlock(props: {
         addresses={props.addresses}
         emptyTitle={props.emptyTitle ?? "Keine Anschriften"}
         emptyDescription={props.emptyDescription ?? "Post- oder Rechnungsadressen können ergänzt werden."}
+        emptyMode={props.emptyMode}
         disabled={busyAction !== null}
         onEdit={(address) => setEditingAddress(address)}
         onDelete={(address) => {
@@ -109,12 +120,13 @@ export function AddressList(props: {
   addresses: PartyAddress[];
   emptyTitle: string;
   emptyDescription?: string;
+  emptyMode?: RelationEmptyMode;
   disabled?: boolean;
   onEdit?: (address: PartyAddress) => void;
   onDelete?: (address: PartyAddress) => void;
 }) {
   return (
-    <RelationList emptyTitle={props.emptyTitle} emptyDescription={props.emptyDescription}>
+    <RelationList emptyTitle={props.emptyTitle} emptyDescription={props.emptyDescription} emptyMode={props.emptyMode}>
       {props.addresses.map((address) => (
         <AddressItem
           key={address.id}

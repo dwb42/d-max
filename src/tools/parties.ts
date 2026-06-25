@@ -18,12 +18,12 @@ const participantEntityTypeSchema = z.enum(["initiative", "task", "calendar_entr
 const listPeopleInput = z.object({ search: z.string().trim().min(1).optional() }).passthrough();
 const getPartyInput = z.object({ id: z.number().int().positive() });
 const createPersonInput = z.object({
-  displayName: z.string().trim().min(1).optional(),
   firstName: z.string().trim().min(1).nullable().optional(),
   lastName: z.string().trim().min(1).nullable().optional(),
   salutation: salutationSchema.optional(),
   academicTitle: z.string().trim().min(1).nullable().optional(),
-  nameSuffix: z.string().trim().min(1).nullable().optional()
+  nameSuffix: z.string().trim().min(1).nullable().optional(),
+  description: z.string().nullable().optional()
 });
 const updatePersonInput = createPersonInput.partial().extend({ id: z.number().int().positive() });
 
@@ -95,7 +95,7 @@ const updateContactPointInput = createContactPointInput.partial().extend({ id: z
 export const partyTools: ToolDefinition<any>[] = [
   defineTool({
     name: "listPeople",
-    description: "List people in d-max's Who dimension. Optional search matches display names.",
+    description: "List people in DMAX's Who dimension. Optional search matches display names.",
     inputSchema: listPeopleInput,
     run: (input, context) => {
       if (!context.db) return { ok: false, error: "Database context is required" };
@@ -115,7 +115,7 @@ export const partyTools: ToolDefinition<any>[] = [
   defineTool({
     name: "createPerson",
     description:
-      "Create a person. Use salutation=mr, mrs, or unknown for address-form purposes. Provide displayName or enough name fields to derive one.",
+      "Create a person. Use salutation=mr, mrs, or unknown for address-form purposes. Provide firstName or lastName; the person name is derived from those fields. Use description for free-text person notes.",
     inputSchema: createPersonInput,
     run: (input, context) => {
       if (!context.db) return { ok: false, error: "Database context is required" };
@@ -128,7 +128,7 @@ export const partyTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "updatePerson",
-    description: "Update a person by party id.",
+    description: "Update a person by party id, including free-text description when useful.",
     inputSchema: updatePersonInput,
     run: (input, context) => {
       if (!context.db) return { ok: false, error: "Database context is required" };
@@ -141,7 +141,7 @@ export const partyTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "listOrganizations",
-    description: "List organizations in d-max's Who dimension. Optional search matches display names.",
+    description: "List organizations in DMAX's Who dimension. Optional search matches display names.",
     inputSchema: listOrganizationsInput,
     run: (input, context) => {
       if (!context.db) return { ok: false, error: "Database context is required" };

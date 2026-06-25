@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { EmptyState } from "./EmptyState.js";
 import { SectionHeader } from "./SectionBlock.js";
 
-type RelationEmptyMode = "card" | "inline" | "none";
+export type RelationEmptyMode = "card" | "inline" | "none";
 
 export function RelationList(props: { children: ReactNode; emptyTitle?: string; emptyDescription?: string; emptyMode?: RelationEmptyMode }) {
   const hasChildren = Children.count(props.children) > 0;
@@ -32,11 +32,18 @@ export function RelationItem(props: {
   onOpen?: () => void;
   actions?: ReactNode;
 }) {
+  const title = props.onOpen && props.actions ? (
+    <button type="button" className="relation-title-button" onClick={props.onOpen}>
+      {props.title}
+    </button>
+  ) : (
+    props.title
+  );
   const content = (
     <>
       <div className="entity-icon">{props.icon}</div>
       <div className="relation-item-copy">
-        <strong>{props.title}</strong>
+        <strong>{title}</strong>
         {props.meta ? <p>{props.meta}</p> : null}
         {props.detail ? <span>{props.detail}</span> : null}
       </div>
@@ -44,7 +51,7 @@ export function RelationItem(props: {
     </>
   );
 
-  if (props.onOpen) {
+  if (props.onOpen && !props.actions) {
     return (
       <button type="button" className="relation-item relation-button" onClick={props.onOpen}>
         {content}

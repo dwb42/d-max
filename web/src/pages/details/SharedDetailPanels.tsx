@@ -4,7 +4,7 @@ import { Building2, CalendarDays, CheckCircle2, Circle, ClipboardPaste, External
 import { ConfirmModal, EditModal, RelationItem, RelationList, SectionBlock } from "../../components/ui/index.js";
 import { reanalyzeMediaAsset, updateMediaAssetAnalysis } from "../../api.js";
 import type { EntityParticipant, Initiative, MediaAttachment, MediaAsset, MediaEntityType, Organization, ParticipantRoleType, Person, Task } from "../../types.js";
-import { displayInitiativeName, documentExtension, dropAfter, entityTypeLabel, formatBytes, formatMediaTimestamp, formatTaskDueDate, moveIdToDropPosition, nullableText, participantRoleSummary, sortTasksByCompletionAndRank } from "./detailUtils.js";
+import { displayInitiativeName, documentExtension, dropAfter, entityTypeLabel, formatBytes, formatMediaTimestamp, formatTaskDueDate, moveIdToDropPosition, nullableText, participantRoleSummary, personName, sortTasksByCompletionAndRank } from "./detailUtils.js";
 
 export { MediaAttachmentsPanel, ParticipantsPanel, TaskCreateInlineForm, TasksView };
 
@@ -15,6 +15,24 @@ function Panel(props: { title: string; children: ReactNode }) {
       {props.children}
     </section>
   );
+}
+
+function participantContactDetail(participant: EntityParticipant): string | null {
+  const primaryEmail = participant.contactPoints?.find((contactPoint) => contactPoint.type === "email") ?? null;
+  const worksFor = participant.party.type === "person"
+    ? participant.relationships?.find(
+        (relationship) =>
+          relationship.relationshipType.key === "works_for"
+          && relationship.status === "active"
+          && relationship.fromPartyId === participant.partyId
+          && relationship.toParty.type === "organization"
+      ) ?? null
+    : null;
+  const parts = [
+    primaryEmail?.value,
+    worksFor ? `bei ${worksFor.toParty.displayName}` : null
+  ].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 function ParticipantsPanel(props: {
@@ -35,9 +53,11 @@ function ParticipantsPanel(props: {
     isPrimary?: boolean;
   }) => Promise<void>;
   onDeleteParticipant: (participantId: number) => Promise<void>;
+  onOpenPerson?: (partyId: number) => void;
+  onOpenOrganization?: (partyId: number) => void;
 }) {
   const parties = [
-    ...props.people.map((person) => ({ id: person.id, type: "person" as const, displayName: person.displayName })),
+    ...props.people.map((person) => ({ id: person.id, type: "person" as const, displayName: personName(person) })),
     ...props.organizations.map((organization) => ({ id: organization.id, type: "organization" as const, displayName: organization.displayName }))
   ].sort((left, right) => left.displayName.localeCompare(right.displayName));
   const roleTypes = props.roleTypes.filter((roleType) => !roleType.appliesToEntityType || roleType.appliesToEntityType === props.entityType);
@@ -101,13 +121,59 @@ function ParticipantsPanel(props: {
   );
   const relationList = props.surface === "section" ? (
     <RelationList emptyMode={createMode === "modal" ? "none" : "inline"} emptyTitle="Noch keine Beteiligten.">
-      {props.participants.map((participant) => (
-        <RelationItem
-          key={participant.id}
-          icon={participant.party.type === "person" ? <Users size={16} /> : <Building2 size={16} />}
-          title={participant.party.displayName}
-          meta={participantRoleSummary(participant)}
-          actions={(
+      {props.participants.map((participant) => {
+        const detail = participantContactDetail(participant);
+        const openParticipant =
+          participant.party.type === "person"
+            ? props.onOpenPerson
+            : props.onOpenOrganization;
+        return (
+          <RelationItem
+            key={participant.id}
+            icon={participant.party.type === "person" ? <Users size={16} /> : <Building2 size={16} />}
+            title={participant.party.displayName}
+            meta={participantRoleSummary(participant)}
+            detail={detail}
+            onOpen={openParticipant ? () => openParticipant(participant.partyId) : undefined}
+            actions={(
+              <button
+                type="button"
+                className="icon-button compact"
+                disabled={busy}
+                title="Beteiligung entfernen"
+                onClick={async () => {
+                  if (busy) return;
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    await props.onDeleteParticipant(participant.id);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Beteiligung konnte nicht entfernt werden.");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+          />
+        );
+      })}
+    </RelationList>
+  ) : (
+    <div className="relationship-list">
+      {props.participants.length === 0 ? <p className="muted-text">Noch keine Beteiligten.</p> : null}
+      {props.participants.map((participant) => {
+        const detail = participantContactDetail(participant);
+        return (
+          <div className="relationship-row" key={participant.id}>
+            <div className="entity-icon">{participant.party.type === "person" ? <Users size={16} /> : <Building2 size={16} />}</div>
+            <div>
+              <strong>{participant.party.displayName}</strong>
+              <p>{participantRoleSummary(participant)}</p>
+              {detail ? <p>{detail}</p> : null}
+            </div>
             <button
               type="button"
               className="icon-button compact"
@@ -128,42 +194,9 @@ function ParticipantsPanel(props: {
             >
               <Trash2 size={14} />
             </button>
-          )}
-        />
-      ))}
-    </RelationList>
-  ) : (
-    <div className="relationship-list">
-      {props.participants.length === 0 ? <p className="muted-text">Noch keine Beteiligten.</p> : null}
-      {props.participants.map((participant) => (
-        <div className="relationship-row" key={participant.id}>
-          <div className="entity-icon">{participant.party.type === "person" ? <Users size={16} /> : <Building2 size={16} />}</div>
-          <div>
-            <strong>{participant.party.displayName}</strong>
-            <p>{participantRoleSummary(participant)}</p>
           </div>
-          <button
-            type="button"
-            className="icon-button compact"
-            disabled={busy}
-            title="Beteiligung entfernen"
-            onClick={async () => {
-              if (busy) return;
-              setBusy(true);
-              setError(null);
-              try {
-                await props.onDeleteParticipant(participant.id);
-              } catch (err) {
-                setError(err instanceof Error ? err.message : "Beteiligung konnte nicht entfernt werden.");
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
   const content = (

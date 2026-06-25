@@ -17,6 +17,8 @@ export function InitiativeDetailView(props: {
   participantRoleTypes: ParticipantRoleType[];
   onOpenInitiative: (initiativeId: number) => void;
   onOpenTask: (taskId: number) => void;
+  onOpenPerson: (partyId: number) => void;
+  onOpenOrganization: (partyId: number) => void;
   onCreateParticipant: (input: {
     partyId: number;
     entityType: "initiative" | "task";
@@ -112,6 +114,8 @@ export function InitiativeDetailView(props: {
         surface="section"
         onCreateParticipant={props.onCreateParticipant}
         onDeleteParticipant={props.onDeleteParticipant}
+        onOpenPerson={props.onOpenPerson}
+        onOpenOrganization={props.onOpenOrganization}
       />
       <InitiativeRelationsPanel
         initiative={initiative}
@@ -484,11 +488,7 @@ function InitiativeRelationsPanel(props: {
           />
         </div>
       </div>
-      ) : (
-        <RelationList emptyTitle="Beziehungen eingeklappt" emptyDescription="Öffne den Bereich, um Parent/Child- und Vorgänger/Nachfolger-Beziehungen zu bearbeiten.">
-          {null}
-        </RelationList>
-      )}
+      ) : null}
     </SectionBlock>
   );
 }

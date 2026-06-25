@@ -1,6 +1,6 @@
 # DMAX UI Current State
 
-Last updated: 2026-05-15
+Last updated: 2026-06-25
 
 This is the short active handover for frontend UI work. Historical planning, phase reviews, route inventories and screenshot audits are archived under `archive/completed-ui-refactor/`.
 
@@ -54,6 +54,17 @@ Use the shared primitives in `web/src/components/ui/` before creating route-loca
 - `RichText`
 
 Party/contact primitives live under `web/src/components/party/`.
+
+## Current Party Communication UI
+
+`/people/:id` uses the main content column as an email communication timeline.
+The right sidebar is ordered as Kontakt, Beschreibung, Anschriften,
+DMAX-Kontexte, and Metadaten. E-Mail rows are compact by default, newest-first,
+and optimized for temporal scanning: direction icon/label plus date/time,
+subject, and a preview stripped of quoted reply history when recognizable.
+Expanding a message reveals headers/body and small right-aligned actions for
+reply, reply-all, forward, archive, and trash. Archive/trash require the
+connected Gmail mailbox to have the `gmail.modify` OAuth scope.
 
 ## Active Guidance Docs
 

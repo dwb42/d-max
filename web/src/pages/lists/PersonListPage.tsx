@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Plus } from "lucide-react";
 import { EditModal, EmptyState, EntityList, EntityListItem, EntityListPage, ErrorState } from "../../components/ui/index.js";
 import type { Person } from "../../types.js";
+import { personName } from "../details/detailUtils.js";
 import { salutationLabel } from "./listUtils.js";
 
 export { PeopleView as PersonListPage };
@@ -16,7 +17,7 @@ function PeopleView(props: {
   const filteredPeople = props.people.filter((person) => {
     const needle = trimmedSearch;
     if (!needle) return true;
-    return [person.displayName, person.firstName, person.lastName, person.academicTitle, salutationLabel(person.salutation)]
+    return [personName(person), person.academicTitle, salutationLabel(person.salutation), person.nameSuffix]
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
@@ -53,7 +54,7 @@ function PeopleView(props: {
             <EntityListItem
               key={person.id}
               marker={<span className="person-list-avatar">{personInitials(person)}</span>}
-              title={person.displayName}
+              title={personName(person)}
               meta={personListMeta(person)}
               onOpen={() => props.onOpenPerson(person.id)}
             />
@@ -67,7 +68,6 @@ function PeopleView(props: {
 export function PersonCreateModal(props: {
   onCancel: () => void;
   onCreate: (input: {
-    displayName?: string;
     firstName?: string | null;
     lastName?: string | null;
     salutation?: Person["salutation"];
@@ -118,6 +118,14 @@ export function PersonCreateModal(props: {
     >
       <div className="person-create-fields">
         <label>
+          Vorname
+          <input value={firstName} onChange={(event) => setFirstName(event.target.value)} placeholder="Vorname" disabled={creating} />
+        </label>
+        <label>
+          Nachname
+          <input value={lastName} onChange={(event) => setLastName(event.target.value)} placeholder="Nachname" disabled={creating} />
+        </label>
+        <label>
           Anrede
           <select value={salutation} onChange={(event) => setSalutation(event.target.value as Person["salutation"])} disabled={creating}>
             <option value="unknown">Unbekannt</option>
@@ -130,14 +138,6 @@ export function PersonCreateModal(props: {
           <input value={academicTitle} onChange={(event) => setAcademicTitle(event.target.value)} placeholder="Dr., Prof. Dr." disabled={creating} />
         </label>
         <label>
-          Vorname
-          <input value={firstName} onChange={(event) => setFirstName(event.target.value)} placeholder="Vorname" disabled={creating} />
-        </label>
-        <label>
-          Nachname
-          <input value={lastName} onChange={(event) => setLastName(event.target.value)} placeholder="Nachname" disabled={creating} />
-        </label>
-        <label>
           Zusatz
           <input value={nameSuffix} onChange={(event) => setNameSuffix(event.target.value)} placeholder="Suffix" disabled={creating} />
         </label>
@@ -148,11 +148,9 @@ export function PersonCreateModal(props: {
 }
 
 function personListMeta(person: Person): string | null {
-  const nameParts = [person.firstName, person.lastName].filter(Boolean).join(" ");
   const parts = [
     person.salutation !== "unknown" ? salutationLabel(person.salutation) : null,
     person.academicTitle,
-    nameParts && nameParts !== person.displayName ? nameParts : null,
     person.nameSuffix
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(" · ") : null;
@@ -160,8 +158,7 @@ function personListMeta(person: Person): string | null {
 
 function personInitials(person: Person): string {
   const sourceParts = [person.firstName, person.lastName].filter((part): part is string => Boolean(part));
-  const fallbackParts = person.displayName.split(/\s+/).filter(Boolean);
-  const initials = (sourceParts.length > 0 ? sourceParts : fallbackParts)
+  const initials = sourceParts
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("");

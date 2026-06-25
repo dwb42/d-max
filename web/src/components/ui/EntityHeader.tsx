@@ -18,7 +18,7 @@ export function EntityHeader(props: {
         <div className="entity-header-title-block">
           {props.entityType ? <span className="entity-header-eyebrow">{props.entityType}</span> : null}
           <h1>{props.titleContent ?? props.title}</h1>
-          {props.subtitleContent || props.subtitle ? <p>{props.subtitleContent ?? props.subtitle}</p> : null}
+          {props.subtitleContent ? <div className="entity-header-subtitle">{props.subtitleContent}</div> : props.subtitle ? <p>{props.subtitle}</p> : null}
           {props.facts && props.facts.length > 0 ? (
             <div className="entity-header-facts">
               {props.facts.map((fact) => (

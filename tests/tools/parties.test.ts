@@ -20,7 +20,7 @@ describe("party tools", () => {
     const runner = createToolRunner();
     const category = new CategoryRepository(db).create({ name: "Business" });
     const initiative = new InitiativeRepository(db).create({ categoryId: category.id, name: "Outreach" });
-    const person = await runner.run("createPerson", { firstName: "Anna", lastName: "Muster", salutation: "mrs" }, { db });
+    const person = await runner.run("createPerson", { firstName: "Anna", lastName: "Muster", salutation: "mrs", description: "Kontakt fuer Outreach." }, { db });
     const organization = await runner.run("createOrganization", { name: "Acme GmbH" }, { db });
     const relationshipTypes = await runner.run("listRelationshipTypes", {}, { db });
     const participantRoles = await runner.run("listParticipantRoleTypes", { appliesToEntityType: "initiative" }, { db });
@@ -49,7 +49,7 @@ describe("party tools", () => {
       { db }
     );
 
-    expect(person).toMatchObject({ ok: true, data: expect.objectContaining({ displayName: "Anna Muster", salutation: "mrs" }) });
+    expect(person).toMatchObject({ ok: true, data: expect.objectContaining({ firstName: "Anna", lastName: "Muster", salutation: "mrs", description: "Kontakt fuer Outreach." }) });
     expect(organization).toMatchObject({ ok: true, data: expect.objectContaining({ displayName: "Acme GmbH" }) });
     expect(relationship).toMatchObject({ ok: true, data: expect.objectContaining({ fromPartyId: personId, toPartyId: organizationId }) });
     expect(participant).toMatchObject({

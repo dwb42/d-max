@@ -4,6 +4,11 @@ import { randomBytes } from "node:crypto";
 import { env } from "../config/env.js";
 
 const googleCalendarScope = "https://www.googleapis.com/auth/calendar";
+export const googleGmailScopes = [
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.compose",
+  "https://www.googleapis.com/auth/gmail.modify"
+];
 const googleWorkspaceScopes = [
   "https://www.googleapis.com/auth/drive",
   "https://www.googleapis.com/auth/documents",
@@ -36,7 +41,9 @@ type GoogleTokenResponse = {
   error_description?: string;
 };
 
-const pendingStates = new Map<string, { expiresAt: number; accountLabel: string | null; purpose: "calendar" | "workspace" }>();
+type GoogleOAuthPurpose = "calendar" | "workspace" | "gmail";
+
+const pendingStates = new Map<string, { expiresAt: number; accountLabel: string | null; purpose: GoogleOAuthPurpose }>();
 
 export type GoogleCalendarAuthStatus = {
   configured: boolean;
@@ -47,6 +54,11 @@ export type GoogleCalendarAuthStatus = {
   tokenScope: string | null;
   hasRequiredScope: boolean;
   detail: string | null;
+};
+
+export type GoogleGmailAuthStatus = Omit<GoogleCalendarAuthStatus, "scope"> & {
+  scopes: string[];
+  missingScopes: string[];
 };
 
 export type GoogleCalendarAccountStatus = {
@@ -89,7 +101,27 @@ export class GoogleCalendarAuth {
     return this.createAuthorizationUrlForPurpose("workspace", loginHint);
   }
 
-  private createAuthorizationUrlForPurpose(purpose: "calendar" | "workspace", loginHint?: string | null): string {
+  gmailStatus(accountLabel?: string | null): GoogleGmailAuthStatus {
+    const base = this.status(accountLabel);
+    const missingScopes = googleGmailScopes.filter((scope) => !tokenHasScope(base.tokenScope, scope));
+    return {
+      configured: base.configured,
+      connected: base.connected,
+      tokenPath: base.tokenPath,
+      redirectUri: base.redirectUri,
+      scopes: googleGmailScopes,
+      tokenScope: base.tokenScope,
+      hasRequiredScope: base.connected && missingScopes.length === 0,
+      missingScopes,
+      detail: base.detail
+    };
+  }
+
+  createGmailAuthorizationUrl(loginHint?: string | null): string {
+    return this.createAuthorizationUrlForPurpose("gmail", loginHint);
+  }
+
+  private createAuthorizationUrlForPurpose(purpose: GoogleOAuthPurpose, loginHint?: string | null): string {
     this.assertConfigured();
     const state = randomBytes(20).toString("hex");
     const accountLabel = loginHint?.trim() || null;
@@ -98,10 +130,10 @@ export class GoogleCalendarAuth {
     url.searchParams.set("client_id", env.googleOAuthClientId!);
     url.searchParams.set("redirect_uri", this.redirectUri());
     url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", purpose === "workspace" ? googleWorkspaceScopes.join(" ") : googleCalendarScope);
+    url.searchParams.set("scope", scopesForPurpose(purpose).join(" "));
     url.searchParams.set("access_type", "offline");
     url.searchParams.set("include_granted_scopes", "true");
-    url.searchParams.set("prompt", "consent");
+    url.searchParams.set("prompt", "consent select_account");
     url.searchParams.set("state", state);
     if (loginHint?.trim()) {
       url.searchParams.set("login_hint", loginHint.trim());
@@ -109,7 +141,7 @@ export class GoogleCalendarAuth {
     return url.toString();
   }
 
-  async handleCallback(input: { code: string; state: string }): Promise<{ accountLabel: string | null; purpose: "calendar" | "workspace"; token: StoredGoogleCalendarToken }> {
+  async handleCallback(input: { code: string; state: string }): Promise<{ accountLabel: string | null; purpose: GoogleOAuthPurpose; token: StoredGoogleCalendarToken }> {
     this.assertConfigured();
     const pendingState = pendingStates.get(input.state);
     pendingStates.delete(input.state);
@@ -261,7 +293,21 @@ export class GoogleCalendarAuth {
 }
 
 function tokenHasRequiredScope(scope: string | null): boolean {
-  return Boolean(scope?.split(/\s+/).includes(googleCalendarScope));
+  return tokenHasScope(scope, googleCalendarScope);
+}
+
+function tokenHasScope(scope: string | null, requiredScope: string): boolean {
+  return Boolean(scope?.split(/\s+/).includes(requiredScope));
+}
+
+function scopesForPurpose(purpose: GoogleOAuthPurpose): string[] {
+  if (purpose === "workspace") {
+    return googleWorkspaceScopes;
+  }
+  if (purpose === "gmail") {
+    return googleGmailScopes;
+  }
+  return [googleCalendarScope];
 }
 
 function accountTokenDir(): string {

@@ -1,5 +1,5 @@
 import type { DragEvent, FocusEvent, PointerEvent, ReactNode } from "react";
-import type { AppOverview, Category, EntityParticipant, Initiative, InitiativeType, PartyRelationshipWithParties, ProjectPhase, Task } from "../../types.js";
+import type { AppOverview, Category, EntityParticipant, Initiative, InitiativeType, PartyRelationshipWithParties, Person, ProjectPhase, Task } from "../../types.js";
 
 export type CreateInitiativeInput = {
   categoryId: number;
@@ -339,6 +339,10 @@ export function partyRelationshipLabel(relationship: PartyRelationshipWithPartie
         ? relationship.relationshipType.label
         : relationship.relationshipType.inverseLabel ?? relationship.relationshipType.label;
   return [label, relationship.roleLabel].filter(Boolean).join(" · ");
+}
+
+export function personName(person: Pick<Person, "firstName" | "lastName">): string {
+  return [person.firstName, person.lastName].filter(Boolean).join(" ").trim();
 }
 
 export function salutationLabel(salutation: "mr" | "mrs" | "unknown"): string {

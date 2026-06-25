@@ -1,6 +1,6 @@
-# d-max Current State
+# DMAX Current State
 
-Date: 2026-06-22
+Date: 2026-06-25
 
 Short handoff for fresh Codex/OpenClaw sessions. This file describes the
 implemented repository state; older plans are historical unless this file or
@@ -8,7 +8,7 @@ code says otherwise.
 
 ## Snapshot
 
-d-max is Dietrich's agentic initiative, task, and initiative-memory system.
+DMAX is Dietrich's agentic initiative, task, and initiative-memory system.
 
 Active interfaces:
 
@@ -85,6 +85,8 @@ mindmap_change_drafts,
 tasks,
 task_checklist_items,
 calendar_entries, calendar_sources, calendar_event_bindings, calendar_event_visibility,
+gmail_mailboxes, gmail_messages, gmail_message_participants,
+gmail_message_party_links, gmail_message_party_visibility, gmail_message_attachments,
 media_assets, media_links,
 parties, people, organizations, relationship_types, party_relationships,
 participant_role_types, entity_participants, party_contact_points, party_addresses,
@@ -92,11 +94,15 @@ app_chat_messages, app_conversations, app_prompt_logs, app_state_events
 ```
 
 The Who dimension is implemented as a party identity layer. `parties` stores
-the shared `person` or `organization` identity and display name; `people`
+the shared `person` or `organization` identity and display name; for people this
+display name is an internal derived value from `first_name` and `last_name`, not
+a separate editable field. `people`
 stores person fields including `first_name`, `last_name`, `salutation`
-(`mr`, `mrs`, `unknown`), `academic_title`, and `name_suffix`;
+(`mr`, `mrs`, `unknown`), `academic_title`, `name_suffix`, and free-text
+`description`;
 `organizations` stores organization name, legal name, organization type, and
-Markdown description/context memory. There is no person Markdown memory yet.
+Markdown description/context memory. People have a lightweight free-text
+description, but no person Markdown memory field.
 `relationship_types`
 stores configured directed or symmetric relationship kinds such as `works_for`,
 `founder_of`, `member_of`, `knows`, `partner_of`, and `mentor_of`.
@@ -116,13 +122,40 @@ per party. The browser surfaces `/people` and `/organizations` list/create
 screens plus `/people/:id` and `/organizations/:id` detail pages. Detail pages
 can edit core person/organization fields, add/delete/prefer contact points,
 show party relationships, and show DMAX contexts where that party participates.
+The person detail header displays relationship context directly below the name,
+and the person `Anpassen` modal manages core person fields plus person and
+organization party relationships in one place.
 The organization detail page edits core fields in a header-triggered modal,
 shows a full-width Markdown description panel, manages contact points and
 postal addresses through modals with delete confirmation, and shows/adds
 organization members via party relationships.
+Gmail integration is implemented for central Workspace mailboxes. `/config`
+can create Gmail mailbox records, start OAuth with `gmail.readonly`,
+`gmail.compose`, and `gmail.modify`, toggle sync/send capability, and run
+manual sync. Tokens use the existing Google OAuth runtime token storage, not
+SQLite. Person and organization detail pages show an `E-Mails` section that
+syncs messages whose sender or recipients exactly match normalized
+`party_contact_points` email values. Matching is intentionally direct: one side
+of the message must be a connected Gmail mailbox and the other side must match a
+known party contact email. Message full text is stored locally in
+`gmail_messages`; attachments are stored only as Gmail metadata. Multiple
+matching contact points create multiple party links. `gmail_message_party_visibility`
+stores per-party archived/trashed visibility so archive/delete actions remove a
+message from the current party timeline and later syncs do not re-add it there.
+DMAX can create plain-text Gmail drafts from party detail pages and sends a
+draft only after explicit confirmation; after Gmail returns the sent message ID,
+DMAX immediately fetches and stores that message so the party timeline updates
+without waiting for the next search sync. Reply, reply-all, and forward are
+new plain-text compose flows, not Gmail-native thread mutation. Archive removes
+the Gmail `INBOX` label through `messages.modify`; delete moves the message to
+Gmail trash through `messages.trash`. Local attachment import, global inbox,
+full-text mail search, Gmail push notifications, and durable voice commits are
+not implemented.
 Initiative and task detail pages include a `Beteiligte` panel to add/remove
 people or organizations with configured participant roles plus optional
-free-text role labels. Relationship-type editing and calendar-entry
+free-text role labels. Participant rows can also show the party's primary or
+preferred email contact and active organization relationship context such as a
+person's `works_for` link. Relationship-type editing and calendar-entry
 participant editing are available through API/tools or schema but are not
 first-class browser workflows yet.
 
@@ -263,7 +296,7 @@ because visible layout siblings and stored freestyle snapshot siblings can
 differ for top-level `branch:freestyle` nodes. Reparenting never targets the
 dragged node or its descendants. The browser/API repository reads and writes
 this table for initiative mindmaps.
-OpenClaw/d-max tools can read full
+OpenClaw/DMAX tools can read full
 initiative mindmaps and can create, update, move/reparent, collapse/expand, and
 delete freestyle nodes. Agent tool mutations are intentionally restricted to
 `node_kind = 'freestyle'`; derived root, branch, task, and media nodes are
@@ -286,7 +319,7 @@ inside tasks. Items have only a name, `todo`/`done` status, and persisted order;
 checklist completion does not automatically complete the parent task. Deleting
 a task deletes its checklist items and task media links, but not the underlying
 deduplicated media asset files.
-`calendar_entries` stores local d-max calendar time blocks
+`calendar_entries` stores local DMAX calendar time blocks
 for project focus, task work, and standalone appointments. Entries have concrete
 `start_at`/`end_at` timestamps and a simple `open`/`done` status. A task can have
 multiple calendar entries; completing a task calendar entry also completes the
@@ -326,7 +359,7 @@ keyed by `recurring_event_id`. The current browser UI uses this for Planning
 Canvas Google event hiding; `/calendar` is prepared as a future surface but does
 not yet expose hide controls.
 `media_assets` stores metadata for uploaded media files and `media_links`
-connects those assets to d-max entities. Binary media files are stored outside
+connects those assets to DMAX entities. Binary media files are stored outside
 SQLite under `DMAX_MEDIA_STORAGE_DIR` (`data/media` by default, gitignored).
 Current first-class attachment UI is implemented for initiative and task detail
 pages. The shared media panel accepts normal file-picker uploads, drag/drop
@@ -337,7 +370,7 @@ Clipboard files without a browser-provided name receive a generated
 `clipboard-YYYYMMDD-HHMMSS.ext` filename before going through the same upload
 pipeline. Assets can be images, audio, video, documents, or other allowed
 files; the API serves files through `/api/media/assets/:id/file` rather than
-exposing filesystem paths. Immediately after upload, d-max attempts to derive
+exposing filesystem paths. Immediately after upload, DMAX attempts to derive
 text for the asset: text/Markdown files are excerpted locally, audio/video
 files are transcribed with the configured OpenAI transcription model, and
 images/PDFs are summarized through the configured OpenAI media-analysis model
@@ -409,7 +442,7 @@ TTS fails.
 
 ## Runtime And Provider State
 
-- Runtime: OpenClaw plus deterministic d-max MCP tools.
+- Runtime: OpenClaw plus deterministic DMAX MCP tools.
 - Historical OpenClaw/browser-chat latency handoffs are archived under
   `docs/archive/session-handoffs/`. The latest preserved latency handoff is
   `docs/archive/session-handoffs/session-handoff-openclaw-latency-2026-05-02.md`;
@@ -491,8 +524,8 @@ TTS fails.
   are configured. API changes under `src/` restart the local API automatically.
 - The web-chat OpenClaw config is intentionally narrow. It keeps the browser
   chat path on OpenClaw/Codex while disabling OpenClaw memory-core for this
-  runtime; d-max initiative memory remains the SQLite/markdown source of truth.
-- During OpenClaw cold start, d-max treats a bound gateway port as an existing
+  runtime; DMAX initiative memory remains the SQLite/markdown source of truth.
+- During OpenClaw cold start, DMAX treats a bound gateway port as an existing
   startup in progress and does not repeatedly restart the gateway.
 - The browser polls `/api/openclaw/status` every 15s. The status is shown in the
   global `DMAX` agent button, not as a separate sidebar item.
@@ -527,14 +560,14 @@ Implemented behavior:
   mapping, and link behavior as the desktop sidebar. The menu closes after a
   normal route selection.
 - A global `DMAX` button is fixed at the top right of the main app area. It
-  opens/closes the contextual d-max drawer for the current route context, or
+  opens/closes the contextual DMAX drawer for the current route context, or
   falls back to Global Chat when no route context is available.
 - The `DMAX` button represents the OpenClaw agent and includes availability:
   green dot for `ready` with no extra text, yellow dot plus `Starting...` for
   `starting`, and red dot plus `Offline` for `unavailable`. Tooltips explain
   each state. There is intentionally no restart click yet; that would need a
   separate backend restart endpoint.
-- There is no standalone global chat page; d-max chat UI is the contextual
+- There is no standalone global chat page; DMAX chat UI is the contextual
   drawer used from overview/category/initiative/task contexts.
 - On narrow/mobile viewports, opening the contextual DMAX drawer locks the
   app-shell background and makes the drawer a full-screen fixed surface with its
@@ -578,9 +611,15 @@ Implemented behavior:
 - `/people` and `/organizations`: canonical contact/context list pages with
   search, compact rows, and create actions hidden behind `EditModal`.
 - `/people/:id` and `/organizations/:id`: canonical party detail pages for core
-  identity, contact points, addresses, relationships, and DMAX participation
-  context. Contact points and postal addresses use modal create/edit flows with
-  explicit delete confirmation.
+  identity, contact points, addresses, relationships, DMAX participation
+  context, and party email communication. On people, the main content column is
+  reserved for the E-Mail timeline, while the right sidebar contains Kontakt,
+  Beschreibung, Anschriften, DMAX-Kontexte, and Metadaten. Contact points and
+  postal addresses use modal create/edit flows with explicit delete
+  confirmation. Clicking an email contact opens compose to that address.
+  E-Mail rows are newest-first and show a prominent direction/date cluster,
+  subject, and quote-stripped preview. Expanding a row reveals full headers/body
+  and actions for reply, reply all, forward, archive, and trash.
 - `/ideas`, `/projects`, and `/habits`: canonical action/planning list pages.
   Each page uses compact scan rows, simple search, page-level create actions
   behind `EditModal`, and secondary facts appropriate to the type. Ideas remain
@@ -632,7 +671,7 @@ Implemented behavior:
   Termine ausgeblendet` opens the restore list. Zoom changes the time-axis
   scale and horizontal spacing only.
 - `/calendar`: day/week planning view with Google-Calendar-style day columns and
-  a 10-minute time grid. Local d-max entries can be created by dragging active
+  a 10-minute time grid. Local DMAX entries can be created by dragging active
   projects or open project tasks into the grid, moved by drag/drop, resized via
   top/bottom handles, deleted, and marked done. Project date ranges and
   multi-day timed events appear in the all-day area. That area is split into
@@ -850,7 +889,7 @@ Compatibility: `/api/projects`, `/api/projects/:id`, and
 bookmarks/clients, but new code should use `/api/initiatives`.
 
 Boundary: explicit UI actions use API routes/repositories. Telegram and app
-chat natural-language turns use OpenClaw plus d-max tools. Browser Drive Mode
+chat natural-language turns use OpenClaw plus DMAX tools. Browser Drive Mode
 currently bridges realtime audio to xAI; it does not yet perform durable
 ToolRunner state changes.
 
@@ -859,7 +898,7 @@ ToolRunner state changes.
 Current browser-first path:
 
 ```text
-Browser Drive Mode -> LiveKit room -> d-max LiveKit agent
+Browser Drive Mode -> LiveKit room -> DMAX LiveKit agent
 -> xAI realtime voice session
 ```
 
@@ -868,7 +907,7 @@ Implemented:
 - LiveKit browser token endpoint: `POST /api/voice/session`.
 - Browser Drive Mode joins room and publishes mic audio.
 - `src/voice/livekit-agent.ts`: watches latest registered room, joins as
-  d-max, consumes browser audio, forwards PCM16 to xAI, publishes model audio
+  DMAX, consumes browser audio, forwards PCM16 to xAI, publishes model audio
   back to LiveKit.
 - `src/voice/xai-realtime-session.ts`: xAI realtime WebSocket wrapper.
 - `src/voice/drive-mode-instructions.ts`: drive-mode voice policy.

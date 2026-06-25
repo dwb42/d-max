@@ -13,13 +13,14 @@ export type Party = {
   updatedAt: string;
 };
 
-export type Person = Party & {
+export type Person = Omit<Party, "displayName"> & {
   type: "person";
   firstName: string | null;
   lastName: string | null;
   salutation: PersonSalutation;
   academicTitle: string | null;
   nameSuffix: string | null;
+  description: string | null;
 };
 
 export type Organization = Party & {
@@ -92,6 +93,8 @@ export type EntityParticipant = {
 export type EntityParticipantWithParty = EntityParticipant & {
   party: Party;
   roleType: ParticipantRoleType | null;
+  contactPoints?: PartyContactPoint[];
+  relationships?: PartyRelationshipWithParties[];
 };
 
 export type PartyContactPoint = {
@@ -140,6 +143,7 @@ type PersonRow = PartyRow & {
   salutation: PersonSalutation;
   academic_title: string | null;
   name_suffix: string | null;
+  description: string | null;
 };
 
 type OrganizationRow = PartyRow & {
@@ -263,12 +267,12 @@ type PartyAddressRow = {
 };
 
 export type CreatePersonInput = {
-  displayName?: string;
   firstName?: string | null;
   lastName?: string | null;
   salutation?: PersonSalutation;
   academicTitle?: string | null;
   nameSuffix?: string | null;
+  description?: string | null;
 };
 
 export type UpdatePersonInput = Partial<CreatePersonInput> & { id: number };
@@ -368,13 +372,16 @@ export function toParty(row: PartyRow): Party {
 
 function toPerson(row: PersonRow): Person {
   return {
-    ...toParty(row),
+    id: row.id,
     type: "person",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
     firstName: row.first_name,
     lastName: row.last_name,
     salutation: row.salutation,
     academicTitle: row.academic_title,
-    nameSuffix: row.name_suffix
+    nameSuffix: row.name_suffix,
+    description: row.description
   };
 }
 
@@ -600,7 +607,7 @@ export class PersonRepository {
     const partyId = Number(result.lastInsertRowid);
     this.db
       .prepare(
-        "insert into people (party_id, first_name, last_name, salutation, academic_title, name_suffix, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?)"
+        "insert into people (party_id, first_name, last_name, salutation, academic_title, name_suffix, description, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?)"
       )
       .run(
         partyId,
@@ -609,6 +616,7 @@ export class PersonRepository {
         input.salutation ?? "unknown",
         clean(input.academicTitle),
         clean(input.nameSuffix),
+        clean(input.description),
         now,
         now
       );
@@ -622,19 +630,19 @@ export class PersonRepository {
     }
 
     const next = {
-      displayName: input.displayName,
       firstName: input.firstName === undefined ? existing.firstName : input.firstName,
       lastName: input.lastName === undefined ? existing.lastName : input.lastName,
       salutation: input.salutation ?? existing.salutation,
       academicTitle: input.academicTitle === undefined ? existing.academicTitle : input.academicTitle,
-      nameSuffix: input.nameSuffix === undefined ? existing.nameSuffix : input.nameSuffix
+      nameSuffix: input.nameSuffix === undefined ? existing.nameSuffix : input.nameSuffix,
+      description: input.description === undefined ? existing.description : input.description
     };
     const displayName = personDisplayName(next);
 
     this.db.prepare("update parties set display_name = ?, updated_at = ? where id = ? and type = 'person'").run(displayName, now, input.id);
     this.db
-      .prepare("update people set first_name = ?, last_name = ?, salutation = ?, academic_title = ?, name_suffix = ?, updated_at = ? where party_id = ?")
-      .run(clean(next.firstName), clean(next.lastName), next.salutation, clean(next.academicTitle), clean(next.nameSuffix), now, input.id);
+      .prepare("update people set first_name = ?, last_name = ?, salutation = ?, academic_title = ?, name_suffix = ?, description = ?, updated_at = ? where party_id = ?")
+      .run(clean(next.firstName), clean(next.lastName), next.salutation, clean(next.academicTitle), clean(next.nameSuffix), clean(next.description), now, input.id);
     return this.findById(input.id)!;
   }
 
@@ -938,12 +946,12 @@ export class EntityParticipantRepository {
     const rows = this.db
       .prepare(`${entityParticipantJoinSql()} ${where} order by ep.is_primary desc, prt.sort_order asc, lower(p.display_name) asc, ep.id asc`)
       .all(...params) as EntityParticipantJoinRow[];
-    return rows.map(toEntityParticipantWithParty);
+    return rows.map((row) => this.withPartyDetails(toEntityParticipantWithParty(row)));
   }
 
   findById(id: number): EntityParticipantWithParty | null {
     const row = this.db.prepare(`${entityParticipantJoinSql()} where ep.id = ?`).get(id) as EntityParticipantJoinRow | undefined;
-    return row ? toEntityParticipantWithParty(row) : null;
+    return row ? this.withPartyDetails(toEntityParticipantWithParty(row)) : null;
   }
 
   create(input: CreateEntityParticipantInput, now = nowIso()): EntityParticipantWithParty {
@@ -1027,6 +1035,14 @@ export class EntityParticipantRepository {
       .get(partyId, entityType, entityId, roleTypeId, clean(roleLabel)) as { id: number } | undefined;
     return row?.id ?? null;
   }
+
+  private withPartyDetails(participant: EntityParticipantWithParty): EntityParticipantWithParty {
+    return {
+      ...participant,
+      contactPoints: new PartyContactPointRepository(this.db).list({ partyId: participant.partyId }),
+      relationships: new PartyRelationshipRepository(this.db).list({ partyId: participant.partyId, status: "active" })
+    };
+  }
 }
 
 export class PartyContactPointRepository {
@@ -1107,6 +1123,7 @@ export class PartyContactPointRepository {
         now,
         input.id
       );
+    cleanupStaleGmailLinksForContactPoint(this.db, input.id);
     return this.findById(input.id)!;
   }
 
@@ -1115,6 +1132,7 @@ export class PartyContactPointRepository {
     if (!existing) {
       return null;
     }
+    deleteGmailLinksForContactPoint(this.db, id);
     this.db.prepare("delete from party_contact_points where id = ?").run(id);
     return existing;
   }
@@ -1239,15 +1257,10 @@ function entityParticipantJoinSql(): string {
   left join participant_role_types prt on prt.id = ep.role_type_id`;
 }
 
-function personDisplayName(input: Pick<CreatePersonInput, "displayName" | "firstName" | "lastName" | "academicTitle" | "nameSuffix">): string {
-  const explicit = clean(input.displayName);
-  if (explicit) {
-    return explicit;
-  }
-
-  const parts = [clean(input.academicTitle), clean(input.firstName), clean(input.lastName), clean(input.nameSuffix)].filter(Boolean);
+function personDisplayName(input: Pick<CreatePersonInput, "firstName" | "lastName">): string {
+  const parts = [clean(input.firstName), clean(input.lastName)].filter(Boolean);
   if (parts.length === 0) {
-    throw new Error("Person displayName or name is required");
+    throw new Error("Person firstName or lastName is required");
   }
   return parts.join(" ");
 }
@@ -1288,6 +1301,26 @@ function normalizeContactPointValue(type: ContactPointType, value: string): stri
     return trimmed.replace(/[\s().-]/g, "");
   }
   return trimmed;
+}
+
+function cleanupStaleGmailLinksForContactPoint(db: Database.Database, contactPointId: number): void {
+  db
+    .prepare(
+      `delete from gmail_message_party_links
+       where contact_point_id = ?
+         and not exists (
+           select 1
+           from party_contact_points cp
+           where cp.id = gmail_message_party_links.contact_point_id
+             and cp.type = 'email'
+             and lower(cp.normalized_value) = lower(gmail_message_party_links.matched_email)
+         )`
+    )
+    .run(contactPointId);
+}
+
+function deleteGmailLinksForContactPoint(db: Database.Database, contactPointId: number): void {
+  db.prepare("delete from gmail_message_party_links where contact_point_id = ?").run(contactPointId);
 }
 
 function assertValidDateRange(start: string | null, end: string | null, message: string): void {

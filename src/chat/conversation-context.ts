@@ -15,7 +15,7 @@ import {
   PartyRelationshipRepository,
   PersonRepository
 } from "../repositories/parties.js";
-import type { EntityParticipantWithParty, PartyAddress, PartyContactPoint, PartyRelationshipWithParties } from "../repositories/parties.js";
+import type { EntityParticipantWithParty, PartyAddress, PartyContactPoint, PartyRelationshipWithParties, Person } from "../repositories/parties.js";
 import { TaskChecklistItemRepository } from "../repositories/task-checklist-items.js";
 import type { TaskChecklistItem } from "../repositories/task-checklist-items.js";
 import { TaskRepository } from "../repositories/tasks.js";
@@ -172,7 +172,7 @@ const promptTemplateSpecs: Array<{
     name: "Global",
     route: "Global Chat",
     type: "global",
-    meaning: "Global d-max chat without a focused UI entity.",
+    meaning: "Global DMAX chat without a focused UI entity.",
     contextDataLines: [
       "Use the tools to inspect initiatives or tasks when the user asks for specific state.",
       "Do not assume an initiative or task target unless the user names one clearly."
@@ -372,7 +372,7 @@ const promptTemplateSpecs: Array<{
     type: "tasks",
     meaning: "Focused on the cross-initiative task execution surface.",
     contextDataLines: [
-      "Open tasks across d-max ({{open_task_count}}, showing highest-signal first):",
+      "Open tasks across DMAX ({{open_task_count}}, showing highest-signal first):",
       "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}; initiative: #{{initiative_id}} {{initiative_name}}; category: #{{category_id}} {{category_name}}"
     ]
   },
@@ -715,13 +715,13 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       storage,
       title: "Global Chat",
       promptType: "global",
-      description: "Global d-max chat without a focused UI entity.",
+      description: "Global DMAX chat without a focused UI entity.",
       lines: [
         "Use the tools to inspect initiatives or tasks when the user asks for specific state.",
         "Do not assume an initiative or task target unless the user names one clearly."
       ],
       payload: {
-        dataSources: ["OpenClaw workspace", "d-max MCP tools"],
+        dataSources: ["OpenClaw workspace", "DMAX MCP tools"],
         current: ["global app chat"],
         notes: ["No focused UI entity was provided."]
       }
@@ -1149,7 +1149,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     const allInitiatives = initiatives.list();
     const allCategories = categories.list();
     const lines = [
-      `Open tasks across d-max (${allTasks.length}, showing highest-signal first):`,
+      `Open tasks across DMAX (${allTasks.length}, showing highest-signal first):`,
       ...rankTasks(allTasks)
         .slice(0, 40)
         .map((task) => {
@@ -1186,7 +1186,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
             `People (${personList.length}):`,
             ...personList.slice(0, 60).map((person) => {
               const contacts = formatContactSummary(partyContactPoints.list({ partyId: person.id }));
-              return `- #${person.id} ${person.displayName}; salutation: ${person.salutation}; first: ${person.firstName ?? "none"}; last: ${person.lastName ?? "none"}${contacts}`;
+              return `- #${person.id} ${formatPersonName(person)}; salutation: ${person.salutation}; first: ${person.firstName ?? "none"}; last: ${person.lastName ?? "none"}; description: ${person.description?.trim() ? "described" : "missing"}${contacts}`;
             })
           ]
         : [
@@ -1202,7 +1202,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       storage,
       title: context.type === "people" ? "People" : "Organizations",
       promptType: context.type,
-      description: `Focused on d-max ${context.type} and the Who dimension.`,
+      description: `Focused on DMAX ${context.type} and the Who dimension.`,
       lines,
       payload: {
         dataSources: context.type === "people" ? ["people", "party_contact_points"] : ["organizations", "party_contact_points"],
@@ -1339,10 +1339,11 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     const addresses = partyAddresses.list({ partyId: party.id });
     const header =
       person !== null
-        ? `Person: #${person.id} ${person.displayName}; salutation: ${person.salutation}; first: ${person.firstName ?? "none"}; last: ${person.lastName ?? "none"}; title: ${person.academicTitle ?? "none"}`
+        ? `Person: #${person.id} ${formatPersonName(person)}; salutation: ${person.salutation}; first: ${person.firstName ?? "none"}; last: ${person.lastName ?? "none"}; title: ${person.academicTitle ?? "none"}; description: ${person.description?.trim() ? "described" : "missing"}`
         : `Organization: #${organization!.id} ${organization!.displayName}; name: ${organization!.name}; legal name: ${organization!.legalName ?? "none"}; type: ${organization!.organizationType ?? "none"}`;
     const lines = [
       header,
+      ...(person ? [`Person description:\n${truncate(person.description || "No person description yet.", 3000)}`] : []),
       ...(organization ? [`Organization description markdown:\n${truncate(organization.markdown || "No organization description yet.", 3000)}`] : []),
       `Contact points (${contacts.length}):`,
       ...contacts.slice(0, 20).map(formatContactPoint),
@@ -1357,13 +1358,13 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     return buildResolvedContext({
       context,
       storage,
-      title: party.displayName,
+      title: person ? formatPersonName(person) : organization!.displayName,
       promptType: context.type,
       description: `Focused on one ${context.type} in the Who dimension.`,
       lines,
       payload: {
         dataSources: ["people", "organizations", "party_relationships", "entity_participants", "party_contact_points", "party_addresses"],
-        current: [`${context.type} #${party.id} ${party.displayName}`],
+        current: [`${context.type} #${party.id} ${person ? formatPersonName(person) : organization!.displayName}`],
         children: [`${contacts.length} contact points`, `${addresses.length} postal addresses`, `${participants.length} DMAX participations`],
         neighbors: [`${relationships.length} party relationships`],
         limits: ["Contacts capped at 20.", "Addresses capped at 20.", "Relationships capped at 30.", "Participations capped at 30."]
@@ -1670,14 +1671,14 @@ function buildPromptSections(type: ConversationContext["type"], description: str
   const contextData = ["Context data:", ...lines.filter(Boolean)].join("\n");
   const contextSpecificInstructions = instructionsForContextType(type);
   const systemInstructions = [
-    "Current d-max conversation context:",
+    "Current DMAX conversation context:",
     `Type: ${type}`,
     `Meaning: ${description}`,
     "",
     "Context contract:",
     "- Treat this as the active focus for this turn.",
     "- Context is not an automatic instruction to mutate durable state.",
-    "- Durable changes must go through d-max tools and existing confirmation rules.",
+    "- Durable changes must go through DMAX tools and existing confirmation rules.",
     "- If the requested mutation target is ambiguous, ask before creating or changing initiatives/tasks.",
     "- Use tools to fetch more detail when the current context is not enough.",
     "",
@@ -1702,7 +1703,7 @@ function buildPromptSections(type: ConversationContext["type"], description: str
     ...contextSpecificInstructions
   ].join("\n");
   const agentContextBlock = [
-    "Current d-max conversation context:",
+    "Current DMAX conversation context:",
     `Type: ${type}`,
     `Meaning: ${description}`,
     "",
@@ -1711,7 +1712,7 @@ function buildPromptSections(type: ConversationContext["type"], description: str
     "Context contract:",
     "- Treat this as the active focus for this turn.",
     "- Context is not an automatic instruction to mutate durable state.",
-    "- Durable changes must go through d-max tools and existing confirmation rules.",
+    "- Durable changes must go through DMAX tools and existing confirmation rules.",
     "- If the requested mutation target is ambiguous, ask before creating or changing initiatives/tasks.",
     "- Use tools to fetch more detail when the current context is not enough.",
     "",
@@ -1745,13 +1746,13 @@ function buildGermanCategoryPromptSections(type: ConversationContext["type"], de
   const contextData = ["Kontextdaten:", ...lines.filter(Boolean)].join("\n");
   const contextSpecificInstructions = instructionsForContextType(type);
   const sharedInstructions = [
-    "Aktueller d-max Conversation Context:",
+    "Aktueller DMAX Conversation Context:",
     `Typ: ${type}`,
     `Bedeutung: ${description}`,
     "",
     "Kontextvertrag:",
     "- Aktiver Fokus fuer diesen Turn; kein automatischer Auftrag zu dauerhaften Aenderungen.",
-    "- Dauerhafte Aenderungen nur ueber d-max Tools und bestehende Bestaetigungsregeln.",
+    "- Dauerhafte Aenderungen nur ueber DMAX Tools und bestehende Bestaetigungsregeln.",
     "- Bei mehrdeutigem Aenderungsziel nachfragen, bevor du Initiativen/Aufgaben erstellst oder aenderst.",
     "- Fehlende Details per Tools abrufen.",
     "",
@@ -1773,7 +1774,7 @@ function buildGermanCategoryPromptSections(type: ConversationContext["type"], de
   ];
   const systemInstructions = sharedInstructions.join("\n");
   const agentContextBlock = [
-    "Aktueller d-max Conversation Context:",
+    "Aktueller DMAX Conversation Context:",
     `Typ: ${type}`,
     `Bedeutung: ${description}`,
     "",
@@ -2357,6 +2358,10 @@ function formatPartyAddress(address: PartyAddress): string {
 function formatContactSummary(contactPoints: PartyContactPoint[]): string {
   const preferred = contactPoints.find((contactPoint) => contactPoint.isPreferred) ?? contactPoints.find((contactPoint) => contactPoint.isPrimary);
   return preferred ? `; preferred contact: ${preferred.type} ${preferred.value}` : "";
+}
+
+function formatPersonName(person: Pick<Person, "firstName" | "lastName">): string {
+  return [person.firstName, person.lastName].filter(Boolean).join(" ").trim() || "Unnamed person";
 }
 
 function formatPartyRelationship(relationship: PartyRelationshipWithParties, focusPartyId: number): string {

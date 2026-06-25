@@ -16,6 +16,8 @@ import type {
   GoogleCalendarAccountStatus,
   GoogleCalendarAuthStatus,
   GoogleCalendarListItem,
+  GmailMailboxWithStatus,
+  GmailMessage,
   GoogleWorkspaceAuthStatus,
   GraphLayoutNode,
   LiveKitVoiceSession,
@@ -66,12 +68,12 @@ export async function fetchPersonDetail(id: number): Promise<PersonDetail> {
 }
 
 export async function createPerson(input: {
-  displayName?: string;
   firstName?: string | null;
   lastName?: string | null;
   salutation?: Person["salutation"];
   academicTitle?: string | null;
   nameSuffix?: string | null;
+  description?: string | null;
 }): Promise<Person> {
   const response = await request<{ person: Person }>("/api/people", {
     method: "POST",
@@ -84,12 +86,12 @@ export async function createPerson(input: {
 export async function updatePerson(
   id: number,
   input: {
-    displayName?: string;
     firstName?: string | null;
     lastName?: string | null;
     salutation?: Person["salutation"];
     academicTitle?: string | null;
     nameSuffix?: string | null;
+    description?: string | null;
   }
 ): Promise<Person> {
   const response = await request<{ person: Person }>(`/api/people/${id}`, {
@@ -167,6 +169,10 @@ export async function createPartyRelationship(input: {
     body: JSON.stringify(input)
   });
   return response.relationship;
+}
+
+export async function deletePartyRelationship(id: number): Promise<void> {
+  await request(`/api/party-relationships/${id}`, { method: "DELETE" });
 }
 
 export async function createEntityParticipant(input: {
@@ -446,6 +452,98 @@ export async function fetchGoogleCalendarAccounts(): Promise<GoogleCalendarAccou
 export async function fetchGoogleWorkspaceAuthStatus(): Promise<GoogleWorkspaceAuthStatus> {
   const response = await request<{ googleWorkspace: GoogleWorkspaceAuthStatus }>("/api/config/google-workspace/status");
   return response.googleWorkspace;
+}
+
+export async function fetchGmailMailboxes(): Promise<GmailMailboxWithStatus[]> {
+  const response = await request<{ mailboxes: GmailMailboxWithStatus[] }>("/api/config/gmail/mailboxes");
+  return response.mailboxes;
+}
+
+export async function createGmailAuthUrl(input: { loginHint?: string | null } = {}): Promise<string> {
+  const response = await request<{ authUrl: string }>("/api/config/gmail/auth-url", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.authUrl;
+}
+
+export async function upsertGmailMailbox(input: {
+  accountLabel: string;
+  displayName?: string | null;
+  emailAddress?: string | null;
+  enabled?: boolean;
+  syncEnabled?: boolean;
+  sendEnabled?: boolean;
+  signature?: string | null;
+}): Promise<GmailMailboxWithStatus> {
+  const response = await request<{ mailbox: GmailMailboxWithStatus }>("/api/config/gmail/mailboxes", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.mailbox;
+}
+
+export async function updateGmailMailbox(
+  id: number,
+  input: {
+    displayName?: string | null;
+    emailAddress?: string | null;
+    enabled?: boolean;
+    syncEnabled?: boolean;
+    sendEnabled?: boolean;
+    signature?: string | null;
+  }
+): Promise<GmailMailboxWithStatus> {
+  const response = await request<{ mailbox: GmailMailboxWithStatus }>(`/api/config/gmail/mailboxes/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.mailbox;
+}
+
+export async function syncGmailMailbox(id: number): Promise<void> {
+  await request(`/api/config/gmail/mailboxes/${id}/sync`, { method: "POST" });
+}
+
+export async function fetchPartyGmailMessages(partyId: number, input: { sync?: boolean } = {}): Promise<GmailMessage[]> {
+  const query = input.sync ? "?sync=1" : "";
+  const response = await request<{ messages: GmailMessage[] }>(`/api/parties/${partyId}/gmail/messages${query}`);
+  return response.messages;
+}
+
+export async function createGmailDraft(input: {
+  mailboxId: number;
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  body: string;
+}): Promise<{ id: string; messageId: string | null }> {
+  const response = await request<{ draft: { id: string; messageId: string | null } }>("/api/gmail/drafts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.draft;
+}
+
+export async function sendGmailDraft(input: { mailboxId: number; draftId: string; confirmed: boolean }): Promise<void> {
+  await request("/api/gmail/drafts/send", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+}
+
+export async function archivePartyGmailMessage(partyId: number, messageId: number): Promise<void> {
+  await request(`/api/parties/${partyId}/gmail/messages/${messageId}/archive`, { method: "POST" });
+}
+
+export async function trashPartyGmailMessage(partyId: number, messageId: number): Promise<void> {
+  await request(`/api/parties/${partyId}/gmail/messages/${messageId}/trash`, { method: "POST" });
 }
 
 export async function createGoogleCalendarAuthUrl(input: { loginHint?: string | null } = {}): Promise<string> {
@@ -1069,7 +1167,7 @@ export async function streamChatMessage(
 
   if (!finalResult) {
     recordBrowserChatTraceEvent(trace, "browser_stream_finished_without_final_result");
-    throw new Error("Chat stream ended before d-max returned a final answer.");
+    throw new Error("Chat stream ended before DMAX returned a final answer.");
   }
 
   recordBrowserChatTraceEvent(trace, "browser_stream_result_ready", {

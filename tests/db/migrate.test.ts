@@ -75,6 +75,9 @@ describe("migrate", () => {
       const graphAnnotationColumns = db.prepare("pragma table_info(graph_node_annotations)").all() as Array<{ name: string }>;
       const mindmapDraftColumns = db.prepare("pragma table_info(mindmap_change_drafts)").all() as Array<{ name: string }>;
       const appChatMessageColumns = db.prepare("pragma table_info(app_chat_messages)").all() as Array<{ name: string }>;
+      const gmailMailboxColumns = db.prepare("pragma table_info(gmail_mailboxes)").all() as Array<{ name: string }>;
+      const gmailMessageColumns = db.prepare("pragma table_info(gmail_messages)").all() as Array<{ name: string }>;
+      const gmailVisibilityColumns = db.prepare("pragma table_info(gmail_message_party_visibility)").all() as Array<{ name: string }>;
       const partyColumns = db.prepare("pragma table_info(parties)").all() as Array<{ name: string }>;
       const peopleColumns = db.prepare("pragma table_info(people)").all() as Array<{ name: string }>;
       const organizationColumns = db.prepare("pragma table_info(organizations)").all() as Array<{ name: string }>;
@@ -107,8 +110,12 @@ describe("migrate", () => {
       expect(mindmapDraftColumns.some((column) => column.name === "patches_json")).toBe(true);
       expect(appChatMessageColumns.some((column) => column.name === "audio_generation_status")).toBe(true);
       expect(appChatMessageColumns.some((column) => column.name === "audio_generated_from_message_id")).toBe(true);
+      expect(gmailMailboxColumns.some((column) => column.name === "account_label")).toBe(true);
+      expect(gmailMessageColumns.some((column) => column.name === "plain_body")).toBe(true);
+      expect(gmailVisibilityColumns.some((column) => column.name === "status")).toBe(true);
       expect(partyColumns.some((column) => column.name === "display_name")).toBe(true);
       expect(peopleColumns.some((column) => column.name === "salutation")).toBe(true);
+      expect(peopleColumns.some((column) => column.name === "description")).toBe(true);
       expect(organizationColumns.some((column) => column.name === "markdown")).toBe(true);
       expect(relationshipTypeCount.count).toBeGreaterThanOrEqual(10);
       expect(participantRoleTypeCount.count).toBeGreaterThanOrEqual(12);

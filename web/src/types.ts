@@ -222,13 +222,14 @@ export type Party = {
   updatedAt: string;
 };
 
-export type Person = Party & {
+export type Person = Omit<Party, "displayName"> & {
   type: "person";
   firstName: string | null;
   lastName: string | null;
   salutation: PersonSalutation;
   academicTitle: string | null;
   nameSuffix: string | null;
+  description: string | null;
 };
 
 export type Organization = Party & {
@@ -274,6 +275,8 @@ export type EntityParticipant = {
   updatedAt: string;
   party: Party;
   roleType: ParticipantRoleType | null;
+  contactPoints?: PartyContactPoint[];
+  relationships?: PartyRelationshipWithParties[];
 };
 
 export type PartyRelationship = {
@@ -437,6 +440,83 @@ export type GoogleCalendarListItem = {
   primary: boolean;
   accessRole: string | null;
   readOnly: boolean;
+};
+
+export type GmailAuthStatus = {
+  configured: boolean;
+  connected: boolean;
+  tokenPath: string;
+  redirectUri: string;
+  scopes: string[];
+  tokenScope: string | null;
+  hasRequiredScope: boolean;
+  missingScopes: string[];
+  detail: string | null;
+};
+
+export type GmailMailbox = {
+  id: number;
+  accountLabel: string;
+  displayName: string;
+  emailAddress: string | null;
+  enabled: boolean;
+  syncEnabled: boolean;
+  sendEnabled: boolean;
+  signature: string | null;
+  lastSyncAt: string | null;
+  lastSyncError: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GmailMailboxWithStatus = GmailMailbox & {
+  authStatus: GmailAuthStatus;
+};
+
+export type GmailAddress = {
+  name: string | null;
+  email: string;
+};
+
+export type GmailMessage = {
+  id: number;
+  mailboxId: number;
+  gmailMessageId: string;
+  gmailThreadId: string | null;
+  historyId: string | null;
+  labelIds: string[];
+  direction: "inbound" | "outbound" | "internal" | "unknown";
+  messageDate: string;
+  subject: string | null;
+  from: GmailAddress[];
+  to: GmailAddress[];
+  cc: GmailAddress[];
+  bcc: GmailAddress[];
+  plainBody: string | null;
+  htmlBody: string | null;
+  snippet: string | null;
+  syncStatus: "synced" | "external_deleted";
+  lastSyncedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  attachments: Array<{
+    gmailAttachmentId: string | null;
+    filename: string | null;
+    mimeType: string | null;
+    byteSize: number | null;
+    partId: string | null;
+  }>;
+  partyLinks: Array<{
+    id: number;
+    messageId: number;
+    partyId: number;
+    partyType: "person" | "organization";
+    partyDisplayName: string;
+    contactPointId: number | null;
+    matchedEmail: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
 };
 
 export type CalendarViewWarning = {

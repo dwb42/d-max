@@ -47,11 +47,14 @@ function contactPointCapabilities(type: PartyContactPoint["type"]): { canSend: b
 export function ContactPointList(props: {
   partyId: number;
   contactPoints: PartyContactPoint[];
+  title?: string;
   description?: string | null;
   emptyTitle?: string;
   emptyDescription?: string;
   addLabel?: string;
+  addIconOnly?: boolean;
   deleteDescription?: (contactPoint: PartyContactPoint) => ReactNode;
+  onActivateContactPoint?: (contactPoint: PartyContactPoint) => void;
   onCreate: (partyId: number, input: ContactPointInput) => Promise<void>;
   onUpdate: (contactPointId: number, input: Partial<ContactPointInput>) => Promise<void>;
   onDelete: (contactPointId: number) => Promise<void>;
@@ -63,12 +66,19 @@ export function ContactPointList(props: {
 
   return (
     <SectionBlock
-      title="Kontaktwege"
+      title={props.title ?? "Kontaktwege"}
       description={props.description === undefined ? "Direkte Wege zur Organisation." : props.description}
       actions={(
-        <button type="button" className="section-primary-action" onClick={() => setEditingContactPoint("new")} disabled={busyAction !== null}>
+        <button
+          type="button"
+          className={props.addIconOnly ? "icon-button compact" : "section-primary-action"}
+          onClick={() => setEditingContactPoint("new")}
+          disabled={busyAction !== null}
+          title={props.addLabel ?? "Kontaktweg hinzufügen"}
+          aria-label={props.addLabel ?? "Kontaktweg hinzufügen"}
+        >
           <Plus size={15} />
-          {props.addLabel ?? "Kontaktweg hinzufügen"}
+          {props.addIconOnly ? null : props.addLabel ?? "Kontaktweg hinzufügen"}
         </button>
       )}
     >
@@ -79,6 +89,7 @@ export function ContactPointList(props: {
             contactPoint={contactPoint}
             disabled={busyAction !== null}
             onEdit={() => setEditingContactPoint(contactPoint)}
+            onOpen={props.onActivateContactPoint && contactPoint.type === "email" ? () => props.onActivateContactPoint?.(contactPoint) : undefined}
             onDelete={() => {
               if (busyAction) return;
               setDeletingContactPoint(contactPoint);
@@ -140,6 +151,7 @@ export function ContactPointList(props: {
 export function ContactPointItem(props: {
   contactPoint: PartyContactPoint;
   disabled?: boolean;
+  onOpen?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
 }) {
@@ -151,6 +163,7 @@ export function ContactPointItem(props: {
       meta={[contactPointTypeLabel(contactPoint.type), contactPoint.label, contactPoint.isPreferred ? "bevorzugt" : null, contactPoint.isPrimary ? "primär" : null]
         .filter(Boolean)
         .join(" · ")}
+      onOpen={props.onOpen}
       actions={(
         <>
           {props.onEdit ? (

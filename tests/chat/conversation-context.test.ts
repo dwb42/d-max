@@ -34,7 +34,7 @@ describe("resolveConversationContext", () => {
     const project = initiatives.create({
       categoryId: category.id,
       type: "project",
-      name: "d-max",
+      name: "DMAX",
       startDate: "2026-05-02",
       endDate: "2026-06-15",
       markdown: "# Projekt\n\nPrompt-Kontext sauber strukturieren."
@@ -60,7 +60,7 @@ describe("resolveConversationContext", () => {
     expect(resolved.agentContextBlock).toContain("Agent Prompt Idee");
     expect(resolved.agentContextBlock).toContain("Mehr Kontextklarheit fuer den Agenten.");
     expect(resolved.agentContextBlock).toContain("Projekte in diesem Lebensbereich (1):");
-    expect(resolved.agentContextBlock).toContain("d-max");
+    expect(resolved.agentContextBlock).toContain("DMAX");
     expect(resolved.agentContextBlock).toContain("Prompt-Kontext sauber strukturieren.");
     expect(resolved.agentContextBlock).toContain("Gewohnheiten in diesem Lebensbereich (1):");
     expect(resolved.agentContextBlock).toContain("Prompt Review");
@@ -234,7 +234,7 @@ describe("resolveConversationContext", () => {
     expect(habits.agentContextBlock).toContain("Neuseeland-Route");
     expect(habits.agentContextBlock).toContain("Reiserad kaufen");
     expect(taskList.contextType).toBe("tasks");
-    expect(taskList.agentContextBlock).toContain("Open tasks across d-max");
+    expect(taskList.agentContextBlock).toContain("Open tasks across DMAX");
     expect(taskList.agentContextBlock).toContain("Haendler anrufen");
   });
 
@@ -568,7 +568,7 @@ describe("resolveConversationContext", () => {
     const category = new CategoryRepository(db).create({ name: "Business" });
     const initiative = new InitiativeRepository(db).create({ categoryId: category.id, name: "Relationship System" });
     const task = new TaskRepository(db).create({ initiativeId: initiative.id, title: "Call Clara" });
-    const person = new PersonRepository(db).create({ firstName: "Clara", lastName: "Kontakt", salutation: "mrs" });
+    const person = new PersonRepository(db).create({ firstName: "Clara", lastName: "Kontakt", salutation: "mrs", description: "Clara koordiniert den Beziehungsaufbau." });
     const organization = new OrganizationRepository(db).create({ name: "Acme GmbH", markdown: "Strategic partner notes." });
     new PartyContactPointRepository(db).create({ partyId: person.id, type: "email", value: "clara@example.com", isPreferred: true });
     new PartyAddressRepository(db).create({ partyId: organization.id, line1: "Main Street 1", city: "Hamburg" });
@@ -586,6 +586,7 @@ describe("resolveConversationContext", () => {
     expect(projectContext.agentContextBlock).toContain("Clara Kontakt");
     expect(taskContext.agentContextBlock).toContain("Ansprechpartner");
     expect(personContext.agentContextBlock).toContain("Person: #");
+    expect(personContext.agentContextBlock).toContain("Clara koordiniert den Beziehungsaufbau.");
     expect(personContext.agentContextBlock).toContain("Contact points (1):");
     expect(personContext.agentContextBlock).toContain("clara@example.com");
     expect(personContext.agentContextBlock).toContain("DMAX participations (2):");

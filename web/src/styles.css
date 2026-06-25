@@ -1713,10 +1713,42 @@ textarea {
   font-weight: inherit;
 }
 
-.entity-header-title-block p {
+.entity-header-title-block p,
+.entity-header-subtitle {
   color: #49534d;
   font-size: 14px;
   font-weight: 650;
+}
+
+.person-header-relations {
+  display: grid;
+  gap: 3px;
+}
+
+.person-header-relation-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.person-header-relation-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #14584e;
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.person-header-relation-link:hover,
+.person-header-relation-link:focus-visible {
+  text-decoration: underline;
+  outline: none;
 }
 
 .entity-header-facts {
@@ -1924,6 +1956,25 @@ textarea {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   align-items: start;
+}
+
+.person-reference-detail {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.person-detail-communication-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+}
+
+.person-detail-email-main,
+.person-detail-sidebar {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
 }
 
 .section-block,
@@ -2197,6 +2248,23 @@ textarea {
 .relation-item-copy span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.relation-title-button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.relation-title-button:hover {
+  text-decoration: underline;
 }
 
 .relation-item-copy p {
@@ -4576,7 +4644,39 @@ button.initiative-markdown-panel:hover {
 }
 
 .party-edit-modal {
-  width: min(520px, calc(100vw - 32px));
+  width: min(860px, calc(100vw - 32px));
+}
+
+.party-modal-relationship-manager {
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid #edf1eb;
+  padding-top: 14px;
+}
+
+.party-modal-relationship-group {
+  display: grid;
+  gap: 10px;
+}
+
+.party-modal-relationship-group h3 {
+  margin: 0;
+  color: #17211c;
+  font-size: 14px;
+}
+
+.party-modal-relationship-create {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(130px, 0.8fr) minmax(130px, 0.8fr) minmax(120px, 0.8fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.party-modal-relationship-create input,
+.party-modal-relationship-create select {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 9px;
 }
 
 .markdown-modal {
@@ -5070,6 +5170,10 @@ button.initiative-markdown-panel:hover {
   background: #f7f8f5;
 }
 
+.gmail-mailbox-row {
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto auto;
+}
+
 .config-source-row label {
   display: inline-flex;
   align-items: center;
@@ -5085,6 +5189,171 @@ button.initiative-markdown-panel:hover {
   background: #ffffff;
   color: #66726b;
   font-size: 12px;
+}
+
+.party-email-timeline {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.party-email-section,
+.party-email-item {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.party-email-section .section-block-header {
+  align-items: center;
+}
+
+.party-email-section .section-block-actions {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.party-email-item {
+  border: 1px solid #dfe4dc;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.party-email-summary {
+  display: grid;
+  width: 100%;
+  gap: 7px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.party-email-summary:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid rgba(20, 88, 78, 0.24);
+  outline-offset: 4px;
+}
+
+.party-email-date-cluster {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, max-content) auto;
+  align-items: center;
+  justify-self: start;
+  max-width: 100%;
+  gap: 7px;
+  border-radius: 7px;
+  padding: 5px 8px;
+  background: #f4f7f4;
+  color: #26342d;
+  line-height: 1;
+}
+
+.party-email-date-cluster.inbound {
+  background: #edf7f2;
+  color: #14584e;
+}
+
+.party-email-date-cluster.outbound {
+  background: #f2f4f8;
+  color: #34435e;
+}
+
+.party-email-date-cluster.internal,
+.party-email-date-cluster.unknown {
+  background: #f4f1ea;
+  color: #5a4b2b;
+}
+
+.party-email-direction-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.party-email-date-time {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.party-email-direction-label {
+  border-left: 1px solid currentColor;
+  padding-left: 7px;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  opacity: 0.72;
+  white-space: nowrap;
+}
+
+.party-email-subject {
+  color: #17211c;
+  font-weight: 850;
+  line-height: 1.2;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.party-email-preview,
+.party-email-meta {
+  color: #66726b;
+  font-size: 13px;
+  line-height: 1.3;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.party-email-preview {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.party-email-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 6px;
+  margin-bottom: 8px;
+}
+
+.party-email-action-button {
+  min-height: 28px;
+  padding: 4px 7px;
+  font-size: 12px;
+  line-height: 1.1;
+}
+
+.party-email-expanded {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  border-top: 1px solid #edf0eb;
+  padding-top: 14px;
+}
+
+.party-email-meta {
+  display: grid;
+  gap: 4px;
+}
+
+.party-email-item p {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  color: #66726b;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .row-meta {
@@ -5307,7 +5576,6 @@ button.initiative-markdown-panel:hover {
   gap: 10px;
 }
 
-.person-create-fields label:first-child,
 .person-create-fields label:last-child {
   grid-column: span 2;
 }
@@ -7181,10 +7449,12 @@ button.task-notes-panel:hover {
   .category-create-inline-form,
   .participant-create-form,
   .member-create-form,
+  .party-modal-relationship-create,
   .organization-detail-grid,
   .organization-secondary-grid,
   .entity-detail-page,
   .entity-detail-two-column,
+  .person-detail-communication-layout,
   .modal-two-column,
   .timeline-toolbar,
   .split-view,
@@ -7211,7 +7481,6 @@ button.task-notes-panel:hover {
     grid-template-columns: 1fr;
   }
 
-  .person-create-fields label:first-child,
   .person-create-fields label:last-child {
     grid-column: auto;
   }

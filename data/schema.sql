@@ -172,6 +172,89 @@ create table if not exists calendar_sources (
   unique(provider, calendar_id)
 );
 
+create table if not exists gmail_mailboxes (
+  id integer primary key,
+  account_label text not null unique,
+  display_name text not null,
+  email_address text,
+  enabled integer not null default 1 check (enabled in (0, 1)),
+  sync_enabled integer not null default 1 check (sync_enabled in (0, 1)),
+  send_enabled integer not null default 0 check (send_enabled in (0, 1)),
+  signature text,
+  last_sync_at text,
+  last_sync_error text,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists gmail_messages (
+  id integer primary key,
+  mailbox_id integer not null references gmail_mailboxes(id) on delete cascade,
+  gmail_message_id text not null,
+  gmail_thread_id text,
+  history_id text,
+  label_ids_json text not null default '[]',
+  direction text not null default 'unknown' check (direction in ('inbound', 'outbound', 'internal', 'unknown')),
+  message_date text not null,
+  subject text,
+  from_json text not null default '[]',
+  to_json text not null default '[]',
+  cc_json text not null default '[]',
+  bcc_json text not null default '[]',
+  plain_body text,
+  html_body text,
+  snippet text,
+  sync_status text not null default 'synced' check (sync_status in ('synced', 'external_deleted')),
+  last_synced_at text not null,
+  created_at text not null,
+  updated_at text not null,
+  unique(mailbox_id, gmail_message_id)
+);
+
+create table if not exists gmail_message_participants (
+  id integer primary key,
+  message_id integer not null references gmail_messages(id) on delete cascade,
+  role text not null check (role in ('from', 'to', 'cc', 'bcc')),
+  email text not null,
+  normalized_email text not null,
+  name text,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists gmail_message_party_links (
+  id integer primary key,
+  message_id integer not null references gmail_messages(id) on delete cascade,
+  party_id integer not null references parties(id) on delete cascade,
+  contact_point_id integer references party_contact_points(id) on delete set null,
+  matched_email text not null,
+  created_at text not null,
+  updated_at text not null,
+  unique(message_id, party_id, contact_point_id, matched_email)
+);
+
+create table if not exists gmail_message_party_visibility (
+  id integer primary key,
+  message_id integer not null references gmail_messages(id) on delete cascade,
+  party_id integer not null references parties(id) on delete cascade,
+  status text not null check (status in ('archived', 'trashed')),
+  created_at text not null,
+  updated_at text not null,
+  unique(message_id, party_id)
+);
+
+create table if not exists gmail_message_attachments (
+  id integer primary key,
+  message_id integer not null references gmail_messages(id) on delete cascade,
+  gmail_attachment_id text,
+  filename text,
+  mime_type text,
+  byte_size integer,
+  part_id text,
+  created_at text not null,
+  updated_at text not null
+);
+
 create table if not exists calendar_event_bindings (
   id integer primary key,
   local_entity_type text not null check (local_entity_type in ('calendar_entry', 'initiative_project_span')),
@@ -260,6 +343,7 @@ create table if not exists people (
   salutation text not null default 'unknown' check (salutation in ('mr', 'mrs', 'unknown')),
   academic_title text,
   name_suffix text,
+  description text,
   created_at text not null,
   updated_at text not null
 );
@@ -448,6 +532,14 @@ create index if not exists idx_calendar_entries_status on calendar_entries(statu
 create index if not exists idx_calendar_entries_initiative_id on calendar_entries(initiative_id);
 create index if not exists idx_calendar_entries_task_id on calendar_entries(task_id);
 create index if not exists idx_calendar_sources_enabled on calendar_sources(enabled, provider);
+create index if not exists idx_gmail_mailboxes_sync on gmail_mailboxes(enabled, sync_enabled, id);
+create index if not exists idx_gmail_messages_mailbox_date on gmail_messages(mailbox_id, message_date desc, id desc);
+create index if not exists idx_gmail_messages_status on gmail_messages(sync_status, id);
+create index if not exists idx_gmail_message_participants_email on gmail_message_participants(normalized_email, message_id);
+create index if not exists idx_gmail_message_party_links_party on gmail_message_party_links(party_id, message_id);
+create index if not exists idx_gmail_message_party_links_message on gmail_message_party_links(message_id, party_id);
+create index if not exists idx_gmail_message_party_visibility_party on gmail_message_party_visibility(party_id, status, message_id);
+create index if not exists idx_gmail_message_attachments_message on gmail_message_attachments(message_id);
 create unique index if not exists idx_calendar_event_bindings_active_local
   on calendar_event_bindings(local_entity_type, local_entity_id)
   where unlinked_at is null;
