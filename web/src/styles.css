@@ -2237,6 +2237,12 @@ textarea {
   transform: translateY(-1px);
 }
 
+.relation-button:focus-visible {
+  border-color: #27806f;
+  outline: 2px solid rgba(20, 88, 78, 0.24);
+  outline-offset: 2px;
+}
+
 .relation-item-copy {
   display: grid;
   gap: 2px;
@@ -5261,6 +5267,16 @@ button.initiative-markdown-panel:hover {
   color: #34435e;
 }
 
+.party-email-date-cluster.bidirectional {
+  background: #eef6f4;
+  color: #1f665d;
+}
+
+.party-email-date-cluster.none {
+  background: #f5f5f0;
+  color: #4f5b54;
+}
+
 .party-email-date-cluster.internal,
 .party-email-date-cluster.unknown {
   background: #f4f1ea;
@@ -5636,6 +5652,45 @@ button.initiative-markdown-panel:hover {
   border-radius: 8px;
   background: #eef4f1;
   color: #27806f;
+}
+
+.party-task-status-toggle {
+  appearance: none;
+  -webkit-appearance: none;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 0;
+  margin: 0;
+  border-radius: 8px;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.party-task-status-toggle:hover,
+.party-task-status-toggle:focus-visible {
+  background: rgba(39, 128, 111, 0.12);
+  outline: 2px solid rgba(39, 128, 111, 0.18);
+  outline-offset: -2px;
+}
+
+.party-task-status-toggle.done {
+  color: #27806f;
+}
+
+.party-task-status-toggle.open {
+  color: #2f756a;
+}
+
+.party-task-status-toggle:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .primary-button {

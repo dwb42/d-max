@@ -59,7 +59,7 @@ export const initiativeTools: ToolDefinition<any>[] = [
   defineTool({
     name: "listInitiatives",
     description:
-      "List d-max initiatives. Optional filters include categoryId, status, and type (idea, project, habit). Returned type=project initiatives may include projectPhase, startDate, endDate, and isLocked.",
+      "List DMAX initiatives. Optional filters include categoryId, status, and type (idea, project, habit). Returned type=project initiatives may include projectPhase, startDate, endDate, and isLocked.",
     inputSchema: listInitiativesInput,
     run: (input, context) => {
       if (!context.db) {
@@ -74,7 +74,7 @@ export const initiativeTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "getInitiative",
-    description: "Get one d-max initiative, including its type, projectPhase, optional startDate/endDate, and isLocked for type=project initiatives.",
+    description: "Get one DMAX initiative, including its type, projectPhase, optional startDate/endDate, and isLocked for type=project initiatives.",
     inputSchema: getInitiativeInput,
     run: (input, context) => {
       if (!context.db) {
@@ -88,7 +88,7 @@ export const initiativeTools: ToolDefinition<any>[] = [
   defineTool({
     name: "createInitiative",
     description:
-      "Create a d-max initiative. Always choose type: idea for loose thoughts with no time binding, project for goal-oriented work with a clear start/end when known, habit for ongoing practices without a clear end date. categoryId is required; use the system Inbox category if placement is unclear.",
+      "Create a DMAX initiative. Always choose type: idea for loose thoughts with no time binding, project for goal-oriented work with a clear start/end when known, habit for ongoing practices without a clear end date. categoryId is required; use the system Inbox category if placement is unclear.",
     inputSchema: createInitiativeInput,
     run: (input, context) => {
       if (!context.db) {
@@ -104,7 +104,7 @@ export const initiativeTools: ToolDefinition<any>[] = [
   defineTool({
     name: "updateInitiative",
     description:
-      "Update a d-max initiative. For type=project initiatives, maintain projectPhase, startDate/endDate, and isLocked when Dietrich gives project phase, time-span, or timeframe lock changes. Ideas are loose thoughts and habits are ongoing practices. Changing type is a lifecycle decision such as idea -> project or idea -> habit and requires Dietrich's confirmation.",
+      "Update a DMAX initiative. For type=project initiatives, maintain projectPhase, startDate/endDate, and isLocked when Dietrich gives project phase, time-span, or timeframe lock changes. Ideas are loose thoughts and habits are ongoing practices. Changing type is a lifecycle decision such as idea -> project or idea -> habit and requires Dietrich's confirmation.",
     inputSchema: updateInitiativeInput,
     run: (input, context) => {
       if (!context.db) {
@@ -126,7 +126,7 @@ export const initiativeTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "archiveInitiative",
-    description: "Archive a d-max initiative. Requires confirmation.",
+    description: "Archive a DMAX initiative. Requires confirmation.",
     inputSchema: archiveInitiativeInput,
     run: (input, context) => {
       if (!context.db) {

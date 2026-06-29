@@ -6,7 +6,7 @@ function parseToolResult(result: Awaited<ReturnType<Client["callTool"]>>): unkno
   const first = content?.[0];
 
   if (!first || first.type !== "text" || first.text === undefined) {
-    throw new Error("Expected text content from d-max MCP tool");
+    throw new Error("Expected text content from DMAX MCP tool");
   }
 
   return JSON.parse(first.text);

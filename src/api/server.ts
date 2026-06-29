@@ -41,6 +41,7 @@ import { MediaStorage } from "../media/media-storage.js";
 import type { TaskStatus } from "../repositories/tasks.js";
 import { TaskRepository } from "../repositories/tasks.js";
 import { TaskChecklistItemRepository } from "../repositories/task-checklist-items.js";
+import { PartyTimelineRepository } from "../repositories/party-timeline.js";
 import { StateEventRepository } from "../repositories/state-events.js";
 import type { CreateStateEventInput, StateEvent } from "../repositories/state-events.js";
 import { AppChatService } from "../chat/app-chat.js";
@@ -94,6 +95,7 @@ const partyContactPoints = new PartyContactPointRepository(db);
 const partyAddresses = new PartyAddressRepository(db);
 const tasks = new TaskRepository(db);
 const taskChecklistItems = new TaskChecklistItemRepository(db);
+const partyTimeline = new PartyTimelineRepository(db);
 const stateEvents = new StateEventRepository(db);
 const chat = new AppChatService(db);
 const chatMessages = new AppChatRepository(db);
@@ -553,6 +555,72 @@ const server = http.createServer(async (req, res) => {
       gmail.hideMessageForParty(message.id, partyId, action === "archive" ? "archived" : "trashed");
       sendJson(res, 200, { messageId: message.id, gmailMessageId: message.gmailMessageId, action, labelIds: result.labelIds });
       return;
+    }
+
+    const partyTimelineEntriesMatch = url.pathname.match(/^\/api\/parties\/(\d+)\/timeline-entries$/);
+    if (partyTimelineEntriesMatch) {
+      const partyId = Number(partyTimelineEntriesMatch[1]);
+      if (!partyExists(partyId)) {
+        sendJson(res, 404, { error: "Party not found." });
+        return;
+      }
+
+      if (req.method === "GET") {
+        sendJson(res, 200, { entries: partyTimeline.listForParty(partyId, gmailLimitQuery.parse(url.searchParams.get("limit") ?? undefined)) });
+        return;
+      }
+
+      if (req.method === "POST") {
+        const body = createPartyTimelineEntryBody.parse(await readJson(req));
+        if (body.relatedTaskId !== undefined && body.relatedTaskId !== null && !tasks.findById(body.relatedTaskId)) {
+          sendJson(res, 400, { error: "Related task not found." });
+          return;
+        }
+        for (const party of body.parties ?? []) {
+          if (!partyExists(party.partyId)) {
+            sendJson(res, 400, { error: `Related party not found: ${party.partyId}` });
+            return;
+          }
+        }
+        const entry = partyTimeline.create({ partyId, ...body });
+        emitApiStateEvent({ operation: "createPartyTimelineEntry", entityType: "communication_event", entityId: entry.id, taskId: entry.relatedTaskId });
+        sendJson(res, 200, { entry });
+        return;
+      }
+    }
+
+    const partyTimelineEntryMatch = url.pathname.match(/^\/api\/parties\/(\d+)\/timeline-entries\/(\d+)$/);
+    if (partyTimelineEntryMatch) {
+      const partyId = Number(partyTimelineEntryMatch[1]);
+      const entryId = Number(partyTimelineEntryMatch[2]);
+      if (!partyExists(partyId)) {
+        sendJson(res, 404, { error: "Party not found." });
+        return;
+      }
+      const existing = partyTimeline.findById(entryId);
+      if (!existing || !existing.parties.some((party) => party.partyId === partyId)) {
+        sendJson(res, 404, { error: "Timeline entry not found for this party." });
+        return;
+      }
+
+      if (req.method === "PATCH") {
+        const body = updatePartyTimelineEntryBody.parse(await readJson(req));
+        if (body.relatedTaskId !== undefined && body.relatedTaskId !== null && !tasks.findById(body.relatedTaskId)) {
+          sendJson(res, 400, { error: "Related task not found." });
+          return;
+        }
+        const entry = partyTimeline.update({ id: entryId, ...body });
+        emitApiStateEvent({ operation: "updatePartyTimelineEntry", entityType: "communication_event", entityId: entry.id, taskId: entry.relatedTaskId });
+        sendJson(res, 200, { entry });
+        return;
+      }
+
+      if (req.method === "DELETE") {
+        const deleted = partyTimeline.delete(entryId);
+        emitApiStateEvent({ operation: "deletePartyTimelineEntry", entityType: "communication_event", entityId: entryId, taskId: deleted?.relatedTaskId ?? null });
+        sendJson(res, 200, { deleted: true, id: entryId });
+        return;
+      }
     }
 
     if (req.method === "POST" && url.pathname === "/api/gmail/drafts") {
@@ -1152,12 +1220,25 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/api/tasks") {
       const status = url.searchParams.get("status") as TaskStatus | null;
-      sendJson(res, 200, { tasks: tasks.list({ status: status ?? undefined }) });
+      sendJson(res, 200, {
+        tasks: tasks.list({
+          status: status ?? undefined,
+          primaryPartyId: parseOptionalPositiveInt(url.searchParams.get("primaryPartyId")) ?? undefined
+        })
+      });
       return;
     }
 
     if (req.method === "POST" && url.pathname === "/api/tasks") {
       const body = createTaskBody.parse(await readJson(req));
+      if (body.initiativeId !== undefined && body.initiativeId !== null && !initiatives.findById(body.initiativeId)) {
+        sendJson(res, 400, { error: "Initiative not found" });
+        return;
+      }
+      if (body.primaryPartyId !== undefined && body.primaryPartyId !== null && !partyExists(body.primaryPartyId)) {
+        sendJson(res, 400, { error: "Primary party not found" });
+        return;
+      }
       const task = tasks.create(body);
       emitApiStateEvent({ operation: "createTask", entityType: "task", entityId: task.id, taskId: task.id, initiativeId: task.initiativeId });
       sendJson(res, 200, { task });
@@ -1180,7 +1261,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const initiative = initiatives.findById(task.initiativeId);
+      const initiative = task.initiativeId ? initiatives.findById(task.initiativeId) : null;
       const category = initiative ? categories.findById(initiative.categoryId) : null;
       sendJson(res, 200, {
         task,
@@ -1195,12 +1276,16 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "PATCH" && taskMatch) {
       const body = updateTaskBody.parse(await readJson(req));
-      if (body.initiativeId !== undefined) {
+      if (body.initiativeId !== undefined && body.initiativeId !== null) {
         const targetInitiative = initiatives.findById(body.initiativeId);
         if (!targetInitiative || targetInitiative.type !== "project") {
           sendJson(res, 400, { error: "Target project not found" });
           return;
         }
+      }
+      if (body.primaryPartyId !== undefined && body.primaryPartyId !== null && !partyExists(body.primaryPartyId)) {
+        sendJson(res, 400, { error: "Primary party not found" });
+        return;
       }
       const task = tasks.update({ id: Number(taskMatch[1]), ...body });
       emitApiStateEvent({ operation: "updateTask", entityType: "task", entityId: task.id, taskId: task.id, initiativeId: task.initiativeId });
@@ -1784,13 +1869,20 @@ function shutdown(): void {
   });
 }
 
+const taskDueAtBody = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{3})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/, "Expected YYYY-MM-DD or ISO datetime")
+  .nullable();
+
 const updateTaskBody = z.object({
-  initiativeId: z.number().int().positive().optional(),
+  initiativeId: z.number().int().positive().nullable().optional(),
+  primaryPartyId: z.number().int().positive().nullable().optional(),
   title: z.string().trim().min(1).optional(),
   status: z.enum(["open", "done"]).optional(),
   priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
   notes: z.string().trim().min(1).nullable().optional(),
-  dueAt: z.string().trim().min(1).nullable().optional()
+  dueAt: taskDueAtBody.optional()
 });
 
 const calendarDateQuery = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
@@ -2055,6 +2147,33 @@ const createPartyAddressBody = z.object({
 
 const updatePartyAddressBody = createPartyAddressBody.omit({ partyId: true }).partial();
 
+const partyTimelineEntryKindBody = z.enum(["conversation", "letter_received", "letter_sent", "visit", "note"]);
+const partyTimelineEntryDirectionBody = z.enum(["inbound", "outbound", "bidirectional", "none"]);
+const partyTimelineEntryPartyRoleBody = z.enum(["primary", "participant", "related", "organization_context"]);
+const partyTimelineRelatedPartiesBody = z.array(z.object({
+  partyId: z.number().int().positive(),
+  role: partyTimelineEntryPartyRoleBody.optional()
+})).optional();
+
+const createPartyTimelineEntryBody = z.object({
+  kind: partyTimelineEntryKindBody,
+  direction: partyTimelineEntryDirectionBody.optional(),
+  occurredAt: z.string().trim().min(1).nullable().optional(),
+  title: z.string().trim().min(1),
+  body: z.string().nullable().optional(),
+  relatedTaskId: z.number().int().positive().nullable().optional(),
+  parties: partyTimelineRelatedPartiesBody
+});
+
+const updatePartyTimelineEntryBody = z.object({
+  kind: partyTimelineEntryKindBody.optional(),
+  direction: partyTimelineEntryDirectionBody.optional(),
+  occurredAt: z.string().trim().min(1).optional(),
+  title: z.string().trim().min(1).optional(),
+  body: z.string().nullable().optional(),
+  relatedTaskId: z.number().int().positive().nullable().optional()
+});
+
 const initiativeDateBody = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable();
 const projectPhaseBody = z.enum(["planning", "doing"]);
 
@@ -2173,11 +2292,14 @@ const reorderTasksBody = z.union([
 ]);
 
 const createTaskBody = z.object({
-  initiativeId: z.number().int().positive(),
+  initiativeId: z.number().int().positive().nullable().optional(),
+  primaryPartyId: z.number().int().positive().nullable().optional(),
   title: z.string().trim().min(1),
   priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
   notes: z.string().trim().min(1).nullable().optional(),
-  dueAt: initiativeDateBody.optional()
+  dueAt: taskDueAtBody.optional()
+}).refine((body) => body.initiativeId || body.primaryPartyId, {
+  message: "initiativeId or primaryPartyId is required"
 });
 
 const createTaskChecklistItemBody = z.object({

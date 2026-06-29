@@ -11,7 +11,7 @@ Allowed:
 
 Forbidden:
 
-- d-max write tools.
+- DMAX write tools.
 - Web search and web fetch.
 - Browser automation.
 - Filesystem editing except temporary files required by `gog` command input.

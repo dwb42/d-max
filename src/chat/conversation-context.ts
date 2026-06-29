@@ -20,6 +20,8 @@ import { TaskChecklistItemRepository } from "../repositories/task-checklist-item
 import type { TaskChecklistItem } from "../repositories/task-checklist-items.js";
 import { TaskRepository } from "../repositories/tasks.js";
 import type { Task } from "../repositories/tasks.js";
+import { PartyTimelineRepository } from "../repositories/party-timeline.js";
+import type { PartyTimelineEntry } from "../repositories/party-timeline.js";
 import type { ConversationContextType } from "../repositories/app-conversations.js";
 
 export const conversationContextSchema = z.discriminatedUnion("type", [
@@ -708,6 +710,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   const partyAddresses = new PartyAddressRepository(db);
   const tasks = new TaskRepository(db);
   const taskChecklistItems = new TaskChecklistItemRepository(db);
+  const partyTimeline = new PartyTimelineRepository(db);
 
   if (context.type === "global") {
     return buildResolvedContext({
@@ -746,7 +749,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       `Life areas overview (${categoryList.length} categories):`,
       ...categoryList.flatMap((category) => {
         const categoryInitiatives = allInitiatives.filter((initiative) => initiative.categoryId === category.id);
-        const categoryTasks = activeTasks.filter((task) => categoryInitiatives.some((initiative) => initiative.id === task.initiativeId));
+        const categoryTasks = activeTasks.filter((task) => task.initiativeId !== null && categoryInitiatives.some((initiative) => initiative.id === task.initiativeId));
         const categoryDescription = truncateTracked(category.description || "none", categoryOverviewLimits.categoryMarkdownChars, {
           id: `category:${category.id}:overview-markdown`,
           kind: "categoryBackground",
@@ -785,7 +788,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
           }));
         });
         activeTasks
-          .filter((task) => categoryInitiatives.some((initiative) => initiative.id === task.initiativeId))
+          .filter((task) => task.initiativeId !== null && categoryInitiatives.some((initiative) => initiative.id === task.initiativeId))
           .forEach((task) => {
             deduplications.push({
               sourceBlock: `categories:global-open-task:${task.id}`,
@@ -1034,7 +1037,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     const typedRelations = initiativeRelations
       .list({ relationType: "precedes" })
       .filter((relation) => initiativeIds.has(relation.predecessorInitiativeId) || initiativeIds.has(relation.successorInitiativeId));
-    const typedTasks = tasks.list().filter((task) => initiativeIds.has(task.initiativeId) && task.status !== "done");
+    const typedTasks = tasks.list().filter((task) => task.initiativeId !== null && initiativeIds.has(task.initiativeId) && task.status !== "done");
     const blocks: ContextDebugBlock[] = [];
     const loadedEntities: ContextDebugEntity[] = [];
     const omittedEntities: ContextOmittedEntity[] = [];
@@ -1153,10 +1156,10 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       ...rankTasks(allTasks)
         .slice(0, 40)
         .map((task) => {
-          const initiative = allInitiatives.find((candidate) => candidate.id === task.initiativeId);
+          const initiative = task.initiativeId ? allInitiatives.find((candidate) => candidate.id === task.initiativeId) : null;
           const category = initiative ? allCategories.find((candidate) => candidate.id === initiative.categoryId) : null;
           return `${formatTask(task)}; initiative: ${
-            initiative ? `#${initiative.id} ${initiative.name} [${formatInitiativeType(initiative.type)}]` : `#${task.initiativeId} not found`
+            initiative ? `#${initiative.id} ${initiative.name} [${formatInitiativeType(initiative.type)}]` : task.initiativeId ? `#${task.initiativeId} not found` : "none"
           }; category: ${category ? `#${category.id} ${category.name}` : "unknown"}`;
         })
     ];
@@ -1220,7 +1223,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
 
     const categoryInitiatives = initiatives.list({ categoryId: category.id });
     const initiativeIds = new Set(categoryInitiatives.map((initiative) => initiative.id));
-    const categoryTasks = tasks.list().filter((task) => initiativeIds.has(task.initiativeId) && task.status !== "done");
+    const categoryTasks = tasks.list().filter((task) => task.initiativeId !== null && initiativeIds.has(task.initiativeId) && task.status !== "done");
     const categoryRelations = initiativeRelations
       .list({ relationType: "precedes" })
       .filter((relation) => initiativeIds.has(relation.predecessorInitiativeId) || initiativeIds.has(relation.successorInitiativeId));
@@ -1337,6 +1340,8 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     const participants = entityParticipants.list({ partyId: party.id });
     const contacts = partyContactPoints.list({ partyId: party.id });
     const addresses = partyAddresses.list({ partyId: party.id });
+    const partyTasks = tasks.list({ primaryPartyId: party.id });
+    const timelineEntries = partyTimeline.listForParty(party.id, 20);
     const header =
       person !== null
         ? `Person: #${person.id} ${formatPersonName(person)}; salutation: ${person.salutation}; first: ${person.firstName ?? "none"}; last: ${person.lastName ?? "none"}; title: ${person.academicTitle ?? "none"}; description: ${person.description?.trim() ? "described" : "missing"}`
@@ -1351,6 +1356,10 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       ...addresses.slice(0, 20).map(formatPartyAddress),
       `Relationships (${relationships.length}):`,
       ...relationships.slice(0, 30).map((relationship) => formatPartyRelationship(relationship, party.id)),
+      `Party-owned tasks (${partyTasks.length}, open first):`,
+      ...rankTasks(partyTasks).slice(0, 20).map(formatPartyTask),
+      `Manual communication entries (${timelineEntries.length}, newest first):`,
+      ...timelineEntries.slice(0, 20).map(formatPartyTimelineEntry),
       `DMAX participations (${participants.length}):`,
       ...participants.slice(0, 30).map(formatEntityParticipant)
     ];
@@ -1363,11 +1372,11 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       description: `Focused on one ${context.type} in the Who dimension.`,
       lines,
       payload: {
-        dataSources: ["people", "organizations", "party_relationships", "entity_participants", "party_contact_points", "party_addresses"],
+        dataSources: ["people", "organizations", "party_relationships", "entity_participants", "party_contact_points", "party_addresses", "tasks", "party_timeline_entries"],
         current: [`${context.type} #${party.id} ${person ? formatPersonName(person) : organization!.displayName}`],
-        children: [`${contacts.length} contact points`, `${addresses.length} postal addresses`, `${participants.length} DMAX participations`],
+        children: [`${contacts.length} contact points`, `${addresses.length} postal addresses`, `${partyTasks.length} party-owned tasks`, `${timelineEntries.length} manual communication entries`, `${participants.length} DMAX participations`],
         neighbors: [`${relationships.length} party relationships`],
-        limits: ["Contacts capped at 20.", "Addresses capped at 20.", "Relationships capped at 30.", "Participations capped at 30."]
+        limits: ["Contacts capped at 20.", "Addresses capped at 20.", "Relationships capped at 30.", "Party tasks capped at 20.", "Manual communication entries capped at 20.", "Participations capped at 30."]
       }
     });
   }
@@ -1514,7 +1523,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     throw new Error(`Task not found: ${context.taskId}`);
   }
 
-  const initiative = initiatives.findById(task.initiativeId);
+  const initiative = task.initiativeId ? initiatives.findById(task.initiativeId) : null;
   const category = initiative ? categories.findById(initiative.categoryId) : null;
   const allInitiatives = initiatives.list();
   const siblingTasks = initiative ? tasks.list({ initiativeId: initiative.id }).filter((candidate) => candidate.id !== task.id) : [];
@@ -1597,8 +1606,8 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     ...taskMedia.slice(0, taskContextLimits.media).map(formatMediaAttachment),
     `People and organizations (${taskParticipants.length}):`,
     ...taskParticipants.slice(0, taskContextLimits.participants).map(formatEntityParticipant),
-    initiative ? formatInitiativeHeader(initiative) : `Initiative: #${task.initiativeId} not found`,
-    category ? `Category: #${category.id} ${category.name} (${category.color})` : "Category: unknown",
+    initiative ? formatInitiativeHeader(initiative) : task.initiativeId ? `Initiative: #${task.initiativeId} not found` : "Initiative: none",
+    category ? `Category: #${category.id} ${category.name} (${category.color})` : "Category: none",
     categoryBackground ? `Category background:\n${categoryBackground.text}` : "",
     initiativeMarkdown ? `Initiative memory excerpt:\n${initiativeMarkdown.text}` : "",
     `Parent initiative: ${parentInitiative ? formatCompactInitiative(parentInitiative) : "none"}`,
@@ -1631,8 +1640,8 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       dataSources: ["tasks", "task_checklist_items", "initiatives", "categories", "initiative_relations", "media_links", "entity_participants"],
       current: [`task #${task.id} ${task.title}`],
       parents: [
-        initiative ? `initiative #${initiative.id} ${initiative.name}` : `initiative #${task.initiativeId} not found`,
-        category ? `category #${category.id} ${category.name}` : "category not found",
+        initiative ? `initiative #${initiative.id} ${initiative.name}` : task.initiativeId ? `initiative #${task.initiativeId} not found` : "no initiative",
+        category ? `category #${category.id} ${category.name}` : "no category",
         parentInitiative ? `parent initiative #${parentInitiative.id} ${parentInitiative.name}` : "no parent initiative"
       ],
       children: [`${checklistItems.length} checklist items`, `${taskMedia.length} media attachments`, `${taskParticipants.length} participants`],
@@ -2165,6 +2174,7 @@ function formatCategoryDetailInitiativeSections(input: {
   );
   const openTaskCountByInitiative = new Map<number, number>();
   input.tasks.forEach((task) => {
+    if (!task.initiativeId) return;
     openTaskCountByInitiative.set(task.initiativeId, (openTaskCountByInitiative.get(task.initiativeId) ?? 0) + 1);
   });
 
@@ -2379,6 +2389,14 @@ function formatPartyRelationship(relationship: PartyRelationshipWithParties, foc
 
 function formatEntityParticipant(participant: EntityParticipantWithParty): string {
   return `- #${participant.id} ${participant.party.type} #${participant.partyId} ${participant.party.displayName}; entity: ${participant.entityType} #${participant.entityId}; role: ${participant.roleType?.label ?? participant.roleLabel ?? "none"}; primary: ${participant.isPrimary ? "yes" : "no"}`;
+}
+
+function formatPartyTask(task: Task): string {
+  return `- #${task.id} ${task.title}; status: ${task.status}; priority: ${task.priority}; due: ${task.dueAt ?? "none"}; initiative: ${task.initiativeId ?? "none"}; notes: ${task.notes ?? "none"}`;
+}
+
+function formatPartyTimelineEntry(entry: PartyTimelineEntry): string {
+  return `- #${entry.id} ${entry.kind}; direction: ${entry.direction}; occurred: ${entry.occurredAt}; title: ${entry.title}; related task: ${entry.relatedTaskId ?? "none"}; note: ${entry.body ?? "none"}`;
 }
 
 function formatInitiativeRelation(relation: InitiativeRelationWithInitiatives): string {

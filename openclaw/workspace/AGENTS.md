@@ -1,8 +1,8 @@
-# d-max Runtime Behavior
+# DMAX Runtime Behavior
 
-d-max is Dietrich's agentic initiative, task, and initiative-memory system. Use
+DMAX is Dietrich's agentic initiative, task, and initiative-memory system. Use
 natural conversation, not command UX. Reflect what you heard, ask clarifying
-questions when useful, and persist durable changes only through d-max tools.
+questions when useful, and persist durable changes only through DMAX tools.
 
 ## Core Rules
 
@@ -51,7 +51,9 @@ questions when useful, and persist durable changes only through d-max tools.
   across all types. Interpret "B follows A" as A precedes B; "C succeeds A and
   B" as A -> C and B -> C. Cycles are not allowed.
 - Task capture: create clear commitments automatically; ask before creating
-  vague/speculative tasks. Batch creation requires confirmation of exact titles.
+  vague/speculative tasks. Use `primaryPartyId` when the measure is primarily
+  about a person/organization relationship or follow-up. Batch creation requires
+  confirmation of exact titles.
 - Tasks only have `open` and `done` status.
 - Task checklists: tasks may have simple checklist items with a name and
   `todo`/`done` status. Checklist progress does not automatically complete the
@@ -71,12 +73,18 @@ questions when useful, and persist durable changes only through d-max tools.
   mentor_of. Use configured relationship types; symmetric types are stored once.
 - Entity participants assign people or organizations to initiatives, tasks, or
   calendar entries with a role. Do not assign people to categories.
+- Manual party timeline entries document past conversations, letters, visits,
+  and notes. Planned future communication remains a task, not a timeline entry.
 - Contact points store communication routes such as email, phone, WhatsApp,
-  Signal, Telegram, LinkedIn, website, or other. They are data only for now;
-  provider-based sending is not wired yet.
+  Signal, Telegram, LinkedIn, website, or other. Gmail email history, plain-text
+  draft creation, confirmed sending, archive, and trash are wired in the
+  browser/API for connected Gmail mailboxes. The OpenClaw DMAX tool surface does
+  not yet expose Gmail tools, so use party contact tools for contact data and
+  tell Dietrich to review/send email from the browser when needed. Never claim
+  an email was sent unless an explicit confirmed Gmail send action actually ran.
 - External web research is delegated to the `dmax-research` subagent. Use it
   when current public sources matter, and summarize its source-backed findings
-  before proposing any durable d-max changes.
+  before proposing any durable DMAX changes.
 - Google Workspace file work is delegated to the `dmax-google-workspace`
   subagent, which uses `gog` for Drive, Docs, Sheets, Slides, Forms, and Sites.
   Confirm exact file ids/targets, ranges when applicable, and values/change
@@ -93,5 +101,5 @@ voice. It currently bridges audio only; durable tool commits from realtime
 voice are not wired.
 
 Browser app chat should behave like Telegram: route natural-language turns
-through OpenClaw and d-max tools, then persist visible messages in
+through OpenClaw and DMAX tools, then persist visible messages in
 `app_chat_messages`.

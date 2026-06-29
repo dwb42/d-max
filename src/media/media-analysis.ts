@@ -224,7 +224,7 @@ function textAnalysisPayload(input: MediaAnalysisInput, label: string, text: str
 
 function analysisInstruction(filename: string, label: string, prompt?: string | null): string {
   const instruction = [
-    `Analysiere dieses ${label} fuer d-max als Projekt-/Task-Kontext.`,
+    `Analysiere dieses ${label} fuer DMAX als Projekt-/Task-Kontext.`,
     `Dateiname: ${filename}`,
     "Antworte ausschliesslich als kompaktes JSON ohne Markdown:",
     '{"summary":"1-2 Saetze, was zu sehen/enthalten ist","textExcerpt":"relevanter erkannter Text oder kurze strukturierte Inhaltsnotiz"}',

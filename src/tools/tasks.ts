@@ -12,12 +12,14 @@ const taskPrioritySchema = z.enum(["low", "normal", "high", "urgent"]);
 const listTasksInput = z
   .object({
     initiativeId: z.number().int().positive().optional(),
+    primaryPartyId: z.number().int().positive().optional(),
     status: taskStatusSchema.optional(),
     priority: taskPrioritySchema.optional()
   })
   .passthrough();
 const createTaskInput = z.object({
-  initiativeId: z.number().int().positive().optional(),
+  initiativeId: z.number().int().positive().nullable().optional(),
+  primaryPartyId: z.number().int().positive().nullable().optional(),
   title: z.string().trim().min(1),
   priority: taskPrioritySchema.optional(),
   notes: z.string().trim().min(1).nullable().optional(),
@@ -26,7 +28,8 @@ const createTaskInput = z.object({
 });
 const updateTaskInput = z.object({
   id: z.number().int().positive(),
-  initiativeId: z.number().int().positive().optional(),
+  initiativeId: z.number().int().positive().nullable().optional(),
+  primaryPartyId: z.number().int().positive().nullable().optional(),
   title: z.string().trim().min(1).optional(),
   status: taskStatusSchema.optional(),
   priority: taskPrioritySchema.optional(),
@@ -82,7 +85,7 @@ function ensureInboxInitiative(db: Database.Database): number {
 export const taskTools: ToolDefinition<any>[] = [
   defineTool({
     name: "listTasks",
-    description: "List d-max tasks.",
+    description: "List DMAX tasks.",
     inputSchema: listTasksInput,
     run: (input, context) => {
       if (!context.db) {
@@ -97,28 +100,35 @@ export const taskTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "createTask",
-    description: "Create a d-max task. Concrete tasks without initiative context can use the Inbox initiative.",
+    description: "Create a DMAX task. Tasks can belong to an initiative, a primary person/organization party, or both. Concrete tasks without either context can use the Inbox initiative.",
     inputSchema: createTaskInput,
     run: (input, context) => {
       if (!context.db) {
         return { ok: false, error: "Database context is required" };
       }
 
-      const initiativeId = input.initiativeId ?? (input.useInboxIfInitiativeMissing ? ensureInboxInitiative(context.db) : undefined);
+      const initiativeId = input.initiativeId ?? (input.primaryPartyId ? null : input.useInboxIfInitiativeMissing ? ensureInboxInitiative(context.db) : undefined);
 
-      if (!initiativeId) {
-        return { ok: false, error: "initiativeId is required unless useInboxIfInitiativeMissing is true" };
+      if (!initiativeId && !input.primaryPartyId) {
+        return { ok: false, error: "initiativeId or primaryPartyId is required unless useInboxIfInitiativeMissing is true" };
       }
 
-      return {
-        ok: true,
-        data: new TaskRepository(context.db).create({ ...input, initiativeId })
-      };
+      try {
+        return {
+          ok: true,
+          data: new TaskRepository(context.db).create({ ...input, initiativeId })
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof Error ? error.message : "Failed to create task"
+        };
+      }
     }
   }),
   defineTool({
     name: "updateTask",
-    description: "Update a d-max task.",
+    description: "Update a DMAX task.",
     inputSchema: updateTaskInput,
     run: (input, context) => {
       if (!context.db) {
@@ -162,7 +172,7 @@ export const taskTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "deleteTask",
-    description: "Delete a d-max task. Requires confirmation.",
+    description: "Delete a DMAX task. Requires confirmation.",
     inputSchema: deleteTaskInput,
     run: (input, context) => {
       if (!context.db) {
@@ -178,7 +188,7 @@ export const taskTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "listTaskChecklistItems",
-    description: "List checklist items for one d-max task in persisted order.",
+    description: "List checklist items for one DMAX task in persisted order.",
     inputSchema: listTaskChecklistItemsInput,
     run: (input, context) => {
       if (!context.db) {
@@ -193,7 +203,7 @@ export const taskTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "createTaskChecklistItem",
-    description: "Create a checklist item inside a d-max task. Checklist items have only a name and todo/done status.",
+    description: "Create a checklist item inside a DMAX task. Checklist items have only a name and todo/done status.",
     inputSchema: createTaskChecklistItemInput,
     run: (input, context) => {
       if (!context.db) {

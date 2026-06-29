@@ -33,8 +33,8 @@ describe("repositories", () => {
     const category = categories.create({ name: "Business" });
     const project = initiatives.create({
       categoryId: category.id,
-      name: "d-max",
-      markdown: "# Overview\n\nBuild d-max.\n",
+      name: "DMAX",
+      markdown: "# Overview\n\nBuild DMAX.\n",
       startDate: "2026-05-02",
       endDate: "2026-06-15"
     });
@@ -213,7 +213,7 @@ describe("repositories", () => {
 
   it("marks tasks complete with completedAt", () => {
     const category = new CategoryRepository(db).create({ name: "Business" });
-    const project = new InitiativeRepository(db).create({ categoryId: category.id, name: "d-max" });
+    const project = new InitiativeRepository(db).create({ categoryId: category.id, name: "DMAX" });
     const tasks = new TaskRepository(db);
     const task = tasks.create({ initiativeId: project.id, title: "Ship MVP" });
 
@@ -225,7 +225,7 @@ describe("repositories", () => {
 
   it("manages task checklist items without completing the parent task", () => {
     const category = new CategoryRepository(db).create({ name: "Business" });
-    const project = new InitiativeRepository(db).create({ categoryId: category.id, name: "d-max" });
+    const project = new InitiativeRepository(db).create({ categoryId: category.id, name: "DMAX" });
     const tasks = new TaskRepository(db);
     const task = tasks.create({ initiativeId: project.id, title: "Ship checklist MVP" });
     const checklistItems = new TaskChecklistItemRepository(db);
@@ -301,7 +301,7 @@ describe("repositories", () => {
 
   it("creates calendar entries and completes linked tasks", () => {
     const category = new CategoryRepository(db).create({ name: "Business" });
-    const initiative = new InitiativeRepository(db).create({ categoryId: category.id, name: "d-max" });
+    const initiative = new InitiativeRepository(db).create({ categoryId: category.id, name: "DMAX" });
     const task = new TaskRepository(db).create({ initiativeId: initiative.id, title: "Plan calendar MVP" });
     const calendarEntries = new CalendarEntryRepository(db);
 
@@ -344,7 +344,7 @@ describe("repositories", () => {
 
   it("stores one active Google binding per concrete DMAX time object", () => {
     const category = new CategoryRepository(db).create({ name: "Business" });
-    const initiative = new InitiativeRepository(db).create({ categoryId: category.id, name: "d-max" });
+    const initiative = new InitiativeRepository(db).create({ categoryId: category.id, name: "DMAX" });
     const entry = new CalendarEntryRepository(db).create({
       type: "initiative_focus",
       title: "Focus block",

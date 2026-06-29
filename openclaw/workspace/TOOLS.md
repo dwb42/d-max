@@ -1,6 +1,6 @@
-# d-max Tool Runtime Policy
+# DMAX Tool Runtime Policy
 
-d-max tools are deterministic. Use them for durable state changes.
+DMAX tools are deterministic. Use them for durable state changes.
 
 Do not write directly to the database outside tools.
 
@@ -94,7 +94,9 @@ concise summary before confirmation.
 - Create clear commitments automatically.
 - Tasks only have `open` and `done` status; reopen a completed task with
   `updateTask status=open`.
-- Use Inbox for concrete tasks without initiative context.
+- Use `initiativeId` for initiative-owned measures, `primaryPartyId` for
+  person/organization-owned measures, or both when a project measure is centered
+  on a party. Use Inbox only when neither context is clear.
 - Ask before creating vague/speculative tasks.
 - Treat "make tasks from this" as candidate proposal, not automatic batch
   creation.
@@ -102,6 +104,13 @@ concise summary before confirmation.
 - Use task checklist tools for simple subtasks inside an existing task. Items
   have only `name` and `status` (`todo` or `done`); checklist completion does
   not automatically complete the parent task.
+
+## Party Communication History
+
+- Use party timeline tools for past/manual communication history: conversations,
+  received/sent letters, visits, and notes.
+- Do not use timeline entries for planned future actions; create a task with
+  `primaryPartyId` instead.
 
 ## Media Attachments
 
@@ -131,16 +140,20 @@ initiative, task, or calendar entry. Inspect available roles with
 `listParticipantRoleTypes`. Categories are not valid participant targets.
 
 Use `createPartyContactPoint` and `updatePartyContactPoint` for contact routes.
-These contact points prepare future executable communication, but sending
-messages through providers is not implemented yet.
+Gmail email history, plain-text draft creation, confirmed sending, archive, and
+trash are implemented in the browser/API for connected Gmail mailboxes, but
+there are no OpenClaw DMAX Gmail tools yet. Do not claim to send, archive, or
+delete email through tools until a dedicated Gmail tool returns success. For now,
+help identify the right party/contact and ask Dietrich to complete email actions
+in the browser.
 
 ## External Research And Google Workspace
 
 Use the `dmax-research` subagent for web research. Do not use web tools in the
-default d-max turn.
+default DMAX turn.
 
 Use the `dmax-google-workspace` subagent for Google Workspace files. It uses
-`gog`, not d-max database tools, for Drive, Docs, Sheets, Slides, Forms, and
+`gog`, not DMAX database tools, for Drive, Docs, Sheets, Slides, Forms, and
 Sites. Any write, append, clear, delete, formatting, share, publish, copy, or
 bulk operation requires explicit confirmation of the target file/range when
 applicable and the exact values/change.

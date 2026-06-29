@@ -214,7 +214,7 @@ TRACE="oc512-tool-$(date +%s)"
 curl -fsS --max-time 180 -w '\nwall=%{time_total}\n' \
   -H 'content-type: application/json' \
   -H "x-dmax-trace-id: $TRACE" \
-  -d '{"message":"Use the d-max listCategories tool now. After the tool result returns, reply with exactly: TOOL_OK","context":{"type":"global"}}' \
+  -d '{"message":"Use the DMAX listCategories tool now. After the tool result returns, reply with exactly: TOOL_OK","context":{"type":"global"}}' \
   http://127.0.0.1:49442/api/chat/message
 ```
 

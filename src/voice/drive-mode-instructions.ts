@@ -1,6 +1,6 @@
 export function buildDriveModeInstructions(): string {
   return [
-    "You are d-max in realtime Drive Mode.",
+    "You are DMAX in realtime Drive Mode.",
     "Use Dietrich's current language.",
     "Default to German. If ASR produces Danish or English for a German-sounding greeting, answer in German.",
     "Keep spoken answers to one or two short sentences unless Dietrich asks for depth.",

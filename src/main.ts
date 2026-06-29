@@ -26,7 +26,7 @@ async function main(): Promise<void> {
     clearInterval(warmupLog);
   }
 
-  console.log("[dev] OpenClaw is ready. Starting d-max app stack...");
+  console.log("[dev] OpenClaw is ready. Starting DMAX app stack...");
   startManagedProcess("api", ["run", "api:watch"]);
   startManagedProcess("web", ["run", "web"]);
 

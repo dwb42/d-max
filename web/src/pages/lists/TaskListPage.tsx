@@ -23,7 +23,7 @@ function TasksListView(props: {
   const trimmedSearch = search.trim().toLowerCase();
   const filteredTasks = sortedTasks.filter((task) => {
     if (!trimmedSearch) return true;
-    const initiative = initiativeById.get(task.initiativeId) ?? null;
+    const initiative = task.initiativeId ? initiativeById.get(task.initiativeId) ?? null : null;
     const category = initiative ? categoryById.get(initiative.categoryId) ?? null : null;
     return [
       task.title,
@@ -68,7 +68,7 @@ function TasksListView(props: {
       {filteredTasks.length > 0 ? (
         <EntityList>
           {filteredTasks.map((task) => {
-            const initiative = initiativeById.get(task.initiativeId) ?? null;
+            const initiative = task.initiativeId ? initiativeById.get(task.initiativeId) ?? null : null;
             const category = initiative ? categoryById.get(initiative.categoryId) ?? null : null;
             return (
               <EntityListItem
@@ -246,8 +246,8 @@ function sortTasksForList(tasks: Task[], initiativeById: Map<number, Initiative>
     if (dueCompare) return dueCompare;
     const priorityCompare = priorityRank[left.priority] - priorityRank[right.priority];
     if (priorityCompare) return priorityCompare;
-    const leftInitiative = initiativeById.get(left.initiativeId);
-    const rightInitiative = initiativeById.get(right.initiativeId);
+    const leftInitiative = left.initiativeId ? initiativeById.get(left.initiativeId) : null;
+    const rightInitiative = right.initiativeId ? initiativeById.get(right.initiativeId) : null;
     return (leftInitiative?.sortOrder ?? 0) - (rightInitiative?.sortOrder ?? 0)
       || left.sortOrder - right.sortOrder
       || left.title.localeCompare(right.title)

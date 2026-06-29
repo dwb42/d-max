@@ -1,5 +1,5 @@
 import { Children } from "react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { EmptyState } from "./EmptyState.js";
 import { SectionHeader } from "./SectionBlock.js";
 
@@ -32,22 +32,23 @@ export function RelationItem(props: {
   onOpen?: () => void;
   actions?: ReactNode;
 }) {
-  const title = props.onOpen && props.actions ? (
-    <button type="button" className="relation-title-button" onClick={props.onOpen}>
-      {props.title}
-    </button>
-  ) : (
-    props.title
-  );
   const content = (
     <>
       <div className="entity-icon">{props.icon}</div>
       <div className="relation-item-copy">
-        <strong>{title}</strong>
+        <strong>{props.title}</strong>
         {props.meta ? <p>{props.meta}</p> : null}
         {props.detail ? <span>{props.detail}</span> : null}
       </div>
-      {props.actions ? <div className="relation-item-actions">{props.actions}</div> : null}
+      {props.actions ? (
+        <div
+          className="relation-item-actions"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          {props.actions}
+        </div>
+      ) : null}
     </>
   );
 
@@ -56,6 +57,25 @@ export function RelationItem(props: {
       <button type="button" className="relation-item relation-button" onClick={props.onOpen}>
         {content}
       </button>
+    );
+  }
+
+  if (props.onOpen) {
+    const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      props.onOpen?.();
+    };
+    return (
+      <div
+        className="relation-item relation-button"
+        role="button"
+        tabIndex={0}
+        onClick={props.onOpen}
+        onKeyDown={onKeyDown}
+      >
+        {content}
+      </div>
     );
   }
 

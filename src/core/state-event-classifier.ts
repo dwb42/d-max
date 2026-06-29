@@ -23,6 +23,9 @@ const STATE_MUTATING_TOOLS = new Set<ToolName>([
   "updateTaskChecklistItem",
   "deleteTaskChecklistItem",
   "reorderTaskChecklistItems",
+  "createPartyTimelineEntry",
+  "updatePartyTimelineEntry",
+  "deletePartyTimelineEntry",
   "attachMediaToEntity",
   "updateMediaAttachment",
   "deleteMediaAttachment",
@@ -122,6 +125,16 @@ export function stateEventFromToolResult(name: ToolName, input: unknown, result:
       entityType: "task",
       entityId: taskId,
       taskId
+    };
+  }
+
+  if (name === "createPartyTimelineEntry" || name === "updatePartyTimelineEntry" || name === "deletePartyTimelineEntry") {
+    const entryId = numberValue(dataRecord?.id) ?? numberValue(inputRecord?.id);
+    return {
+      ...base,
+      entityType: "communication_event",
+      entityId: entryId,
+      taskId: numberValue(dataRecord?.relatedTaskId) ?? numberValue(inputRecord?.relatedTaskId)
     };
   }
 

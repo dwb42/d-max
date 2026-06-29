@@ -3,7 +3,7 @@
 Stand: 2026-05-01
 
 Dieses Dokument plant den ersten kleinen Umsetzungsschnitt fuer Initiative
-Types in d-max.
+Types in DMAX.
 
 Es baut auf `Plan_Project_Types.md` auf. Dort ist das fachliche Verstaendnis
 festgehalten: Das heutige technische Objekt `Project` wird perspektivisch als
@@ -16,7 +16,7 @@ zu `Initiative` mitzuziehen.
 
 ## Ziel von V1
 
-V1 soll d-max in die Lage versetzen, bestehende und neue Eintraege fachlich als
+V1 soll DMAX in die Lage versetzen, bestehende und neue Eintraege fachlich als
 Idee, Projekt oder Gewohnheit zu unterscheiden.
 
 Die erste Version soll:

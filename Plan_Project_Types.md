@@ -13,7 +13,7 @@ gesammelt.
 
 Das technische Objekt heißt aktuell weiterhin `Project`. Fachlich soll dieses
 Objekt perspektivisch als `Initiative` verstanden werden: eine bewusst
-angelegte Sache, die d-max begleiten soll. Eine Initiative kann je nach `type`
+angelegte Sache, die DMAX begleiten soll. Eine Initiative kann je nach `type`
 eine Idee, ein konkretes Projekt oder eine Gewohnheit sein.
 
 Diese Naming-Entscheidung bedeutet noch kein sofortiges Code-Refactoring. Sie
@@ -66,7 +66,7 @@ In diesem ersten Schritt geht es aber nur um das gemeinsame Verständnis.
 Alle drei Typen bleiben zunächst technisch `Project`. Fachlich sind sie aber
 Initiativen.
 
-Eine Initiative ist ein bewusst angelegter Container für etwas, das d-max
+Eine Initiative ist ein bewusst angelegter Container für etwas, das DMAX
 begleiten soll. Je nach `type` ist diese Initiative:
 
 - eine Idee, die gedacht, sortiert und bewertet wird
@@ -412,7 +412,7 @@ Habits eine andere Lebenszykluslogik brauchen als Ideen und Projekte.
 
 Die geplante Domain Language lautet:
 
-- `Initiative`: fachlicher Oberbegriff für den Container, den d-max begleitet
+- `Initiative`: fachlicher Oberbegriff für den Container, den DMAX begleitet
 - `idea`: technische Type-Bezeichnung für Idee
 - `project`: technische Type-Bezeichnung für konkretes Projekt
 - `habit`: technische Type-Bezeichnung für Gewohnheit
@@ -597,7 +597,7 @@ bewusst noch nicht detailliert ausgearbeitet.
 
 15. Fokus-Management für aktive Projekte konzipieren
 
-    Ausarbeiten, wie d-max dem Nutzer hilft, aktive Projekte zu priorisieren,
+    Ausarbeiten, wie DMAX dem Nutzer hilft, aktive Projekte zu priorisieren,
     nicht zu viele Dinge gleichzeitig zu starten und echten Fortschritt zu
     erzeugen.
 

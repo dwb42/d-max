@@ -373,16 +373,14 @@ openclaw agent --local \
 
 ## Verification
 
-Last context-sync verification: 2026-05-15. The commands below passed locally.
+Last local verification: 2026-06-29. See `docs/current-state.md` for the
+current test count and notes. Standard local checks:
 
 ```bash
 npm run typecheck
 npm test
 npm run web:build
-docker compose build
-docker compose up -d --force-recreate
-curl -i http://localhost:49415/health
-curl -I http://localhost:49415/
+npm run build
 ```
 
 ## Secrets

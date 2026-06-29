@@ -1,6 +1,6 @@
 # DMAX Current State
 
-Date: 2026-06-25
+Date: 2026-06-29
 
 Short handoff for fresh Codex/OpenClaw sessions. This file describes the
 implemented repository state; older plans are historical unless this file or
@@ -82,7 +82,7 @@ SQLite tables:
 categories, initiatives, initiative_relations,
 planning_canvases, planning_canvas_nodes, graph_layout_nodes, graph_node_annotations,
 mindmap_change_drafts,
-tasks,
+tasks, party_timeline_entries, party_timeline_entry_parties,
 task_checklist_items,
 calendar_entries, calendar_sources, calendar_event_bindings, calendar_event_visibility,
 gmail_mailboxes, gmail_messages, gmail_message_participants,
@@ -125,6 +125,17 @@ show party relationships, and show DMAX contexts where that party participates.
 The person detail header displays relationship context directly below the name,
 and the person `Anpassen` modal manages core person fields plus person and
 organization party relationships in one place.
+Tasks can now be initiative-owned, party-owned, or both: `tasks.initiative_id`
+is nullable and `tasks.primary_party_id` can point at a person or organization
+when the contact/relationship is the primary context of the measure. Additional
+participants still use `entity_participants`. `party_timeline_entries` plus
+`party_timeline_entry_parties` store manually documented communication history
+such as conversations, received/sent letters, visits, and notes; these entries
+are journal/history facts, not a second planning model. Future/planned actions
+remain tasks. The person detail page surfaces party-owned measures above manual
+communication notes and the existing Gmail section. Manual party timeline
+entries are exposed through API routes and OpenClaw tools; organization support
+uses the same party-level data model.
 The organization detail page edits core fields in a header-triggered modal,
 shows a full-width Markdown description panel, manages contact points and
 postal addresses through modals with delete confirmation, and shows/adds
@@ -314,7 +325,9 @@ confirmation; committed structural changes are still limited to freestyle
 nodes, while annotations may be attached to existing mindmap nodes.
 Tasks have a deliberately small
 `open`/`done` status model; legacy non-`done` task statuses are migrated to
-`open`. `task_checklist_items` stores simple checklist items
+`open`. A task must have either an initiative context or a primary party
+context, and can have both when a project measure is centered on a specific
+person or organization. `task_checklist_items` stores simple checklist items
 inside tasks. Items have only a name, `todo`/`done` status, and persisted order;
 checklist completion does not automatically complete the parent task. Deleting
 a task deletes its checklist items and task media links, but not the underlying
@@ -449,9 +462,9 @@ TTS fails.
   read it as background before continuing latency work, then verify against
   current code and runtime behavior.
 - Tools cover categories, initiatives, initiative relations, initiative
-  freestyle mindmaps, tasks, task checklist items, media attachments, people,
-  organizations, party relationships, entity participants, and party contact
-  points.
+  freestyle mindmaps, tasks, task checklist items, manual party timeline
+  entries, media attachments, people, organizations, party relationships,
+  entity participants, party contact points, and party addresses.
   Initiative tools expose the `type` field for `idea`, `project`, and `habit`,
   `parentId`, `projectPhase` for `type=project`, plus `startDate`/`endDate` for
   time-bounded `type=project` initiatives. Parent/children hierarchy uses
@@ -801,6 +814,9 @@ try a real file in `DMAX_WEB_DIST_DIR`; missing non-asset paths fall back to
 
 ```text
 GET  /health
+POST /internal/openclaw/tools/:toolName
+GET  /api/openclaw/status
+POST /api/openclaw/prewarm
 GET  /api/app/overview
 GET  /api/calendar
 GET  /api/calendar/hidden-events
@@ -827,10 +843,45 @@ POST /api/config/google-calendar/disconnect
 GET  /api/config/google-workspace/status
 POST /api/config/google-workspace/auth-url
 POST /api/config/google-workspace/disconnect
+GET  /api/config/gmail/mailboxes
+POST /api/config/gmail/auth-url
+POST /api/config/gmail/mailboxes
+PATCH /api/config/gmail/mailboxes/:id
+POST /api/config/gmail/mailboxes/:id/sync
 GET  /api/categories
 POST /api/categories
 PATCH /api/categories/:id
 PATCH /api/categories/order
+GET  /api/people
+POST /api/people
+GET  /api/people/:id
+PATCH /api/people/:id
+DELETE /api/people/:id
+GET  /api/organizations
+POST /api/organizations
+GET  /api/organizations/:id
+PATCH /api/organizations/:id
+DELETE /api/organizations/:id
+GET  /api/config/relationship-types
+GET  /api/config/participant-role-types
+GET  /api/party-relationships
+POST /api/party-relationships
+DELETE /api/party-relationships/:id
+GET  /api/entity-participants
+POST /api/entity-participants
+PATCH /api/entity-participants/:id
+DELETE /api/entity-participants/:id
+GET  /api/party-contact-points
+POST /api/party-contact-points
+PATCH /api/party-contact-points/:id
+DELETE /api/party-contact-points/:id
+GET  /api/party-addresses
+POST /api/party-addresses
+PATCH /api/party-addresses/:id
+DELETE /api/party-addresses/:id
+GET  /api/parties/:id/gmail/messages
+POST /api/parties/:id/gmail/messages/:messageId/archive
+POST /api/parties/:id/gmail/messages/:messageId/trash
 GET  /api/initiatives
 POST /api/initiatives
 GET  /api/initiatives/:id
@@ -850,6 +901,7 @@ POST /api/planning-canvas/nodes
 PATCH /api/planning-canvas/nodes/:id
 DELETE /api/planning-canvas/nodes/:id
 GET  /api/tasks
+POST /api/tasks
 GET  /api/tasks/:id
 PATCH /api/tasks/:id
 DELETE /api/tasks/:id
@@ -860,6 +912,12 @@ PATCH /api/tasks/:id/checklist-items
 PATCH /api/tasks/:id/checklist-items/order
 PATCH /api/tasks/:id/checklist-items/:itemId
 DELETE /api/tasks/:id/checklist-items/:itemId
+GET  /api/parties/:id/timeline-entries
+POST /api/parties/:id/timeline-entries
+PATCH /api/parties/:id/timeline-entries/:entryId
+DELETE /api/parties/:id/timeline-entries/:entryId
+POST /api/gmail/drafts
+POST /api/gmail/drafts/send
 POST /api/media/attachments
 GET  /api/media/assets/:id
 PATCH /api/media/assets/:id
@@ -878,6 +936,7 @@ POST /api/chat/message
 POST /api/chat/message/stream
 POST /api/chat/messages/:id/audio
 POST /api/chat/voice/transcribe
+POST /api/diagnostics/chat-event
 GET  /api/debug/prompts
 GET  /api/debug/prompt-templates
 GET  /api/state/events
@@ -993,27 +1052,18 @@ repo writes on the VPS unless Dietrich explicitly approves that operation.
 
 ## Verification
 
-Last checked on 2026-06-02:
+Last checked locally on 2026-06-29:
 
 - `npm run typecheck` passed.
-- `npm test` passed: 38 test files, 189 tests.
-- `npm run web:build` passed.
+- `npm test` passed: 44 test files, 224 tests.
+- `npm run web:build` passed. Vite still reports the known manual-chunk circular
+  warning between `vendor` and `vendor-react`.
 - `npm run build` passed.
-- A one-off `dmax-config-audit` production image run with OpenClaw 2026.5.12
-  returned `{"valid":true,"path":"/app/openclaw/config.production-512.json"}`.
-- A second one-off `dmax-config-audit` run returned
-  `{"valid":true,"path":"/app/openclaw/config.production.json"}`.
-- Focused OpenClaw production-topology tests passed:
-  `tests/api/internal-openclaw-tools.test.ts`,
-  `tests/openclaw/config-web-tools.test.ts`,
-  `tests/openclaw/dmax-dynamic-tools-plugin.test.ts`,
-  `tests/openclaw/dmax-dynamic-tools-http-adapter.test.ts`,
-  `tests/openclaw/prod-topology-validation-harness.test.ts`,
-  `tests/openclaw/production-compose.test.ts`,
-  `tests/openclaw/production-rollback-docs.test.ts`, and
-  `tests/chat/openclaw-external-gateway.test.ts`.
-- Focused Telegram bridge tests passed: `tests/telegram/bot.test.ts`.
-- Fresh local two-container production-topology validation is documented in
+- Full `npm test` includes the OpenClaw production-topology, dynamic-tool,
+  context-schema, party communication, Gmail, media, calendar, Telegram, and
+  voice unit/integration tests.
+- The latest local two-container production-topology validation remains
+  documented in
   `docs/architecture/DMAX_OPENCLAW_512_TWO_CONTAINER_PRODUCTION_PROMOTION_VALIDATION_2026-05-16.md`.
 
 ```bash

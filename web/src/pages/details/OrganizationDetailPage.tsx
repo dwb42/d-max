@@ -5,7 +5,7 @@ import { AddressBlock, ContactPointList } from "../../components/party/index.js"
 import type { AddressInput, ContactPointInput } from "../../components/party/index.js";
 import type { EntityParticipant, Initiative, Organization, OrganizationDetail, PartyRelationshipWithParties, Person, RelationshipType, Task } from "../../types.js";
 import { entityTypeLabel, formatDateTimeForUi, participantRoleSummary, personName } from "./detailUtils.js";
-import { PartyEmailSection } from "./PersonDetailPage.js";
+import { PartyHistorySection } from "./PersonDetailPage.js";
 
 export function OrganizationDetailView(props: {
   detail: OrganizationDetail | null;
@@ -104,7 +104,7 @@ export function OrganizationDetailView(props: {
           onDelete={props.onDeleteAddress}
         />
       </div>
-      <PartyEmailSection partyId={organization.id} contactEmails={props.detail.contactPoints.filter((contactPoint) => contactPoint.type === "email").map((contactPoint) => contactPoint.value)} />
+      <PartyHistorySection partyId={organization.id} contactEmails={props.detail.contactPoints.filter((contactPoint) => contactPoint.type === "email").map((contactPoint) => contactPoint.value)} />
       <OrganizationRelationsSection
         organization={organization}
         people={props.people}

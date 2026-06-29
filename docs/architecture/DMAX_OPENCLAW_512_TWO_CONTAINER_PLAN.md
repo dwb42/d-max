@@ -473,7 +473,7 @@ Build the reversible staging-only version of the target architecture:
    and is protected by an env-provided internal token.
 10. dmax-api talks to dmax-openclaw over the internal Docker network instead
     of spawning OpenClaw as its own subprocess in the final staging layout.
-11. d-max MCP/dynamic tools are visible and callable from the Codex harness,
+11. DMAX MCP/dynamic tools are visible and callable from the Codex harness,
     with proof from trajectory/tool-call evidence.
 12. Startup, first warmup, warm simple turns, and warm DMAX tool-call turns
     are measured cleanly and documented.

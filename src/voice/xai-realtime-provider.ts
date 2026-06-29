@@ -52,7 +52,7 @@ export class XaiRealtimeProvider implements RealtimeVoiceProvider {
       JSON.stringify({
         type: "session.update",
         session: {
-          instructions: "d-max realtime capability spike session.",
+          instructions: "DMAX realtime capability spike session.",
           turn_detection: { type: "server_vad" },
           ...(config.audio ? { input_audio_format: config.audio.codec, output_audio_format: config.audio.codec } : {})
         }

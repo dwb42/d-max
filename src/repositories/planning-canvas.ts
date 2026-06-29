@@ -139,7 +139,8 @@ type UnmappedInitiativeRow = {
 
 type TaskRow = {
   id: number;
-  initiative_id: number;
+  initiative_id: number | null;
+  primary_party_id: number | null;
   title: string;
   status: Task["status"];
   priority: Task["priority"];
@@ -405,6 +406,7 @@ export class PlanningCanvasRepository {
     const byInitiative = new Map<number, Task[]>();
     for (const row of rows) {
       const task = taskFromRow(row);
+      if (!task.initiativeId) continue;
       byInitiative.set(task.initiativeId, [...(byInitiative.get(task.initiativeId) ?? []), task]);
     }
     return byInitiative;
@@ -566,6 +568,7 @@ function taskFromRow(row: TaskRow): Task {
   return {
     id: row.id,
     initiativeId: row.initiative_id,
+    primaryPartyId: row.primary_party_id,
     title: row.title,
     status: row.status,
     priority: row.priority,

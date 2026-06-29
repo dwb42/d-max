@@ -283,6 +283,13 @@ type RouteState = {
   partyId?: number | null;
   categoryName: string | null;
 };
+type TaskBackTarget =
+  | { type: "tasks" }
+  | { type: "person"; partyId: number }
+  | { type: "initiative"; initiativeId: number };
+type DmaxHistoryState = {
+  dmaxTaskBackTarget?: TaskBackTarget | null;
+};
 type VoiceState = "idle" | "connecting" | "listening" | "speaking";
 type ChatVoicePhase = "idle" | "recording" | "transcribing";
 type ChatMessage = {
@@ -489,6 +496,44 @@ function routeFromPath(path: string): RouteState {
   if (pathname === "/prompt-vorlagen") return { view: "promptTemplates", initiativeId: null, taskId: null, categoryName: null };
   if (pathname === "/prompts") return { view: "prompts", initiativeId: null, taskId: null, categoryName: null };
   return { view: "lifeAreas", initiativeId: null, taskId: null, categoryName: null };
+}
+
+function readTaskBackTargetFromHistory(): TaskBackTarget | null {
+  const state = window.history.state as DmaxHistoryState | null;
+  return state?.dmaxTaskBackTarget ?? null;
+}
+
+function taskBackTargetFromRoute(route: RouteState): TaskBackTarget | null {
+  if (route.view === "tasks") return { type: "tasks" };
+  if (route.view === "person" && route.partyId) return { type: "person", partyId: route.partyId };
+  if (route.view === "initiative" && route.initiativeId) return { type: "initiative", initiativeId: route.initiativeId };
+  return null;
+}
+
+function historyStateForTaskBackTarget(taskBackTarget: TaskBackTarget | null): DmaxHistoryState {
+  return { dmaxTaskBackTarget: taskBackTarget };
+}
+
+function taskBackLinkForTarget(
+  taskBackTarget: TaskBackTarget | null,
+  currentInitiative: Initiative | null,
+  initiatives: Initiative[],
+  people: Person[]
+): { path: string; label: string; title?: string } | null {
+  if (!taskBackTarget) return null;
+  if (taskBackTarget.type === "tasks") {
+    return { path: "/tasks", label: "Zurück zu Maßnahmen" };
+  }
+  if (taskBackTarget.type === "person") {
+    const person = people.find((candidate) => candidate.id === taskBackTarget.partyId);
+    const label = person ? personDisplayTitle(person) : `Person ${taskBackTarget.partyId}`;
+    return { path: `/people/${taskBackTarget.partyId}`, label: `Zurück zu „${label}“`, title: label };
+  }
+  const initiative = currentInitiative?.id === taskBackTarget.initiativeId
+    ? currentInitiative
+    : initiatives.find((candidate) => candidate.id === taskBackTarget.initiativeId) ?? null;
+  const label = initiative ? displayInitiativeName(initiative) : `Initiative ${taskBackTarget.initiativeId}`;
+  return { path: `/initiatives/${taskBackTarget.initiativeId}`, label: `Zurück zu „${label}“`, title: label };
 }
 
 function pathForRoute(view: View, initiativeId?: number | null): string {
@@ -739,6 +784,7 @@ function preferredAudioMimeType(): string {
 
 export default function App() {
   const [route, setRoute] = useState<RouteState>(() => routeFromPath(`${window.location.pathname}${window.location.search}`));
+  const [taskBackTarget, setTaskBackTarget] = useState<TaskBackTarget | null>(() => readTaskBackTargetFromHistory());
   const [overview, setOverview] = useState<AppOverview | null>(null);
   const [lifeAreaInitiatives, setLifeAreaInitiatives] = useState<Initiative[] | null>(null);
   const [peopleList, setPeopleList] = useState<Person[] | null>(null);
@@ -908,9 +954,12 @@ export default function App() {
 
   function navigate(path: string) {
     const nextPath = path === "/calendar" ? calendarPathForControls(calendarControls) : path;
-    window.history.pushState(null, "", nextPath);
-    setRoute(routeFromPath(nextPath));
-    if (routeFromPath(nextPath).view === "calendar") {
+    const nextRoute = routeFromPath(nextPath);
+    const nextTaskBackTarget = nextRoute.view === "task" ? taskBackTargetFromRoute(route) : null;
+    window.history.pushState(historyStateForTaskBackTarget(nextTaskBackTarget), "", nextPath);
+    setTaskBackTarget(nextTaskBackTarget);
+    setRoute(nextRoute);
+    if (nextRoute.view === "calendar") {
       setCalendarControls(calendarControlsFromPath(nextPath));
     }
   }
@@ -919,7 +968,8 @@ export default function App() {
     setCalendarControls((current) => {
       const next = typeof updater === "function" ? updater(current) : updater;
       const nextPath = calendarPathForControls(next);
-      window.history.pushState(null, "", nextPath);
+      window.history.pushState(historyStateForTaskBackTarget(null), "", nextPath);
+      setTaskBackTarget(null);
       setRoute(routeFromPath(nextPath));
       return next;
     });
@@ -1408,6 +1458,7 @@ export default function App() {
     const onPopState = () => {
       const path = `${window.location.pathname}${window.location.search}`;
       const nextRoute = routeFromPath(path);
+      setTaskBackTarget(readTaskBackTargetFromHistory());
       setRoute(nextRoute);
       if (nextRoute.view === "calendar") {
         setCalendarControls(calendarControlsFromPath(path));
@@ -1422,7 +1473,8 @@ export default function App() {
     const currentPath = `${window.location.pathname}${window.location.search}`;
     const nextPath = calendarPathForControls(calendarControls);
     if (currentPath !== nextPath) {
-      window.history.replaceState(null, "", nextPath);
+      window.history.replaceState(historyStateForTaskBackTarget(null), "", nextPath);
+      setTaskBackTarget(null);
     }
   }, [route.view, calendarControls]);
 
@@ -1751,7 +1803,7 @@ export default function App() {
     if (view === "lifeArea") {
       const category = overview?.categories.find((candidate) => candidate.name.toLowerCase() === route.categoryName?.toLowerCase()) ?? null;
       const initiatives = category ? (lifeAreaInitiatives ?? overview?.initiatives ?? []).filter((initiative) => initiative.categoryId === category.id) : [];
-      const tasks = category ? (overview?.tasks ?? []).filter((task) => initiatives.some((initiative) => initiative.id === task.initiativeId)) : [];
+      const tasks = category ? (overview?.tasks ?? []).filter((task) => task.initiativeId !== null && initiatives.some((initiative) => initiative.id === task.initiativeId)) : [];
       return (
         <div className="content-header-title">
           <div className="back-actions">
@@ -1826,6 +1878,7 @@ export default function App() {
     if (view === "task") {
       const task = taskDetail?.task ?? null;
       const initiative = taskDetail?.initiative ?? null;
+      const taskBackLink = taskBackLinkForTarget(taskBackTarget, initiative, overview?.initiatives ?? [], peopleList ?? []);
       const taskHeader = taskLoadError ? (
         <EntityHeader
           title="Maßnahme nicht gefunden"
@@ -1853,18 +1906,15 @@ export default function App() {
       );
       return (
         <div className="content-header-title">
-          <div className="back-actions">
-            <div className="back-action-group">
-              <button className="small-button back-button" onClick={() => navigate("/tasks")}>
-                Zurück zu Maßnahmen
-              </button>
-              {initiative ? (
-                <button className="small-button back-button truncate" onClick={() => navigate(`/initiatives/${initiative.id}`)} title={initiative.name}>
-                  Zurück zu {initiative.name}
+          {taskBackLink ? (
+            <div className="back-actions">
+              <div className="back-action-group">
+                <button className="small-button back-button truncate" onClick={() => navigate(taskBackLink.path)} title={taskBackLink.title}>
+                  {taskBackLink.label}
                 </button>
-              ) : null}
+              </div>
             </div>
-          </div>
+          ) : null}
           {taskHeader}
         </div>
       );
@@ -2368,6 +2418,8 @@ export default function App() {
               await deleteEntityParticipant(participantId);
               if (route.taskId) setTaskDetail(await fetchTaskDetail(route.taskId));
             }}
+            onOpenPerson={(partyId) => navigate(`/people/${partyId}`)}
+            onOpenOrganization={(partyId) => navigate(`/organizations/${partyId}`)}
             onUpdateTask={async (taskId, input) => {
               await updateTask(taskId, input);
               await refresh();

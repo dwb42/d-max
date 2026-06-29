@@ -57,14 +57,15 @@ Party/contact primitives live under `web/src/components/party/`.
 
 ## Current Party Communication UI
 
-`/people/:id` uses the main content column as an email communication timeline.
-The right sidebar is ordered as Kontakt, Beschreibung, Anschriften,
-DMAX-Kontexte, and Metadaten. E-Mail rows are compact by default, newest-first,
-and optimized for temporal scanning: direction icon/label plus date/time,
-subject, and a preview stripped of quoted reply history when recognizable.
-Expanding a message reveals headers/body and small right-aligned actions for
-reply, reply-all, forward, archive, and trash. Archive/trash require the
-connected Gmail mailbox to have the `gmail.modify` OAuth scope.
+`/people/:id` uses the main content column as a party communication surface.
+It shows party-owned measures first, then manual communication notes, then the
+Gmail email timeline. The right sidebar is ordered as Kontakt, Beschreibung,
+Anschriften, DMAX-Kontexte, and Metadaten. E-Mail rows are compact by default,
+newest-first, and optimized for temporal scanning: direction icon/label plus
+date/time, subject, and a preview stripped of quoted reply history when
+recognizable. Expanding a message reveals headers/body and small right-aligned
+actions for reply, reply-all, forward, archive, and trash. Archive/trash require
+the connected Gmail mailbox to have the `gmail.modify` OAuth scope.
 
 ## Active Guidance Docs
 

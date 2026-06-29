@@ -124,7 +124,7 @@ const GATEWAY_SESSION_CREATE_TIMEOUT_MS = 30_000;
 const GATEWAY_READY_CACHE_MS = 60_000;
 const SESSION_REPLY_WAIT_TIMEOUT_MS = 90_000;
 const OPENCLAW_PREWARM_SESSION_KEY = "explicit:dmax-openclaw-warmup";
-const OPENCLAW_PREWARM_SESSION_LABEL = "d-max OpenClaw warmup";
+const OPENCLAW_PREWARM_SESSION_LABEL = "DMAX OpenClaw warmup";
 const OPENCLAW_PREWARM_PROMPT = "System warmup. Do not use tools. Reply with exactly: OK";
 
 export function resetOpenClawGatewayClientForTests(): void {
@@ -639,7 +639,7 @@ async function startOpenClawGateway(options: { configPath: string; stateDir: str
         DMAX_OPENCLAW_EARLY_PRUNE_LOCAL_TOOLS: "1",
         // OpenClaw 2026.4.26 uses its Vitest/test-runtime guard only to skip the
         // gateway model-pricing refresh unless OPENCLAW_TEST_MINIMAL_GATEWAY is set.
-        // The pricing refresh blocks startup on two 60s network timeouts in local d-max.
+        // The pricing refresh blocks startup on two 60s network timeouts in local DMAX.
         NODE_ENV: "test"
       },
       stdio: ["ignore", "ignore", "ignore"]
@@ -755,7 +755,7 @@ function prepareRuntimeOpenClawConfig(configPath: string, stateDir: string): Run
 
   const existingMeta = readOpenClawRuntimeConfigMeta(runtimeConfigPath) ?? readOpenClawRuntimeConfigMeta(`${runtimeConfigPath}.last-good`);
   parsed.meta = existingMeta ?? {
-    lastTouchedVersion: "d-max",
+    lastTouchedVersion: "DMAX",
     lastTouchedAt: new Date().toISOString()
   };
 
@@ -2043,8 +2043,8 @@ async function getOpenClawGatewayConnection(
     url: gatewayUrl,
     ...(process.env.OPENCLAW_GATEWAY_TOKEN ? { token: process.env.OPENCLAW_GATEWAY_TOKEN } : {}),
     clientName: "gateway-client",
-    clientDisplayName: "d-max web chat",
-    clientVersion: "d-max",
+    clientDisplayName: "DMAX web chat",
+    clientVersion: "DMAX",
     mode: "backend",
     role: "operator",
     scopes: ["operator.admin", "operator.read", "operator.write"],

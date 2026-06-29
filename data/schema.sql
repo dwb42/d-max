@@ -122,7 +122,8 @@ create table if not exists mindmap_change_drafts (
 
 create table if not exists tasks (
   id integer primary key,
-  initiative_id integer not null references initiatives(id),
+  initiative_id integer references initiatives(id),
+  primary_party_id integer references parties(id),
   title text not null,
   status text not null default 'open' check (status in ('open', 'done')),
   priority text not null default 'normal' check (priority in ('low', 'normal', 'high', 'urgent')),
@@ -131,7 +132,8 @@ create table if not exists tasks (
   sort_order integer not null default 0,
   created_at text not null,
   updated_at text not null,
-  completed_at text
+  completed_at text,
+  check (initiative_id is not null or primary_party_id is not null)
 );
 
 create table if not exists task_checklist_items (
@@ -440,6 +442,28 @@ create table if not exists party_addresses (
   updated_at text not null
 );
 
+create table if not exists party_timeline_entries (
+  id integer primary key,
+  kind text not null check (kind in ('conversation', 'letter_received', 'letter_sent', 'visit', 'note')),
+  direction text not null default 'none' check (direction in ('inbound', 'outbound', 'bidirectional', 'none')),
+  occurred_at text not null,
+  title text not null,
+  body text,
+  related_task_id integer references tasks(id) on delete set null,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists party_timeline_entry_parties (
+  id integer primary key,
+  entry_id integer not null references party_timeline_entries(id) on delete cascade,
+  party_id integer not null references parties(id) on delete cascade,
+  role text not null default 'primary' check (role in ('primary', 'participant', 'related', 'organization_context')),
+  created_at text not null,
+  updated_at text not null,
+  unique(entry_id, party_id, role)
+);
+
 create table if not exists app_chat_messages (
   id integer primary key,
   conversation_id integer references app_conversations(id),
@@ -494,7 +518,7 @@ create table if not exists app_state_events (
   id integer primary key,
   source text not null check (source in ('api', 'tool')),
   operation text not null,
-  entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'party_contact_point', 'party_address')),
+  entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'communication_event', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'party_contact_point', 'party_address')),
   entity_id integer,
   category_id integer,
   initiative_id integer,
@@ -520,10 +544,15 @@ create index if not exists idx_categories_sort_order on categories(sort_order, i
 create index if not exists idx_initiatives_category_sort_order on initiatives(category_id, sort_order, id);
 create index if not exists idx_initiatives_parent_id on initiatives(parent_id);
 create index if not exists idx_tasks_initiative_id on tasks(initiative_id);
+create index if not exists idx_tasks_primary_party_id on tasks(primary_party_id, status, due_at, id);
 create index if not exists idx_tasks_initiative_sort_order on tasks(initiative_id, sort_order, id);
 create index if not exists idx_tasks_status on tasks(status);
 create index if not exists idx_tasks_priority on tasks(priority);
 create index if not exists idx_tasks_due_at on tasks(due_at);
+create index if not exists idx_party_timeline_entries_occurred on party_timeline_entries(occurred_at desc, id desc);
+create index if not exists idx_party_timeline_entries_task on party_timeline_entries(related_task_id);
+create index if not exists idx_party_timeline_entry_parties_party on party_timeline_entry_parties(party_id, entry_id);
+create index if not exists idx_party_timeline_entry_parties_entry on party_timeline_entry_parties(entry_id, party_id);
 create index if not exists idx_task_checklist_items_task_sort_order on task_checklist_items(task_id, sort_order, id);
 create index if not exists idx_task_checklist_items_status on task_checklist_items(status);
 create index if not exists idx_calendar_entries_start_at on calendar_entries(start_at);

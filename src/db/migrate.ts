@@ -30,6 +30,8 @@ export function migrate(databasePath?: string): void {
     migrateTaskChecklistItems(db);
     migrateMediaDomain(db);
     migrateWhoDomain(db);
+    migratePartyTaskContext(db);
+    migratePartyTimelineDomain(db);
     migrateAppChatResearchSummary(db);
     migrateMindmapReviewDomain(db);
     db.exec(schema);
@@ -482,13 +484,15 @@ function migrateTaskStatusModel(db: ReturnType<typeof openDatabase>): void {
   if (!columnNames.has("status")) {
     return;
   }
+  const hasPrimaryPartyId = columnNames.has("primary_party_id");
 
   db.pragma("foreign_keys = OFF");
   try {
     db.exec(`
       create table tasks_next (
         id integer primary key,
-        initiative_id integer not null references initiatives(id),
+        initiative_id integer references initiatives(id),
+        primary_party_id integer references parties(id),
         title text not null,
         status text not null default 'open' check (status in ('open', 'done')),
         priority text not null default 'normal' check (priority in ('low', 'normal', 'high', 'urgent')),
@@ -497,12 +501,14 @@ function migrateTaskStatusModel(db: ReturnType<typeof openDatabase>): void {
         sort_order integer not null default 0,
         created_at text not null,
         updated_at text not null,
-        completed_at text
+        completed_at text,
+        check (initiative_id is not null or primary_party_id is not null)
       );
-      insert into tasks_next (id, initiative_id, title, status, priority, notes, due_at, sort_order, created_at, updated_at, completed_at)
+      insert into tasks_next (id, initiative_id, primary_party_id, title, status, priority, notes, due_at, sort_order, created_at, updated_at, completed_at)
         select
           id,
           initiative_id,
+          ${hasPrimaryPartyId ? "primary_party_id" : "null"},
           title,
           case when status = 'done' then 'done' else 'open' end,
           priority,
@@ -512,13 +518,110 @@ function migrateTaskStatusModel(db: ReturnType<typeof openDatabase>): void {
           created_at,
           updated_at,
           case when status = 'done' then completed_at else null end
-        from tasks;
+        from tasks
+        where initiative_id is not null ${hasPrimaryPartyId ? "or primary_party_id is not null" : ""};
       drop table tasks;
       alter table tasks_next rename to tasks;
     `);
   } finally {
     db.pragma("foreign_keys = ON");
   }
+}
+
+function migratePartyTaskContext(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "tasks")) {
+    return;
+  }
+
+  const columns = db.prepare("pragma table_info(tasks)").all() as Array<{ name: string; notnull: number }>;
+  const initiativeColumn = columns.find((column) => column.name === "initiative_id");
+  const hasPrimaryPartyId = columns.some((column) => column.name === "primary_party_id");
+  if (hasPrimaryPartyId && initiativeColumn?.notnull === 0) {
+    db.exec(`
+      create index if not exists idx_tasks_primary_party_id on tasks(primary_party_id, status, due_at, id);
+    `);
+    return;
+  }
+
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec(`
+      create table tasks_next (
+        id integer primary key,
+        initiative_id integer references initiatives(id),
+        primary_party_id integer references parties(id),
+        title text not null,
+        status text not null default 'open' check (status in ('open', 'done')),
+        priority text not null default 'normal' check (priority in ('low', 'normal', 'high', 'urgent')),
+        notes text,
+        due_at text,
+        sort_order integer not null default 0,
+        created_at text not null,
+        updated_at text not null,
+        completed_at text,
+        check (initiative_id is not null or primary_party_id is not null)
+      );
+      insert into tasks_next (
+        id, initiative_id, primary_party_id, title, status, priority, notes, due_at, sort_order, created_at, updated_at, completed_at
+      )
+        select
+          id,
+          initiative_id,
+          ${hasPrimaryPartyId ? "primary_party_id" : "null"},
+          title,
+          status,
+          priority,
+          notes,
+          due_at,
+          sort_order,
+          created_at,
+          updated_at,
+          completed_at
+        from tasks
+        where initiative_id is not null ${hasPrimaryPartyId ? "or primary_party_id is not null" : ""};
+      drop table tasks;
+      alter table tasks_next rename to tasks;
+      create index if not exists idx_tasks_initiative_id on tasks(initiative_id);
+      create index if not exists idx_tasks_primary_party_id on tasks(primary_party_id, status, due_at, id);
+      create index if not exists idx_tasks_initiative_sort_order on tasks(initiative_id, sort_order, id);
+      create index if not exists idx_tasks_status on tasks(status);
+      create index if not exists idx_tasks_priority on tasks(priority);
+      create index if not exists idx_tasks_due_at on tasks(due_at);
+    `);
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
+
+function migratePartyTimelineDomain(db: ReturnType<typeof openDatabase>): void {
+  db.exec(`
+    create table if not exists party_timeline_entries (
+      id integer primary key,
+      kind text not null check (kind in ('conversation', 'letter_received', 'letter_sent', 'visit', 'note')),
+      direction text not null default 'none' check (direction in ('inbound', 'outbound', 'bidirectional', 'none')),
+      occurred_at text not null,
+      title text not null,
+      body text,
+      related_task_id integer references tasks(id) on delete set null,
+      created_at text not null,
+      updated_at text not null
+    );
+
+    create table if not exists party_timeline_entry_parties (
+      id integer primary key,
+      entry_id integer not null references party_timeline_entries(id) on delete cascade,
+      party_id integer not null references parties(id) on delete cascade,
+      role text not null default 'primary' check (role in ('primary', 'participant', 'related', 'organization_context')),
+      created_at text not null,
+      updated_at text not null,
+      unique(entry_id, party_id, role)
+    );
+
+    create index if not exists idx_party_timeline_entries_occurred on party_timeline_entries(occurred_at desc, id desc);
+    create index if not exists idx_party_timeline_entries_task on party_timeline_entries(related_task_id);
+    create index if not exists idx_party_timeline_entry_parties_party on party_timeline_entry_parties(party_id, entry_id);
+    create index if not exists idx_party_timeline_entry_parties_entry on party_timeline_entry_parties(entry_id, party_id);
+  `);
 }
 
 function migrateCalendarDomain(db: ReturnType<typeof openDatabase>): void {
@@ -1516,7 +1619,7 @@ function rebuildStateEventsForWhoDomain(db: ReturnType<typeof openDatabase>): vo
   const sql = db.prepare("select sql from sqlite_master where type = 'table' and name = 'app_state_events'").get() as
     | { sql: string }
     | undefined;
-  if (sql?.sql.includes("'party_address'") && sql.sql.includes("'entity_participant'")) {
+  if (sql?.sql.includes("'party_address'") && sql.sql.includes("'entity_participant'") && sql.sql.includes("'communication_event'")) {
     return;
   }
 
@@ -1525,7 +1628,7 @@ function rebuildStateEventsForWhoDomain(db: ReturnType<typeof openDatabase>): vo
       id integer primary key,
       source text not null check (source in ('api', 'tool')),
       operation text not null,
-      entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'party_contact_point', 'party_address')),
+      entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'communication_event', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'party_contact_point', 'party_address')),
       entity_id integer,
       category_id integer,
       initiative_id integer,
@@ -1535,7 +1638,7 @@ function rebuildStateEventsForWhoDomain(db: ReturnType<typeof openDatabase>): vo
     insert into app_state_events_next (id, source, operation, entity_type, entity_id, category_id, initiative_id, task_id, created_at)
       select id, source, operation, entity_type, entity_id, category_id, initiative_id, task_id, created_at
       from app_state_events
-      where entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'party_contact_point', 'party_address');
+      where entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'communication_event', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'party_contact_point', 'party_address');
     drop table app_state_events;
     alter table app_state_events_next rename to app_state_events;
     create index if not exists idx_app_state_events_id on app_state_events(id);

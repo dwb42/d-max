@@ -94,7 +94,8 @@ type InitiativeRow = {
 
 type TaskRow = {
   id: number;
-  initiative_id: number;
+  initiative_id: number | null;
+  primary_party_id: number | null;
   title: string;
   status: Task["status"];
   priority: Task["priority"];
@@ -659,6 +660,7 @@ function taskFromRow(row: TaskRow): Task {
   return {
     id: row.id,
     initiativeId: row.initiative_id,
+    primaryPartyId: row.primary_party_id,
     title: row.title,
     status: row.status,
     priority: row.priority,

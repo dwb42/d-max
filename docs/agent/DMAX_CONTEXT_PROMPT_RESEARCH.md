@@ -10,7 +10,7 @@ state, use `docs/current-state.md`, `docs/agent/DMAX_CONTEXT_BUDGETING.md`, and
 
 ## 1. Executive Summary
 
-Der Browser-Chat baut aktuell keinen separaten OpenClaw-Systemprompt pro View. Stattdessen erzeugt `src/chat/conversation-context.ts` einen textuellen Kontextblock und sendet diesen zusammen mit der Nutzernachricht als `message` in eine OpenClaw-Session. Die globalen Runtime-Instructions kommen aus dem OpenClaw-Workspace (`openclaw/workspace/AGENTS.md`, `TOOLS.md`, `USER.md`, `SOUL.md`), die d-max Tools kommen als MCP-Tools aus `src/mcp/server.ts`.
+Der Browser-Chat baut aktuell keinen separaten OpenClaw-Systemprompt pro View. Stattdessen erzeugt `src/chat/conversation-context.ts` einen textuellen Kontextblock und sendet diesen zusammen mit der Nutzernachricht als `message` in eine OpenClaw-Session. Die globalen Runtime-Instructions kommen aus dem OpenClaw-Workspace (`openclaw/workspace/AGENTS.md`, `TOOLS.md`, `USER.md`, `SOUL.md`), die DMAX Tools kommen als MCP-Tools aus `src/mcp/server.ts`.
 
 Wichtigste Dateien:
 
@@ -59,7 +59,7 @@ Frontend route in web/src/App.tsx
   -> AppPromptLogRepository stores systemInstructions/contextData/finalPrompt
   -> runOpenClawSessionTurn(finalPrompt, sessionKey)
   -> OpenClaw sessions.send + agent.wait
-  -> d-max MCP tools available through OpenClaw config
+  -> DMAX MCP tools available through OpenClaw config
   -> answer persisted in app_chat_messages
   -> SSE streams synthetic answer deltas back to UI
 ```
@@ -107,7 +107,7 @@ Drive Mode currently sends only concise realtime instructions to xAI and does no
 | OpenClaw session | `src/chat/app-chat.ts:62`, `src/chat/openclaw-agent.ts:1151` | default runner, `runOpenClawGatewaySessionTurn` | Sends prompt to OpenClaw session | Uses per-conversation explicit session key. |
 | OpenClaw config | `openclaw/config.web.json:8` | `agents` | Workspace/model/tools | `openai-codex/gpt-5.5`, MCP `d-max`. |
 | MCP server | `src/mcp/server.ts:24`, `34` | `McpServer`, tool registration loop | Exposes deterministic tools to OpenClaw | Tool schemas/descriptions come from `src/tools/*`. |
-| Runtime prompts | `openclaw/workspace/AGENTS.md`, `TOOLS.md`, `USER.md`, `SOUL.md` | Workspace Markdown | Global OpenClaw behavior/memory | Loaded by OpenClaw, not in d-max prompt log. |
+| Runtime prompts | `openclaw/workspace/AGENTS.md`, `TOOLS.md`, `USER.md`, `SOUL.md` | Workspace Markdown | Global OpenClaw behavior/memory | Loaded by OpenClaw, not in DMAX prompt log. |
 | Prompt persistence | `src/repositories/app-prompt-logs.ts:7`, `85` | `AppPromptLog`, `create` | Stores final prompt and diagnostic sections | Backed by `app_prompt_logs`. |
 | Prompt UI | `web/src/App.tsx:9320`, `9374` | `PromptTemplatesView`, `PromptInspectorView` | Shows templates/logs | Can copy final prompt. |
 | Tests | `tests/chat/conversation-context.test.ts`, `app-chat.test.ts`, `context-schema-sync.test.ts` | various | Verifies resolver/logging/schema sync | No snapshot tests, but explicit containment assertions. |
@@ -403,7 +403,7 @@ Present:
 
 Missing or partial:
 
-- Prompt log does not include OpenClaw's actual loaded workspace files/system role assembly; it only logs d-max's message string and readable sections.
+- Prompt log does not include OpenClaw's actual loaded workspace files/system role assembly; it only logs DMAX's message string and readable sections.
 - No snapshot tests for full final prompts.
 - No per-context fixture matrix for all desired ten modes with realistic data density.
 - No token-budget report in prompt logs beyond `promptChars` in trace.
@@ -438,7 +438,7 @@ Summary by capability:
 | Listenansicht-Kontext | Teilweise | Collection lists get same-type summaries and open tasks, not cross-type compressed context. |
 | Token-Budget/Komprimierung | Teilweise | Hard char truncation and item caps; no dynamic budget. |
 | Datenfluss Frontend -> Backend -> Agent | Gut zentralisiert | View sends context ID/type; backend resolves authoritative DB data. |
-| Debugbarkeit | Gut fuer d-max prompt | Final d-max prompt inspectable; OpenClaw internal prompt layers not fully inspectable. |
+| Debugbarkeit | Gut fuer DMAX prompt | Final DMAX prompt inspectable; OpenClaw internal prompt layers not fully inspectable. |
 
 ## 12. Recommendations for Next Implementation Step
 
@@ -466,7 +466,7 @@ Highest leverage first: category background in details, distinct per-mode instru
 
 ## 13. Open Questions
 
-- Does OpenClaw expose a stable API to inspect the complete effective system prompt including workspace Markdown? The d-max prompt log currently cannot show that layer.
+- Does OpenClaw expose a stable API to inspect the complete effective system prompt including workspace Markdown? The DMAX prompt log currently cannot show that layer.
 - Should `/ideas/:categoryName`, `/projects/:categoryName`, and `/habits/:categoryName` remain `category` context, or should they become collection-filtered contexts with category scope?
 - Should `initiatives` context represent Planning Canvas/Timeline, global initiative portfolio, or both? Current route mapping uses it for timeline/canvas, but resolver behavior matches category overview.
 - Should category descriptions become required enough to include in every initiative/task context, and how much should be budgeted?

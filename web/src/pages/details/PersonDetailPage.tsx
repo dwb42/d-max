@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Archive, Blocks, Building2, ClipboardList, Forward, Inbox, Mail, Plus, Reply, ReplyAll, Send, Trash2, Users } from "lucide-react";
+import { Archive, Blocks, Building2, CheckCircle2, Circle, ClipboardList, Forward, Inbox, Mail, MessageSquareText, Plus, Reply, ReplyAll, Send, Trash2, Users } from "lucide-react";
 import { ConfirmModal, DescriptionBlock, EditModal, EmptyState, EntityDetailPage, ErrorState, MetadataGrid, RelationItem, RelationList, SectionBlock } from "../../components/ui/index.js";
 import { AddressBlock, ContactPointList } from "../../components/party/index.js";
 import type { AddressInput, ContactPointInput } from "../../components/party/index.js";
-import { archivePartyGmailMessage, createGmailDraft, fetchGmailMailboxes, fetchPartyGmailMessages, sendGmailDraft, trashPartyGmailMessage } from "../../api.js";
-import type { EntityParticipant, GmailAuthStatus, GmailMailboxWithStatus, GmailMessage, Initiative, Organization, Party, PartyRelationshipWithParties, Person, PersonDetail, RelationshipType, Task } from "../../types.js";
-import { entityTypeLabel, formatDateTimeForUi, participantRoleSummary, partyRelationshipLabel, personName, salutationLabel } from "./detailUtils.js";
+import { archivePartyGmailMessage, createGmailDraft, createPartyTimelineEntry, createTask, deletePartyTimelineEntry, fetchGmailMailboxes, fetchPartyGmailMessages, fetchPartyTasks, fetchPartyTimelineEntries, sendGmailDraft, trashPartyGmailMessage, updatePartyTimelineEntry, updateTask, updateTaskStatus } from "../../api.js";
+import type { EntityParticipant, GmailAuthStatus, GmailMailboxWithStatus, GmailMessage, Initiative, Organization, Party, PartyRelationshipWithParties, PartyTimelineEntry, PartyTimelineEntryKind, Person, PersonDetail, RelationshipType, Task } from "../../types.js";
+import { entityTypeLabel, formatDateTimeForUi, formatTaskDueDate, participantRoleSummary, partyRelationshipLabel, personName, salutationLabel, taskPriorityLabel, taskStatusLabel } from "./detailUtils.js";
 
 type EmailComposeDraft = {
   to: string;
@@ -94,7 +94,11 @@ export function PersonDetailView(props: {
       ) : null}
       <div className="person-detail-communication-layout">
         <main className="person-detail-email-main">
-          <PartyEmailSection
+          <PartyTasksSection
+            partyId={person.id}
+            onOpenTask={props.onOpenTask}
+          />
+          <PartyHistorySection
             partyId={person.id}
             contactEmails={props.detail.contactPoints.filter((contactPoint) => contactPoint.type === "email").map((contactPoint) => contactPoint.value)}
             composeDraft={composeDraft}
@@ -144,20 +148,32 @@ export function PersonDetailView(props: {
   );
 }
 
-export function PartyEmailSection(props: {
+type PartyHistoryItem =
+  | { type: "email"; key: string; occurredAt: string; message: GmailMessage }
+  | { type: "manual"; key: string; occurredAt: string; entry: PartyTimelineEntry };
+
+export function PartyHistorySection(props: {
   partyId: number;
   contactEmails: string[];
   composeDraft?: EmailComposeDraft | null;
   onComposeDraftChange?: (draft: EmailComposeDraft | null) => void;
 }) {
   const [messages, setMessages] = useState<GmailMessage[]>([]);
+  const [entries, setEntries] = useState<PartyTimelineEntry[]>([]);
   const [mailboxes, setMailboxes] = useState<GmailMailboxWithStatus[]>([]);
   const [loading, setLoading] = useState(true);
+  const [timelineLoading, setTimelineLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
   const [internalComposeDraft, setInternalComposeDraft] = useState<EmailComposeDraft | null>(null);
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<number>>(new Set());
+  const [expandedEntryIds, setExpandedEntryIds] = useState<Set<number>>(new Set());
   const [busyMessageAction, setBusyMessageAction] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<PartyTimelineEntry | null>(null);
+  const [deleteEntry, setDeleteEntry] = useState<PartyTimelineEntry | null>(null);
+  const [deletingEntryId, setDeletingEntryId] = useState<number | null>(null);
 
   const load = async (sync = false) => {
     setError(null);
@@ -178,7 +194,20 @@ export function PartyEmailSection(props: {
     }
   };
 
+  const loadEntries = async () => {
+    setTimelineLoading(true);
+    setTimelineError(null);
+    try {
+      setEntries(await fetchPartyTimelineEntries(props.partyId));
+    } catch (err) {
+      setTimelineError(err instanceof Error ? err.message : "Kommunikationsnotizen konnten nicht geladen werden.");
+    } finally {
+      setTimelineLoading(false);
+    }
+  };
+
   useEffect(() => {
+    void loadEntries();
     void load(false).then(() => {
       void load(true);
     });
@@ -190,12 +219,24 @@ export function PartyEmailSection(props: {
   const setComposeDraft = props.onComposeDraftChange ?? setInternalComposeDraft;
   const mailboxEmails = new Set(mailboxes.flatMap((mailbox) => [mailbox.emailAddress, mailbox.accountLabel]).filter((email): email is string => Boolean(email)).map((email) => email.toLowerCase()));
   const sortedMessages = dedupeGmailMessages(messages).sort((left, right) => Date.parse(right.messageDate) - Date.parse(left.messageDate));
+  const historyItems: PartyHistoryItem[] = [
+    ...sortedMessages.map((message) => ({ type: "email" as const, key: `email:${gmailMessageStableKey(message)}`, occurredAt: message.messageDate, message })),
+    ...entries.map((entry) => ({ type: "manual" as const, key: `manual:${entry.id}`, occurredAt: entry.occurredAt, entry }))
+  ].sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt));
   const mailboxById = new Map(mailboxes.map((mailbox) => [mailbox.id, mailbox]));
   const toggleExpanded = (messageId: number) => {
     setExpandedMessageIds((current) => {
       const next = new Set(current);
       if (next.has(messageId)) next.delete(messageId);
       else next.add(messageId);
+      return next;
+    });
+  };
+  const toggleEntryExpanded = (entryId: number) => {
+    setExpandedEntryIds((current) => {
+      const next = new Set(current);
+      if (next.has(entryId)) next.delete(entryId);
+      else next.add(entryId);
       return next;
     });
   };
@@ -223,12 +264,36 @@ export function PartyEmailSection(props: {
     }
   };
 
+  const deleteManualEntry = async (entry: PartyTimelineEntry) => {
+    if (deletingEntryId) return;
+    setDeletingEntryId(entry.id);
+    setTimelineError(null);
+    try {
+      await deletePartyTimelineEntry(props.partyId, entry.id);
+      setDeleteEntry(null);
+      setExpandedEntryIds((current) => {
+        const next = new Set(current);
+        next.delete(entry.id);
+        return next;
+      });
+      await loadEntries();
+    } catch (err) {
+      setTimelineError(err instanceof Error ? err.message : "Kommunikationsnotiz konnte nicht gelöscht werden.");
+    } finally {
+      setDeletingEntryId(null);
+    }
+  };
+
   return (
     <SectionBlock
-      title="E-Mails"
+      title="Historie"
       className="party-email-section"
       actions={(
         <>
+          <button type="button" className="section-primary-action" onClick={() => setCreateOpen(true)}>
+            <MessageSquareText size={15} />
+            Eintrag
+          </button>
           <button type="button" className="section-primary-action" disabled={syncing} onClick={() => void load(true)}>
             <Mail size={15} />
             Sync
@@ -240,12 +305,50 @@ export function PartyEmailSection(props: {
         </>
       )}
     >
-      {loading ? <EmptyState title="E-Mails werden geladen" /> : null}
+      {loading || timelineLoading ? <EmptyState title="Historie wird geladen" /> : null}
       {error ? <ErrorState title="E-Mails konnten nicht geladen werden" description={error} /> : null}
-      {!loading && !error && sortedMessages.length === 0 ? <EmptyState title="Noch keine E-Mails" description="DMAX zeigt direkte E-Mails zwischen diesem Kontakt und verbundenen Gmail-Postfächern." /> : null}
-      {!loading && !error && sortedMessages.length > 0 ? (
+      {timelineError ? <ErrorState title="Kommunikationsnotizen konnten nicht geladen werden" description={timelineError} /> : null}
+      {!loading && !timelineLoading && !error && !timelineError && historyItems.length === 0 ? <EmptyState title="Noch keine Historie" /> : null}
+      {!loading && !timelineLoading && historyItems.length > 0 ? (
         <div className="party-email-timeline">
-          {sortedMessages.map((message) => {
+          {historyItems.map((item) => {
+            if (item.type === "manual") {
+              const entry = item.entry;
+              const expanded = expandedEntryIds.has(entry.id);
+              return (
+                <article className={`party-email-item${expanded ? " expanded" : ""}`} key={item.key}>
+                  <button type="button" className="party-email-summary" onClick={() => toggleEntryExpanded(entry.id)} aria-expanded={expanded}>
+                    <span className={`party-email-date-cluster ${entry.direction}`}>
+                      <span className="party-email-direction-icon" aria-hidden="true">{partyTimelineKindIcon(entry.kind)}</span>
+                      <span className="party-email-date-time">{formatDateTimeForUi(entry.occurredAt)}</span>
+                      <span className="party-email-direction-label">{partyTimelineKindLabel(entry.kind)}</span>
+                    </span>
+                    <span className="party-email-subject">{entry.title}</span>
+                    <span className="party-email-preview">{entry.body ?? ""}</span>
+                  </button>
+                  {expanded ? (
+                    <div className="party-email-expanded">
+                      <div className="party-email-actions" aria-label="Kommunikationsnotiz-Aktionen">
+                        <button type="button" className="secondary-action compact party-email-action-button" onClick={() => setEditingEntry(entry)}>
+                          Bearbeiten
+                        </button>
+                        <button type="button" className="secondary-action compact party-email-action-button" onClick={() => setDeleteEntry(entry)}>
+                          <Trash2 size={14} />
+                          Löschen
+                        </button>
+                      </div>
+                      <div className="party-email-meta">
+                        <span>Typ: {partyTimelineKindLabel(entry.kind)}</span>
+                        <span>Zeitpunkt: {formatDateTimeForUi(entry.occurredAt)}</span>
+                        <span>Aktualisiert: {formatDateTimeForUi(entry.updatedAt)}</span>
+                      </div>
+                      {entry.body ? <p>{entry.body}</p> : <span className="muted-inline">Keine Notiz</span>}
+                    </div>
+                  ) : null}
+                </article>
+              );
+            }
+            const message = item.message;
             const expanded = expandedMessageIds.has(message.id);
             const preview = messagePreview(message);
             const dateLabel = formatEmailTimelineDate(message, sortedMessages);
@@ -318,6 +421,37 @@ export function PartyEmailSection(props: {
           })}
         </div>
       ) : null}
+      {createOpen ? (
+        <PartyTimelineEntryModal
+          onCancel={() => setCreateOpen(false)}
+          onSave={async (input) => {
+            await createPartyTimelineEntry(props.partyId, input);
+            setCreateOpen(false);
+            await loadEntries();
+          }}
+        />
+      ) : null}
+      {editingEntry ? (
+        <PartyTimelineEntryModal
+          entry={editingEntry}
+          onCancel={() => setEditingEntry(null)}
+          onSave={async (input) => {
+            await updatePartyTimelineEntry(props.partyId, editingEntry.id, input);
+            setEditingEntry(null);
+            await loadEntries();
+          }}
+        />
+      ) : null}
+      {deleteEntry ? (
+        <ConfirmModal
+          title="Kommunikationsnotiz löschen?"
+          description={<p>„{deleteEntry.title}“ wird aus der Historie entfernt.</p>}
+          confirmLabel="Löschen"
+          busy={deletingEntryId === deleteEntry.id}
+          onCancel={() => setDeleteEntry(null)}
+          onConfirm={() => deleteManualEntry(deleteEntry)}
+        />
+      ) : null}
       {composeDraft ? (
         <GmailComposeModal
           draft={composeDraft}
@@ -331,6 +465,364 @@ export function PartyEmailSection(props: {
       ) : null}
     </SectionBlock>
   );
+}
+
+function PartyTasksSection(props: {
+  partyId: number;
+  onOpenTask: (taskId: number) => void;
+}) {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [busyTaskId, setBusyTaskId] = useState<number | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setTasks(await fetchPartyTasks(props.partyId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Maßnahmen konnten nicht geladen werden.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, [props.partyId]);
+
+  const sortedTasks = [...tasks].sort((left, right) => {
+    if (left.status !== right.status) return left.status === "open" ? -1 : 1;
+    const dueCompare = (left.dueAt ?? "9999-12-31").localeCompare(right.dueAt ?? "9999-12-31");
+    return dueCompare || left.sortOrder - right.sortOrder || left.id - right.id;
+  });
+  const toggleTaskStatus = async (task: Task) => {
+    if (busyTaskId) return;
+    setBusyTaskId(task.id);
+    setError(null);
+    try {
+      await updateTaskStatus(task.id, task.status === "done" ? "open" : "done");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Maßnahme konnte nicht aktualisiert werden.");
+    } finally {
+      setBusyTaskId(null);
+    }
+  };
+
+  return (
+    <SectionBlock
+      title="Maßnahmen"
+      className="party-task-section"
+      actions={(
+        <button type="button" className="section-primary-action" onClick={() => setCreateOpen(true)}>
+          <Plus size={15} />
+          Maßnahme
+        </button>
+      )}
+    >
+      {loading ? <EmptyState title="Maßnahmen werden geladen" /> : null}
+      {error ? <ErrorState title="Maßnahmen konnten nicht geladen werden" description={error} /> : null}
+      {!loading && !error && sortedTasks.length === 0 ? <EmptyState title="Keine personenbezogenen Maßnahmen" /> : null}
+      {!loading && !error && sortedTasks.length > 0 ? (
+        <div className="relation-list">
+          {sortedTasks.map((task) => (
+            <RelationItem
+              key={task.id}
+              icon={(
+                <TaskStatusIconButton
+                  task={task}
+                  disabled={busyTaskId !== null}
+                  onToggle={() => void toggleTaskStatus(task)}
+                />
+              )}
+              title={task.title}
+              meta={[
+                taskStatusLabel(task.status),
+                taskPriorityLabel(task.priority),
+                task.dueAt ? `Fällig ${formatPartyTaskDueAt(task.dueAt)}` : null
+              ].filter(Boolean).join(" · ")}
+              detail={task.notes}
+              actions={(
+                <button
+                  type="button"
+                  className="secondary-action compact"
+                  disabled={busyTaskId !== null}
+                  onClick={() => setEditingTask(task)}
+                >
+                  Anpassen
+                </button>
+              )}
+              onOpen={() => props.onOpenTask(task.id)}
+            />
+          ))}
+        </div>
+      ) : null}
+      {createOpen ? (
+        <PartyTaskCreateModal
+          onCancel={() => setCreateOpen(false)}
+          onCreate={async (input) => {
+            await createTask({ primaryPartyId: props.partyId, ...input });
+            setCreateOpen(false);
+            await load();
+          }}
+        />
+      ) : null}
+      {editingTask ? (
+        <PartyTaskEditModal
+          task={editingTask}
+          onCancel={() => setEditingTask(null)}
+          onSave={async (input) => {
+            await updateTask(editingTask.id, input);
+            setEditingTask(null);
+            await load();
+          }}
+        />
+      ) : null}
+    </SectionBlock>
+  );
+}
+
+function TaskStatusIconButton(props: {
+  task: Task;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`party-task-status-toggle ${props.task.status}`}
+      disabled={props.disabled}
+      title={props.task.status === "done" ? "Maßnahme wieder öffnen" : "Maßnahme erledigen"}
+      aria-label={props.task.status === "done" ? "Maßnahme wieder öffnen" : "Maßnahme erledigen"}
+      onClick={(event) => {
+        event.stopPropagation();
+        props.onToggle();
+      }}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      {props.task.status === "done" ? <CheckCircle2 size={17} /> : <Circle size={17} />}
+    </button>
+  );
+}
+
+function PartyTaskEditModal(props: {
+  task: Task;
+  onCancel: () => void;
+  onSave: (input: { title: string; dueAt: string | null; notes: string | null }) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(props.task.title);
+  const [dueAt, setDueAt] = useState(() => taskDueAtToLocalDateTimeInput(props.task.dueAt));
+  const [notes, setNotes] = useState(props.task.notes ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <EditModal
+      title="Maßnahme anpassen"
+      label="Personenbezogene Maßnahme anpassen"
+      onCancel={props.onCancel}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!title.trim() || saving) return;
+        setSaving(true);
+        setError(null);
+        try {
+          await props.onSave({
+            title: title.trim(),
+            dueAt: localDateTimeInputToIso(dueAt),
+            notes: notes.trim() || null
+          });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Maßnahme konnte nicht gespeichert werden.");
+        } finally {
+          setSaving(false);
+        }
+      }}
+      footer={(
+        <>
+          <button type="submit" className="primary-button" disabled={!title.trim() || saving}>Speichern</button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={saving}>Abbrechen</button>
+        </>
+      )}
+    >
+      <label>
+        Fällig
+        <input type="datetime-local" value={dueAt} disabled={saving} onChange={(event) => setDueAt(event.target.value)} />
+      </label>
+      <label>
+        Titel
+        <input autoFocus value={title} disabled={saving} onChange={(event) => setTitle(event.target.value)} />
+      </label>
+      <label>
+        Beschreibung
+        <textarea rows={6} value={notes} disabled={saving} onChange={(event) => setNotes(event.target.value)} />
+      </label>
+      {error ? <p className="inline-error">{error}</p> : null}
+    </EditModal>
+  );
+}
+
+function PartyTaskCreateModal(props: {
+  onCancel: () => void;
+  onCreate: (input: { title: string; dueAt: string | null; notes: string | null }) => Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  const [dueAt, setDueAt] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <EditModal
+      title="Maßnahme"
+      label="Personenbezogene Maßnahme anlegen"
+      onCancel={props.onCancel}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!title.trim() || saving) return;
+        setSaving(true);
+        setError(null);
+        try {
+          await props.onCreate({
+            title: title.trim(),
+            dueAt: localDateTimeInputToIso(dueAt),
+            notes: notes.trim() || null
+          });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Maßnahme konnte nicht angelegt werden.");
+        } finally {
+          setSaving(false);
+        }
+      }}
+      footer={(
+        <>
+          <button type="submit" className="primary-button" disabled={!title.trim() || saving}>Anlegen</button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={saving}>Abbrechen</button>
+        </>
+      )}
+    >
+      <label>
+        Titel
+        <input autoFocus value={title} disabled={saving} onChange={(event) => setTitle(event.target.value)} />
+      </label>
+      <label>
+        Fällig
+        <input type="datetime-local" value={dueAt} disabled={saving} onChange={(event) => setDueAt(event.target.value)} />
+      </label>
+      <label>
+        Beschreibung
+        <textarea rows={5} value={notes} disabled={saving} onChange={(event) => setNotes(event.target.value)} />
+      </label>
+      {error ? <p className="inline-error">{error}</p> : null}
+    </EditModal>
+  );
+}
+
+function PartyTimelineEntryModal(props: {
+  entry?: PartyTimelineEntry | null;
+  onCancel: () => void;
+  onSave: (input: { kind: PartyTimelineEntryKind; direction: PartyTimelineEntry["direction"]; occurredAt: string | null; title: string; body: string | null }) => Promise<void>;
+}) {
+  const initialDate = props.entry?.occurredAt ? new Date(props.entry.occurredAt) : new Date();
+  const [kind, setKind] = useState<PartyTimelineEntryKind>(props.entry?.kind ?? "conversation");
+  const [occurredAt, setOccurredAt] = useState(() => formatLocalDateTimeInput(initialDate));
+  const [title, setTitle] = useState(props.entry?.title ?? "");
+  const [body, setBody] = useState(props.entry?.body ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const editing = Boolean(props.entry);
+
+  return (
+    <EditModal
+      title={editing ? "Kommunikationsnotiz bearbeiten" : "Kommunikation dokumentieren"}
+      label="Kommunikation dokumentieren"
+      onCancel={props.onCancel}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!title.trim() || saving) return;
+        setSaving(true);
+        setError(null);
+        try {
+          await props.onSave({
+            kind,
+            direction: defaultPartyTimelineDirection(kind),
+            occurredAt: localDateTimeInputToIso(occurredAt),
+            title: title.trim(),
+            body: body.trim() || null
+          });
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Eintrag konnte nicht gespeichert werden.");
+        } finally {
+          setSaving(false);
+        }
+      }}
+      footer={(
+        <>
+          <button type="submit" className="primary-button" disabled={!title.trim() || saving}>Speichern</button>
+          <button type="button" className="small-button" onClick={props.onCancel} disabled={saving}>Abbrechen</button>
+        </>
+      )}
+    >
+      <div className="modal-two-column">
+        <label>
+          Typ
+          <select value={kind} disabled={saving} onChange={(event) => setKind(event.target.value as PartyTimelineEntryKind)}>
+            <option value="conversation">Gespräch</option>
+            <option value="letter_received">Brief erhalten</option>
+            <option value="letter_sent">Brief gesendet</option>
+            <option value="visit">Besuch</option>
+            <option value="note">Notiz</option>
+          </select>
+        </label>
+        <label>
+          Zeitpunkt
+          <input type="datetime-local" value={occurredAt} disabled={saving} onChange={(event) => setOccurredAt(event.target.value)} />
+        </label>
+      </div>
+      <label>
+        Titel
+        <input autoFocus value={title} disabled={saving} onChange={(event) => setTitle(event.target.value)} />
+      </label>
+      <label>
+        Notiz
+        <textarea rows={8} value={body} disabled={saving} onChange={(event) => setBody(event.target.value)} />
+      </label>
+      {error ? <p className="inline-error">{error}</p> : null}
+    </EditModal>
+  );
+}
+
+function taskDueAtToLocalDateTimeInput(value: string | null): string {
+  if (!value) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return `${value}T00:00`;
+  return formatLocalDateTimeInput(new Date(value));
+}
+
+function formatPartyTaskDueAt(value: string): string {
+  return value.includes("T") ? formatDateTimeForUi(value) : formatTaskDueDate(value);
+}
+
+function formatLocalDateTimeInput(date: Date): string {
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function localDateTimeInputToIso(value: string): string | null {
+  if (!value) return null;
+  const [dateValue, timeValue = "00:00"] = value.split("T");
+  const [year, month, day] = dateValue.split("-").map(Number);
+  const [hours = 0, minutes = 0] = timeValue.split(":").map(Number);
+  const date = new Date(year, month - 1, day, hours, minutes);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function GmailComposeModal(props: {
@@ -669,6 +1161,28 @@ function emailDirectionIcon(direction: GmailMessage["direction"]): ReactNode {
   if (direction === "inbound") return <Inbox size={17} strokeWidth={2.2} />;
   if (direction === "outbound") return <Send size={17} strokeWidth={2.2} />;
   return <Mail size={17} strokeWidth={2.2} />;
+}
+
+function partyTimelineKindIcon(kind: PartyTimelineEntryKind): ReactNode {
+  if (kind === "letter_received") return <Inbox size={17} strokeWidth={2.2} />;
+  if (kind === "letter_sent") return <Send size={17} strokeWidth={2.2} />;
+  if (kind === "visit") return <Users size={17} strokeWidth={2.2} />;
+  return <MessageSquareText size={17} strokeWidth={2.2} />;
+}
+
+function partyTimelineKindLabel(kind: PartyTimelineEntryKind): string {
+  if (kind === "conversation") return "Gespräch";
+  if (kind === "letter_received") return "Brief erhalten";
+  if (kind === "letter_sent") return "Brief gesendet";
+  if (kind === "visit") return "Besuch";
+  return "Notiz";
+}
+
+function defaultPartyTimelineDirection(kind: PartyTimelineEntryKind): PartyTimelineEntry["direction"] {
+  if (kind === "letter_received") return "inbound";
+  if (kind === "letter_sent") return "outbound";
+  if (kind === "conversation" || kind === "visit") return "bidirectional";
+  return "none";
 }
 
 function PersonCoreModal(props: {

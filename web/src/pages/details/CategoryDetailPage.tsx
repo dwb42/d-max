@@ -69,7 +69,7 @@ function LifeAreaDetailView(props: {
   const category = props.category;
   const initiatives = props.initiatives.filter((initiative) => initiative.categoryId === category.id);
   const initiativeIds = new Set(initiatives.map((initiative) => initiative.id));
-  const tasks = props.tasks.filter((task) => initiativeIds.has(task.initiativeId));
+  const tasks = props.tasks.filter((task) => task.initiativeId !== null && initiativeIds.has(task.initiativeId));
 
   return (
     <>
@@ -238,7 +238,7 @@ function CategoryRelatedWorkSection(props: {
 
         <RelationGroup title="Maßnahmen" emptyMode="none">
           {tasks.map((task) => {
-            const initiative = initiativeById.get(task.initiativeId) ?? null;
+            const initiative = task.initiativeId ? initiativeById.get(task.initiativeId) ?? null : null;
             return (
               <RelationItem
                 key={task.id}

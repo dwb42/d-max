@@ -5,7 +5,7 @@ import { tools } from "../../src/tools/index.js";
 
 describe("OpenClaw web config tools", () => {
   it.each(["openclaw/config.web.json", "openclaw/config.staging-512.json", "openclaw/config.production.json", "openclaw/config.production-512.json"])(
-    "allows exactly the current d-max tools for the main agent in %s",
+    "allows exactly the current DMAX tools for the main agent in %s",
     (configPathInput) => {
       const config = readOpenClawConfig(configPathInput);
       const mainAgent = config.agents?.list?.find((agent) => agent.id === "main");
@@ -44,6 +44,10 @@ describe("OpenClaw web config tools", () => {
         "d-max__updateTaskChecklistItem",
         "d-max__deleteTaskChecklistItem",
         "d-max__reorderTaskChecklistItems",
+        "d-max__listPartyTimelineEntries",
+        "d-max__createPartyTimelineEntry",
+        "d-max__updatePartyTimelineEntry",
+        "d-max__deletePartyTimelineEntry",
         "d-max__listMediaAttachments",
         "d-max__attachMediaToEntity",
         "d-max__updateMediaAttachment",

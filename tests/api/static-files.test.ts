@@ -34,7 +34,7 @@ describe("static web fallback", () => {
       expect(asset.status).toBe(200);
       expect(asset.headers.get("content-type")).toContain("text/javascript");
       expect(asset.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
-      expect(await asset.text()).toBe("console.log('d-max');");
+      expect(await asset.text()).toBe("console.log('DMAX');");
 
       const missingAsset = await fetch(`${baseUrl}/assets/missing.js`);
       expect(missingAsset.status).toBe(404);
@@ -66,7 +66,7 @@ function createWebDist(): string {
   tempDirs.push(distDir);
   mkdirSync(path.join(distDir, "assets"));
   writeFileSync(path.join(distDir, "index.html"), "<!doctype html><div id=\"root\"></div>");
-  writeFileSync(path.join(distDir, "assets", "app.js"), "console.log('d-max');");
+  writeFileSync(path.join(distDir, "assets", "app.js"), "console.log('DMAX');");
   return distDir;
 }
 

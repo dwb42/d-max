@@ -29,7 +29,7 @@ const updateCategoryInput = z.object({
 export const categoryTools: ToolDefinition<any>[] = [
   defineTool({
     name: "listCategories",
-    description: "List d-max categories/life areas, including their Markdown description when present.",
+    description: "List DMAX categories/life areas, including their Markdown description when present.",
     inputSchema: listCategoriesInput,
     run: (_input, context) => {
       if (!context.db) {
@@ -44,7 +44,7 @@ export const categoryTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "createCategory",
-    description: "Create a d-max category/life area. The optional description field is Markdown for scope, current situation, target state, and high-level measures.",
+    description: "Create a DMAX category/life area. The optional description field is Markdown for scope, current situation, target state, and high-level measures.",
     inputSchema: createCategoryInput,
     run: (input, context) => {
       if (!context.db) {
@@ -59,7 +59,7 @@ export const categoryTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "updateCategory",
-    description: "Update a d-max category/life area, including its Markdown description.",
+    description: "Update a DMAX category/life area, including its Markdown description.",
     inputSchema: updateCategoryInput,
     run: (input, context) => {
       if (!context.db) {

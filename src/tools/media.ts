@@ -45,7 +45,7 @@ export const mediaTools: ToolDefinition<any>[] = [
   defineTool({
     name: "listMediaAttachments",
     description:
-      "List media attachments for a d-max category, initiative, or task. Returns metadata, captions, and derived text only; raw files are served by the app API.",
+      "List media attachments for a DMAX category, initiative, or task. Returns metadata, captions, and derived text only; raw files are served by the app API.",
     inputSchema: listMediaAttachmentsInput,
     run: (input, context) => {
       if (!context.db) {

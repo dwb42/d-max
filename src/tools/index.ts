@@ -5,6 +5,7 @@ import { initiativeRelationTools } from "./initiative-relations.js";
 import { initiativeTools } from "./initiatives.js";
 import { mediaTools } from "./media.js";
 import { partyTools } from "./parties.js";
+import { partyTimelineTools } from "./party-timeline.js";
 import { taskTools } from "./tasks.js";
 
 export const tools: ToolDefinition<any>[] = [
@@ -13,6 +14,7 @@ export const tools: ToolDefinition<any>[] = [
   ...initiativeRelationTools,
   ...initiativeMindmapTools,
   ...taskTools,
+  ...partyTimelineTools,
   ...mediaTools,
   ...partyTools
 ];

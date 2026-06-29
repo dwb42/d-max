@@ -56,7 +56,7 @@ export async function createLiveKitAgentToken(input: { roomName: string }): Prom
   const identity = `dmax-agent-${randomUUID()}`;
   const token = new AccessToken(env.livekitApiKey, env.livekitApiSecret, {
     identity,
-    name: "d-max Voice Agent",
+    name: "DMAX Voice Agent",
     metadata: JSON.stringify({ role: "dmax_voice_agent" })
   });
 

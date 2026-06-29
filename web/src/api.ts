@@ -51,7 +51,10 @@ import type {
   ContactPointType,
   CreatePartyAddressInput,
   PartyAddress,
-  PartyContactPoint
+  PartyContactPoint,
+  PartyTimelineEntry,
+  PartyTimelineEntryDirection,
+  PartyTimelineEntryKind
 } from "./types.js";
 
 export async function fetchOverview(): Promise<AppOverview> {
@@ -721,7 +724,7 @@ export async function reorderTasks(initiativeId: number, taskIds: number[]): Pro
   });
 }
 
-export async function createTask(input: { initiativeId: number; title: string; priority?: Task["priority"]; notes?: string | null; dueAt?: string | null }): Promise<Task> {
+export async function createTask(input: { initiativeId?: number | null; primaryPartyId?: number | null; title: string; priority?: Task["priority"]; notes?: string | null; dueAt?: string | null }): Promise<Task> {
   const response = await request<{ task: Task }>("/api/tasks", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -904,7 +907,8 @@ export async function updateTaskStatus(id: number, status: Task["status"]) {
 export async function updateTask(
   id: number,
   input: {
-    initiativeId?: number;
+    initiativeId?: number | null;
+    primaryPartyId?: number | null;
     title?: string;
     status?: Task["status"];
     priority?: Task["priority"];
@@ -918,6 +922,61 @@ export async function updateTask(
     body: JSON.stringify(input)
   });
   return response.task;
+}
+
+export async function fetchPartyTasks(partyId: number): Promise<Task[]> {
+  const response = await request<{ tasks: Task[] }>(`/api/tasks?primaryPartyId=${encodeURIComponent(String(partyId))}`);
+  return response.tasks;
+}
+
+export async function fetchPartyTimelineEntries(partyId: number): Promise<PartyTimelineEntry[]> {
+  const response = await request<{ entries: PartyTimelineEntry[] }>(`/api/parties/${partyId}/timeline-entries`);
+  return response.entries;
+}
+
+export async function createPartyTimelineEntry(
+  partyId: number,
+  input: {
+    kind: PartyTimelineEntryKind;
+    direction?: PartyTimelineEntryDirection;
+    occurredAt?: string | null;
+    title: string;
+    body?: string | null;
+    relatedTaskId?: number | null;
+  }
+): Promise<PartyTimelineEntry> {
+  const response = await request<{ entry: PartyTimelineEntry }>(`/api/parties/${partyId}/timeline-entries`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.entry;
+}
+
+export async function updatePartyTimelineEntry(
+  partyId: number,
+  entryId: number,
+  input: {
+    kind?: PartyTimelineEntryKind;
+    direction?: PartyTimelineEntryDirection;
+    occurredAt?: string | null;
+    title?: string;
+    body?: string | null;
+    relatedTaskId?: number | null;
+  }
+): Promise<PartyTimelineEntry> {
+  const response = await request<{ entry: PartyTimelineEntry }>(`/api/parties/${partyId}/timeline-entries/${entryId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.entry;
+}
+
+export async function deletePartyTimelineEntry(partyId: number, entryId: number): Promise<void> {
+  await request<{ deleted: true; id: number }>(`/api/parties/${partyId}/timeline-entries/${entryId}`, {
+    method: "DELETE"
+  });
 }
 
 export async function createTaskChecklistItem(taskId: number, input: { name: string }): Promise<TaskChecklistItem> {

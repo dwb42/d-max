@@ -37,7 +37,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`d-max voice server listening on http://localhost:${port}`);
+  console.log(`DMAX voice server listening on http://localhost:${port}`);
 });
 
 function readBody(req: http.IncomingMessage): Promise<string> {

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DMAX">
+  <rect width="64" height="64" rx="12" fill="#101714" />
+  <path
+    fill="#d9f36a"
+    fill-rule="evenodd"
+    d="M14 10h20c12 0 20 9 20 22s-8 22-20 22H14V10Zm12 11v22h7.5C40 43 44 38.5 44 32S40 21 33.5 21H26Z"
+  />
+</svg>

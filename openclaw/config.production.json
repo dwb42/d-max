@@ -22,7 +22,7 @@
     "list": [
       {
         "id": "main",
-        "name": "d-max Default Agent",
+        "name": "DMAX Default Agent",
         "default": true,
         "workspace": "/app/openclaw/workspace",
         "tools": {
@@ -57,6 +57,10 @@
             "d-max__updateTaskChecklistItem",
             "d-max__deleteTaskChecklistItem",
             "d-max__reorderTaskChecklistItems",
+            "d-max__listPartyTimelineEntries",
+            "d-max__createPartyTimelineEntry",
+            "d-max__updatePartyTimelineEntry",
+            "d-max__deletePartyTimelineEntry",
             "d-max__listMediaAttachments",
             "d-max__attachMediaToEntity",
             "d-max__updateMediaAttachment",
@@ -97,7 +101,7 @@
       },
       {
         "id": "dmax-research",
-        "name": "d-max Research Agent",
+        "name": "DMAX Research Agent",
         "workspace": "/app/openclaw/workspace/dmax-research",
         "tools": {
           "allow": [
@@ -131,7 +135,7 @@
       },
       {
         "id": "dmax-google-workspace",
-        "name": "d-max Google Workspace Agent",
+        "name": "DMAX Google Workspace Agent",
         "workspace": "/app/openclaw/workspace/dmax-google-workspace",
         "tools": {
           "allow": [

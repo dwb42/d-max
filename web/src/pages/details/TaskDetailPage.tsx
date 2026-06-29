@@ -4,7 +4,7 @@ import { CalendarDays, CheckCircle2, Circle, Pencil, Plus, Trash2, X } from "luc
 import { DescriptionBlock, EditModal, EmptyState, EntityDetailPage, EntityHeader, ErrorState, InlineEditableText, MetadataGrid, SectionBlock } from "../../components/ui/index.js";
 import type { Category, Initiative, Organization, ParticipantRoleType, Person, Task, TaskChecklistItem, TaskDetail } from "../../types.js";
 import { MediaAttachmentsPanel, ParticipantsPanel } from "./SharedDetailPanels.js";
-import { type UpdateTaskInput, datePart, displayInitiativeName, dropAfter, formatDateTimeForUi, formatTaskDueDate, initiativeTypeLabel, moveIdToDropPosition, taskPriorityLabel, taskPriorityOptions, taskStatusLabel } from "./detailUtils.js";
+import { type UpdateTaskInput, datePart, displayInitiativeName, dropAfter, formatDateTimeForUi, formatTaskDueDate, initiativeTypeLabel, moveIdToDropPosition, personName, taskPriorityLabel, taskPriorityOptions, taskStatusLabel } from "./detailUtils.js";
 
 export function TaskHeaderTitle(props: {
   task: Task | null;
@@ -121,6 +121,8 @@ export function TaskDetailView(props: {
     isPrimary?: boolean;
   }) => Promise<void>;
   onDeleteParticipant: (participantId: number) => Promise<void>;
+  onOpenPerson: (partyId: number) => void;
+  onOpenOrganization: (partyId: number) => void;
   onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void>;
   onMoveTask: (taskId: number, targetProjectId: number) => Promise<void>;
   onCreateChecklistItem: (taskId: number, name: string) => Promise<void>;
@@ -157,6 +159,21 @@ export function TaskDetailView(props: {
   const checklistItems = props.detail.checklistItems ?? [];
   const participants = props.detail.participants ?? [];
   const mediaAttachments = props.detail.mediaAttachments ?? [];
+  const primaryPerson = task.primaryPartyId ? props.people.find((person) => person.id === task.primaryPartyId) ?? null : null;
+  const primaryOrganization = !primaryPerson && task.primaryPartyId ? props.organizations.find((organization) => organization.id === task.primaryPartyId) ?? null : null;
+  const primaryContext = primaryPerson ? {
+    partyId: primaryPerson.id,
+    partyType: "person" as const,
+    displayName: personName(primaryPerson),
+    meta: "Primär · Personenmaßnahme",
+    detail: "Diese Maßnahme hängt direkt an dieser Person."
+  } : primaryOrganization ? {
+    partyId: primaryOrganization.id,
+    partyType: "organization" as const,
+    displayName: primaryOrganization.displayName,
+    meta: "Primär · Organisationsmaßnahme",
+    detail: "Diese Maßnahme hängt direkt an dieser Organisation."
+  } : null;
   const checklistDone = checklistItems.filter((item) => item.status === "done").length;
   const currentCategoryId = category?.id ?? null;
   const moveProjectCandidates = props.projects
@@ -192,7 +209,7 @@ export function TaskDetailView(props: {
         },
         { label: "Lebensbereich", value: category?.name ?? null },
         { label: "Checkliste", value: checklistItems.length > 0 ? `${checklistDone}/${checklistItems.length}` : null },
-        { label: "Beteiligte", value: participants.length > 0 ? String(participants.length) : null },
+        { label: "Beteiligte", value: participants.length + (primaryContext ? 1 : 0) > 0 ? String(participants.length + (primaryContext ? 1 : 0)) : null },
         { label: "Medien", value: mediaAttachments.length > 0 ? String(mediaAttachments.length) : null },
         { label: "Erstellt", value: task.createdAt ? formatDateTimeForUi(task.createdAt) : null },
         { label: "Aktualisiert", value: task.updatedAt ? formatDateTimeForUi(task.updatedAt) : null },
@@ -220,10 +237,13 @@ export function TaskDetailView(props: {
           people={props.people}
           organizations={props.organizations}
           roleTypes={props.participantRoleTypes}
+          primaryContext={primaryContext}
           surface="section"
           createMode="modal"
           onCreateParticipant={props.onCreateParticipant}
           onDeleteParticipant={props.onDeleteParticipant}
+          onOpenPerson={props.onOpenPerson}
+          onOpenOrganization={props.onOpenOrganization}
         />
         <MediaAttachmentsPanel
           entityType="task"

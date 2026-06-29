@@ -8,6 +8,14 @@ import { displayInitiativeName, documentExtension, dropAfter, entityTypeLabel, f
 
 export { MediaAttachmentsPanel, ParticipantsPanel, TaskCreateInlineForm, TasksView };
 
+type PrimaryParticipantContext = {
+  partyId: number;
+  partyType: "person" | "organization";
+  displayName: string;
+  meta: string;
+  detail?: string | null;
+};
+
 function Panel(props: { title: string; children: ReactNode }) {
   return (
     <section className="panel">
@@ -42,6 +50,7 @@ function ParticipantsPanel(props: {
   people: Person[];
   organizations: Organization[];
   roleTypes: ParticipantRoleType[];
+  primaryContext?: PrimaryParticipantContext | null;
   surface?: "panel" | "section";
   createMode?: "inline" | "modal";
   onCreateParticipant: (input: {
@@ -119,9 +128,28 @@ function ParticipantsPanel(props: {
       </label>
     </>
   );
+  const participants = props.primaryContext
+    ? props.participants.filter((participant) => participant.partyId !== props.primaryContext?.partyId)
+    : props.participants;
+  const hasParticipants = participants.length > 0 || Boolean(props.primaryContext);
+  const primaryContextOpen =
+    props.primaryContext?.partyType === "person"
+      ? props.onOpenPerson
+      : props.onOpenOrganization;
+  const primaryContextItem = props.primaryContext ? (
+    <RelationItem
+      key={`primary-context:${props.primaryContext.partyId}`}
+      icon={props.primaryContext.partyType === "person" ? <Users size={16} /> : <Building2 size={16} />}
+      title={props.primaryContext.displayName}
+      meta={props.primaryContext.meta}
+      detail={props.primaryContext.detail}
+      onOpen={primaryContextOpen ? () => primaryContextOpen(props.primaryContext!.partyId) : undefined}
+    />
+  ) : null;
   const relationList = props.surface === "section" ? (
     <RelationList emptyMode={createMode === "modal" ? "none" : "inline"} emptyTitle="Noch keine Beteiligten.">
-      {props.participants.map((participant) => {
+      {primaryContextItem}
+      {participants.map((participant) => {
         const detail = participantContactDetail(participant);
         const openParticipant =
           participant.party.type === "person"
@@ -163,8 +191,18 @@ function ParticipantsPanel(props: {
     </RelationList>
   ) : (
     <div className="relationship-list">
-      {props.participants.length === 0 ? <p className="muted-text">Noch keine Beteiligten.</p> : null}
-      {props.participants.map((participant) => {
+      {!hasParticipants ? <p className="muted-text">Noch keine Beteiligten.</p> : null}
+      {props.primaryContext ? (
+        <div className="relationship-row" key={`primary-context:${props.primaryContext.partyId}`}>
+          <div className="entity-icon">{props.primaryContext.partyType === "person" ? <Users size={16} /> : <Building2 size={16} />}</div>
+          <div>
+            <strong>{props.primaryContext.displayName}</strong>
+            <p>{props.primaryContext.meta}</p>
+            {props.primaryContext.detail ? <p>{props.primaryContext.detail}</p> : null}
+          </div>
+        </div>
+      ) : null}
+      {participants.map((participant) => {
         const detail = participantContactDetail(participant);
         return (
           <div className="relationship-row" key={participant.id}>
@@ -1092,7 +1130,7 @@ function TasksView(props: {
             <h2>{task.title}</h2>
             {showInitiativeName || task.dueAt ? (
               <p className="task-row-meta">
-                {showInitiativeName ? (
+                {showInitiativeName && task.initiativeId ? (
                   <span>{initiativeById.get(task.initiativeId) ? displayInitiativeName(initiativeById.get(task.initiativeId)!) : `Initiative ${task.initiativeId}`}</span>
                 ) : null}
                 {task.dueAt ? (

@@ -152,7 +152,8 @@ export type PlanningCanvasViewData = {
 
 export type Task = {
   id: number;
-  initiativeId: number;
+  initiativeId: number | null;
+  primaryPartyId: number | null;
   title: string;
   status: "open" | "done";
   priority: "low" | "normal" | "high" | "urgent";
@@ -355,6 +356,31 @@ export type OrganizationDetail = {
   participants: EntityParticipant[];
   contactPoints: PartyContactPoint[];
   addresses: PartyAddress[];
+};
+
+export type PartyTimelineEntryKind = "conversation" | "letter_received" | "letter_sent" | "visit" | "note";
+export type PartyTimelineEntryDirection = "inbound" | "outbound" | "bidirectional" | "none";
+
+export type PartyTimelineEntry = {
+  id: number;
+  kind: PartyTimelineEntryKind;
+  direction: PartyTimelineEntryDirection;
+  occurredAt: string;
+  title: string;
+  body: string | null;
+  relatedTaskId: number | null;
+  createdAt: string;
+  updatedAt: string;
+  parties: Array<{
+    id: number;
+    entryId: number;
+    partyId: number;
+    partyType: PartyType;
+    partyDisplayName: string;
+    role: "primary" | "participant" | "related" | "organization_context";
+    createdAt: string;
+    updatedAt: string;
+  }>;
 };
 
 export type CalendarEntryType = "initiative_focus" | "task_work" | "standalone";

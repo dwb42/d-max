@@ -427,7 +427,7 @@ Prompt-Längen aus der Runtime-Simulation:
 - Falsche Perspektive:
   - Keine harte falsche Perspektive gefunden. Die zehn Kernmodi unterscheiden sich ausreichend.
 - Sprachqualität:
-  - Gemischte deutsche Modus-Instructions mit englischem Wrapper (`Current d-max conversation context`, `Context data`) sind funktional, aber unelegant.
+  - Gemischte deutsche Modus-Instructions mit englischem Wrapper (`Current DMAX conversation context`, `Context data`) sind funktional, aber unelegant.
   - Category Detail ist vollständig deutscher und wirkt dadurch konsistenter.
 - Zu viel Kontext:
   - Overview-Modi tendieren zu Wiederholung und könnten bei realer Datenmenge schnell die höchste Prompt-Länge erzeugen.

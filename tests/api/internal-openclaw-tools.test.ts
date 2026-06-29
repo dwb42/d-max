@@ -107,7 +107,7 @@ describe("internal OpenClaw tool endpoint", () => {
     expect(body.ok).toBe(true);
     expect(body.result).toEqual({
       ok: false,
-      error: "initiativeId is required unless useInboxIfInitiativeMissing is true"
+      error: "initiativeId or primaryPartyId is required unless useInboxIfInitiativeMissing is true"
     });
   });
 

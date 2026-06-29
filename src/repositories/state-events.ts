@@ -9,6 +9,7 @@ export type StateEventEntityType =
   | "initiative_relation"
   | "planning_canvas_node"
   | "task"
+  | "communication_event"
   | "calendar_entry"
   | "calendar_event_visibility"
   | "calendar_source"

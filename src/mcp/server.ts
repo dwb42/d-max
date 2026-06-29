@@ -84,7 +84,7 @@ const transport = new StdioServerTransport();
 recordMcp("mcp_transport_connect_started");
 await mcpServer.connect(transport);
 recordMcp("mcp_transport_connected");
-console.error(`d-max MCP server started with ${runner.list().length} tools.`);
+console.error(`DMAX MCP server started with ${runner.list().length} tools.`);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

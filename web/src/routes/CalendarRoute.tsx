@@ -121,6 +121,7 @@ export default function CalendarRoute(props: {
   const otherActiveProjects = activeProjects.filter((initiative) => !projectTimeframeIncludesDate(initiative, today));
   const tasksByInitiative = new Map<number, Task[]>();
   for (const task of props.tasks.filter((task) => task.status === "open")) {
+    if (!task.initiativeId) continue;
     const current = tasksByInitiative.get(task.initiativeId) ?? [];
     current.push(task);
     tasksByInitiative.set(task.initiativeId, current);

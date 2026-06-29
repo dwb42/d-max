@@ -140,7 +140,7 @@ async function runValidation(input: Args): Promise<Summary> {
     tool.push(await runChatSample(input, {
       kind: "tool",
       index: i,
-      message: "Use the d-max listCategories tool now. After the tool result returns, reply with exactly: TOOL_OK"
+      message: "Use the DMAX listCategories tool now. After the tool result returns, reply with exactly: TOOL_OK"
     }));
   }
 

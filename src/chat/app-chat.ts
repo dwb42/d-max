@@ -204,7 +204,7 @@ export class AppChatService {
     });
     const source = input.source ?? "app_text";
     if (input.conversationId && this.activeConversationTurns.has(input.conversationId)) {
-      throw new Error("In dieser Chat-Session läuft bereits ein Agent-Turn. Warte kurz, bis d-max geantwortet hat.");
+      throw new Error("In dieser Chat-Session läuft bereits ein Agent-Turn. Warte kurz, bis DMAX geantwortet hat.");
     }
 
     const resolved = this.resolveInputContext(input);
@@ -275,7 +275,7 @@ export class AppChatService {
     openClawSessionKey?: string | null;
   }> {
     if (this.activeConversationTurns.has(prepared.conversationId)) {
-      throw new Error("In dieser Chat-Session läuft bereits ein Agent-Turn. Warte kurz, bis d-max geantwortet hat.");
+      throw new Error("In dieser Chat-Session läuft bereits ein Agent-Turn. Warte kurz, bis DMAX geantwortet hat.");
     }
 
     this.activeConversationTurns.add(prepared.conversationId);
@@ -408,7 +408,7 @@ function openClawSessionKeyForConversation(conversationId: number): string {
 
 function openClawSessionLabelForConversation(conversationId: number, title?: string | null): string {
   const cleanedTitle = title?.trim();
-  const prefix = `d-max app conversation ${APP_CHAT_OPENCLAW_SESSION_VERSION} ${conversationId}`;
+  const prefix = `DMAX app conversation ${APP_CHAT_OPENCLAW_SESSION_VERSION} ${conversationId}`;
   return cleanedTitle ? `${prefix}: ${cleanedTitle}` : prefix;
 }
 
@@ -424,8 +424,8 @@ function createDiagnosticContext(
 }
 
 const OPENCLAW_TOOL_CONTEXT = [
-  "OpenClaw receives d-max MCP tools through the configured MCP server.",
-  "The full tool schemas are owned by OpenClaw at runtime; d-max does not inline those schemas into the message string.",
+  "OpenClaw receives DMAX MCP tools through the configured MCP server.",
+  "The full tool schemas are owned by OpenClaw at runtime; DMAX does not inline those schemas into the message string.",
   "",
   "Initiative behavior:",
   "- Initiatives have type: idea, project, or habit.",
@@ -438,12 +438,13 @@ const OPENCLAW_TOOL_CONTEXT = [
   "- Never treat a repeated request as confirmation for a lifecycle change. Ask for an explicit yes/confirmation first.",
   "- The MCP tool path does not trust self-set confirmed flags; a returned requiresConfirmation result means the change was not applied.",
   "",
-  "Known d-max tool surface:",
+  "Known DMAX tool surface:",
   "- Categories: listCategories, createCategory, updateCategory",
   "- Initiatives: listInitiatives, getInitiative, createInitiative, updateInitiative, archiveInitiative, updateInitiativeMarkdown",
   "- Initiative mindmaps: summarizeInitiativeMindmap, getInitiativeMindmap, draftMindmapChanges, commitMindmapChangeDraft, createMindmapFreestyleNode, updateMindmapFreestyleNode, deleteMindmapFreestyleNode. Use draftMindmapChanges for complex restructuring and commit only after explicit confirmation; do not convert freestyle nodes into tasks/initiatives unless asked.",
-  "- Tasks: listTasks, createTask, updateTask, completeTask, deleteTask. Task status is only open or done.",
+  "- Tasks: listTasks, createTask, updateTask, completeTask, deleteTask. Task status is only open or done. Use primaryPartyId for person/organization-owned measures; use initiativeId for initiative-owned measures; a task can have both.",
   "- Task checklists: listTaskChecklistItems, createTaskChecklistItem, updateTaskChecklistItem, deleteTaskChecklistItem, reorderTaskChecklistItems",
+  "- Manual party communication history: listPartyTimelineEntries, createPartyTimelineEntry, updatePartyTimelineEntry, deletePartyTimelineEntry. Use these for past conversations, letters, visits, and notes; use tasks for planned future actions.",
   "- Media: listMediaAttachments, attachMediaToEntity, updateMediaAttachment, deleteMediaAttachment, reorderMediaAttachments"
 ].join("\n");
 

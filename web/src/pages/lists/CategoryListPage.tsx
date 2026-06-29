@@ -59,7 +59,7 @@ function categoryListItemData(category: Category, initiatives: Initiative[], tas
     projectCount: categoryInitiatives.filter((initiative) => initiative.type === "project").length,
     ideaCount: categoryInitiatives.filter((initiative) => initiative.type === "idea").length,
     habitCount: categoryInitiatives.filter((initiative) => initiative.type === "habit").length,
-    taskCount: tasks.filter((task) => initiativeIds.has(task.initiativeId)).length
+    taskCount: tasks.filter((task) => task.initiativeId !== null && initiativeIds.has(task.initiativeId)).length
   };
 }
 
