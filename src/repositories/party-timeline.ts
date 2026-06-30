@@ -3,12 +3,14 @@ import { nowIso } from "../db/time.js";
 import type { PartyType } from "./parties.js";
 
 export type PartyTimelineEntryKind = "conversation" | "letter_received" | "letter_sent" | "visit" | "note";
+export type PartyTimelineEntryChannel = "phone" | "meeting" | "visit" | "letter" | "note" | "other";
 export type PartyTimelineEntryDirection = "inbound" | "outbound" | "bidirectional" | "none";
 export type PartyTimelineEntryPartyRole = "primary" | "participant" | "related" | "organization_context";
 
 export type PartyTimelineEntry = {
   id: number;
   kind: PartyTimelineEntryKind;
+  channel: PartyTimelineEntryChannel;
   direction: PartyTimelineEntryDirection;
   occurredAt: string;
   title: string;
@@ -33,6 +35,7 @@ export type PartyTimelineEntryParty = {
 export type CreatePartyTimelineEntryInput = {
   partyId: number;
   kind: PartyTimelineEntryKind;
+  channel?: PartyTimelineEntryChannel | null;
   direction?: PartyTimelineEntryDirection;
   occurredAt?: string | null;
   title: string;
@@ -44,6 +47,7 @@ export type CreatePartyTimelineEntryInput = {
 export type UpdatePartyTimelineEntryInput = {
   id: number;
   kind?: PartyTimelineEntryKind;
+  channel?: PartyTimelineEntryChannel | null;
   direction?: PartyTimelineEntryDirection;
   occurredAt?: string;
   title?: string;
@@ -54,6 +58,7 @@ export type UpdatePartyTimelineEntryInput = {
 type PartyTimelineEntryRow = {
   id: number;
   kind: PartyTimelineEntryKind;
+  channel: PartyTimelineEntryChannel | null;
   direction: PartyTimelineEntryDirection;
   occurred_at: string;
   title: string;
@@ -92,6 +97,20 @@ export class PartyTimelineRepository {
     return rows.map((row) => this.hydrate(row));
   }
 
+  listAllForParty(partyId: number): PartyTimelineEntry[] {
+    const rows = this.db
+      .prepare(
+        `select entry.*
+         from party_timeline_entries entry
+         join party_timeline_entry_parties link on link.entry_id = entry.id
+         where link.party_id = ?
+         group by entry.id
+         order by entry.occurred_at desc, entry.id desc`
+      )
+      .all(partyId) as PartyTimelineEntryRow[];
+    return rows.map((row) => this.hydrate(row));
+  }
+
   findById(id: number): PartyTimelineEntry | null {
     const row = this.db.prepare("select * from party_timeline_entries where id = ?").get(id) as PartyTimelineEntryRow | undefined;
     return row ? this.hydrate(row) : null;
@@ -103,11 +122,12 @@ export class PartyTimelineRepository {
       const result = this.db
         .prepare(
           `insert into party_timeline_entries
-            (kind, direction, occurred_at, title, body, related_task_id, created_at, updated_at)
-           values (?, ?, ?, ?, ?, ?, ?, ?)`
+            (kind, channel, direction, occurred_at, title, body, related_task_id, created_at, updated_at)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           input.kind,
+          input.channel ?? defaultChannel(input.kind),
           input.direction ?? defaultDirection(input.kind),
           input.occurredAt || now,
           input.title.trim(),
@@ -131,11 +151,12 @@ export class PartyTimelineRepository {
     this.db
       .prepare(
         `update party_timeline_entries
-         set kind = ?, direction = ?, occurred_at = ?, title = ?, body = ?, related_task_id = ?, updated_at = ?
+         set kind = ?, channel = ?, direction = ?, occurred_at = ?, title = ?, body = ?, related_task_id = ?, updated_at = ?
          where id = ?`
       )
       .run(
         input.kind ?? existing.kind,
+        input.channel === undefined ? existing.channel : input.channel ?? defaultChannel(input.kind ?? existing.kind),
         input.direction ?? existing.direction,
         input.occurredAt ?? existing.occurredAt,
         input.title?.trim() ?? existing.title,
@@ -180,6 +201,7 @@ export class PartyTimelineRepository {
     return {
       id: row.id,
       kind: row.kind,
+      channel: row.channel ?? defaultChannel(row.kind),
       direction: row.direction,
       occurredAt: row.occurred_at,
       title: row.title,
@@ -221,6 +243,13 @@ function defaultDirection(kind: PartyTimelineEntryKind): PartyTimelineEntryDirec
   if (kind === "letter_sent") return "outbound";
   if (kind === "conversation" || kind === "visit") return "bidirectional";
   return "none";
+}
+
+function defaultChannel(kind: PartyTimelineEntryKind): PartyTimelineEntryChannel {
+  if (kind === "letter_received" || kind === "letter_sent") return "letter";
+  if (kind === "visit") return "visit";
+  if (kind === "note") return "note";
+  return "other";
 }
 
 function clean(value: string | null | undefined): string | null {

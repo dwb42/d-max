@@ -51,6 +51,7 @@ describe("party communication model", () => {
 
     expect(entry).toMatchObject({
       kind: "letter_received",
+      channel: "letter",
       direction: "inbound",
       relatedTaskId: task.id,
       parties: [expect.objectContaining({ partyId: person.id, role: "primary" })]

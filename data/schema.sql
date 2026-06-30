@@ -445,6 +445,7 @@ create table if not exists party_addresses (
 create table if not exists party_timeline_entries (
   id integer primary key,
   kind text not null check (kind in ('conversation', 'letter_received', 'letter_sent', 'visit', 'note')),
+  channel text check (channel in ('phone', 'meeting', 'visit', 'letter', 'note', 'other')),
   direction text not null default 'none' check (direction in ('inbound', 'outbound', 'bidirectional', 'none')),
   occurred_at text not null,
   title text not null,
@@ -465,7 +466,7 @@ create table if not exists party_timeline_entry_parties (
 );
 
 create table if not exists app_chat_messages (
-  id integer primary key,
+  id integer primary key autoincrement,
   conversation_id integer references app_conversations(id),
   role text not null check (role in ('user', 'assistant')),
   content text not null,
@@ -480,7 +481,7 @@ create table if not exists app_chat_messages (
 );
 
 create table if not exists app_conversations (
-  id integer primary key,
+  id integer primary key autoincrement,
   title text,
   context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations', 'category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization')),
   context_entity_id integer,
@@ -493,7 +494,7 @@ create table if not exists app_conversations (
 );
 
 create table if not exists app_prompt_logs (
-  id integer primary key,
+  id integer primary key autoincrement,
   conversation_id integer references app_conversations(id),
   user_message_id integer references app_chat_messages(id),
   openclaw_session_id text not null,
@@ -550,6 +551,7 @@ create index if not exists idx_tasks_status on tasks(status);
 create index if not exists idx_tasks_priority on tasks(priority);
 create index if not exists idx_tasks_due_at on tasks(due_at);
 create index if not exists idx_party_timeline_entries_occurred on party_timeline_entries(occurred_at desc, id desc);
+create index if not exists idx_party_timeline_entries_channel on party_timeline_entries(channel, occurred_at desc, id desc);
 create index if not exists idx_party_timeline_entries_task on party_timeline_entries(related_task_id);
 create index if not exists idx_party_timeline_entry_parties_party on party_timeline_entry_parties(party_id, entry_id);
 create index if not exists idx_party_timeline_entry_parties_entry on party_timeline_entry_parties(entry_id, party_id);

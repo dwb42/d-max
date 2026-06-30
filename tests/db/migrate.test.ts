@@ -83,6 +83,7 @@ describe("migrate", () => {
       const organizationColumns = db.prepare("pragma table_info(organizations)").all() as Array<{ name: string }>;
       const relationshipTypeCount = db.prepare("select count(*) as count from relationship_types where is_system = 1").get() as { count: number };
       const participantRoleTypeCount = db.prepare("select count(*) as count from participant_role_types where is_system = 1").get() as { count: number };
+      const partyTimelineColumns = db.prepare("pragma table_info(party_timeline_entries)").all() as Array<{ name: string }>;
       const legacyTask = db.prepare("select status, completed_at from tasks where id = 1").get() as {
         status: string;
         completed_at: string | null;
@@ -119,6 +120,7 @@ describe("migrate", () => {
       expect(organizationColumns.some((column) => column.name === "markdown")).toBe(true);
       expect(relationshipTypeCount.count).toBeGreaterThanOrEqual(10);
       expect(participantRoleTypeCount.count).toBeGreaterThanOrEqual(12);
+      expect(partyTimelineColumns.some((column) => column.name === "channel")).toBe(true);
       expect(initiative.type).toBe("project");
       expect(initiative.start_date).toBeNull();
       expect(initiative.end_date).toBeNull();
@@ -156,6 +158,102 @@ describe("migrate", () => {
           )
           .run()
       ).not.toThrow();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("repairs orphaned app chat references and prevents conversation id reuse", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "d-max-chat-migrate-test-"));
+    const databasePath = path.join(dir, "legacy-chat.sqlite");
+    const legacy = new Database(databasePath);
+
+    legacy.pragma("foreign_keys = OFF");
+    legacy.exec(`
+      create table app_conversations (
+        id integer primary key,
+        title text,
+        context_type text not null,
+        context_entity_id integer,
+        created_at text not null,
+        updated_at text not null
+      );
+      create table app_chat_messages (
+        id integer primary key,
+        conversation_id integer references app_conversations(id),
+        role text not null,
+        content text not null,
+        source text not null default 'app_text',
+        audio_generation_status text not null default 'none',
+        audio_provider text,
+        audio_error text,
+        audio_generated_from_message_id integer references app_chat_messages(id),
+        audio_generated_at text,
+        research_summary_json text,
+        created_at text not null
+      );
+      create table app_prompt_logs (
+        id integer primary key,
+        conversation_id integer references app_conversations(id),
+        user_message_id integer references app_chat_messages(id),
+        openclaw_session_id text not null,
+        context_type text not null,
+        context_entity_id integer,
+        user_input text not null,
+        system_instructions text not null,
+        context_data text not null,
+        memory_history text not null,
+        tools text not null,
+        final_prompt text not null,
+        context_payload_json text,
+        turn_trace text,
+        created_at text not null
+      );
+      insert into app_conversations (id, title, context_type, context_entity_id, created_at, updated_at)
+        values (1, 'Existing', 'project', 1, '2026-06-30T10:00:00.000Z', '2026-06-30T10:00:00.000Z');
+      insert into app_chat_messages (id, conversation_id, role, content, source, created_at)
+        values
+          (1, 1, 'user', 'valid message', 'app_text', '2026-06-30T10:01:00.000Z'),
+          (2, 42, 'user', 'orphaned voice message', 'app_voice_message', '2026-06-30T10:02:00.000Z');
+      insert into app_prompt_logs (
+        id, conversation_id, user_message_id, openclaw_session_id, context_type, context_entity_id,
+        user_input, system_instructions, context_data, memory_history, tools, final_prompt, created_at
+      )
+        values
+          (1, 1, 1, 'session-1', 'project', 1, 'valid message', 'sys', 'ctx', 'mem', 'tools', 'prompt', '2026-06-30T10:01:01.000Z'),
+          (2, 42, 999, 'session-2', 'project', 1, 'orphaned message', 'sys', 'ctx', 'mem', 'tools', 'prompt', '2026-06-30T10:02:01.000Z');
+    `);
+    legacy.close();
+
+    migrate(databasePath);
+    const db = openDatabase(databasePath);
+
+    try {
+      const conversationSql = db.prepare("select sql from sqlite_master where type = 'table' and name = 'app_conversations'").get() as { sql: string };
+      const messageSql = db.prepare("select sql from sqlite_master where type = 'table' and name = 'app_chat_messages'").get() as { sql: string };
+      const promptLogSql = db.prepare("select sql from sqlite_master where type = 'table' and name = 'app_prompt_logs'").get() as { sql: string };
+      const orphanedMessage = db.prepare("select conversation_id from app_chat_messages where id = 2").get() as { conversation_id: number | null };
+      const orphanedPromptLog = db.prepare("select conversation_id, user_message_id from app_prompt_logs where id = 2").get() as {
+        conversation_id: number | null;
+        user_message_id: number | null;
+      };
+      const foreignKeyViolations = db.prepare("select * from pragma_foreign_key_check").all();
+
+      expect(conversationSql.sql.toLowerCase()).toContain("autoincrement");
+      expect(messageSql.sql.toLowerCase()).toContain("autoincrement");
+      expect(promptLogSql.sql.toLowerCase()).toContain("autoincrement");
+      expect(orphanedMessage.conversation_id).toBeNull();
+      expect(orphanedPromptLog.conversation_id).toBeNull();
+      expect(orphanedPromptLog.user_message_id).toBeNull();
+      expect(foreignKeyViolations).toEqual([]);
+
+      db
+        .prepare(
+          "insert into app_conversations (title, context_type, context_entity_id, created_at, updated_at) values ('Next', 'organization', 13, '2026-06-30T10:03:00.000Z', '2026-06-30T10:03:00.000Z')"
+        )
+        .run();
+      const nextConversation = db.prepare("select max(id) as id from app_conversations").get() as { id: number };
+      expect(nextConversation.id).toBeGreaterThan(42);
     } finally {
       db.close();
     }

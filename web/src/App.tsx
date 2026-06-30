@@ -881,12 +881,16 @@ export default function App() {
         },
         { signal: abortController.signal }
       );
-      const nextMessages = await loadPersistedChatMessages(result.conversationId);
+      const persistedMessages = await loadPersistedChatMessages(result.conversationId).catch(() => []);
+      const resultMessages = result.messages.map(chatMessageFromPersisted);
+      const nextMessages = persistedMessages.length > 0 ? persistedMessages : resultMessages;
       const messagesWithActivities = attachActivitiesToLastAssistant(nextMessages, result.activities ?? []);
       if (agentDrawer.open) {
         const conversations = activeContext ? await fetchChatConversations(activeContext).catch(() => agentDrawer.conversations) : agentDrawer.conversations;
         setAgentDrawer((current) => ({ ...current, conversationId: result.conversationId, conversations }));
-        setChatMessages(messagesWithActivities);
+        if (messagesWithActivities.length > 0) {
+          setChatMessages(messagesWithActivities);
+        }
       }
       if (source === "voice") {
         void generateAudioForAssistantReply(result.conversationId, messagesWithActivities);

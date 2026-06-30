@@ -418,6 +418,24 @@ export class GmailRepository {
     return rows.map((row) => this.hydrateMessage(row)).reverse();
   }
 
+  listAllMessagesForParty(partyId: number): GmailMessage[] {
+    const rows = this.db
+      .prepare(
+        `select gm.*
+         from gmail_messages gm
+         join gmail_message_party_links link on link.message_id = gm.id
+         left join gmail_message_party_visibility visibility
+           on visibility.message_id = gm.id and visibility.party_id = link.party_id
+         where link.party_id = ?
+           and visibility.id is null
+           and gm.sync_status = 'synced'
+         group by gm.id
+         order by gm.message_date desc, gm.id desc`
+      )
+      .all(partyId) as GmailMessageRow[];
+    return rows.map((row) => this.hydrateMessage(row));
+  }
+
   isMessageLinkedToParty(messageId: number, partyId: number): boolean {
     const row = this.db
       .prepare("select id from gmail_message_party_links where message_id = ? and party_id = ? limit 1")

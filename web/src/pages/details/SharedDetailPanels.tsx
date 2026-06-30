@@ -3,8 +3,9 @@ import type { ClipboardEvent, DragEvent, FormEvent, ReactNode } from "react";
 import { Building2, CalendarDays, CheckCircle2, Circle, ClipboardPaste, ExternalLink, FileText, Image, Mic2, Paperclip, Pencil, Plus, RefreshCw, Trash2, Upload, Users, X } from "lucide-react";
 import { ConfirmModal, EditModal, RelationItem, RelationList, SectionBlock } from "../../components/ui/index.js";
 import { reanalyzeMediaAsset, updateMediaAssetAnalysis } from "../../api.js";
-import type { EntityParticipant, Initiative, MediaAttachment, MediaAsset, MediaEntityType, Organization, ParticipantRoleType, Person, Task } from "../../types.js";
-import { displayInitiativeName, documentExtension, dropAfter, entityTypeLabel, formatBytes, formatMediaTimestamp, formatTaskDueDate, moveIdToDropPosition, nullableText, participantRoleSummary, personName, sortTasksByCompletionAndRank } from "./detailUtils.js";
+import { OrganizationPeopleActivityList, PartyActivitySummaryCard } from "../../components/party/index.js";
+import type { EntityParticipant, Initiative, MediaAttachment, MediaAsset, MediaEntityType, Organization, OrganizationPersonActivity, ParticipantRoleType, PartyActivitySummary, PartyRelationshipWithParties, Person, Task } from "../../types.js";
+import { displayInitiativeName, documentExtension, dropAfter, entityTypeLabel, formatBytes, formatMediaTimestamp, formatTaskDueDate, moveIdToDropPosition, nullableText, participantRoleSummary, partyRelationshipLabel, personName, sortTasksByCompletionAndRank } from "./detailUtils.js";
 
 export { MediaAttachmentsPanel, ParticipantsPanel, TaskCreateInlineForm, TasksView };
 
@@ -43,6 +44,100 @@ function participantContactDetail(participant: EntityParticipant): string | null
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+type TaskParticipantEntry = {
+  key: string;
+  partyId: number;
+  partyType: "person" | "organization";
+  displayName: string;
+  participant: EntityParticipant | null;
+  primaryContext: PrimaryParticipantContext | null;
+};
+
+type TaskParticipantPersonEntry = TaskParticipantEntry & {
+  partyType: "person";
+  organizationRelationship: PartyRelationshipWithParties | null;
+};
+
+const genericParticipantLabels = new Set([
+  "participant",
+  "participants",
+  "beteiligte",
+  "beteiligter",
+  "beteiligung",
+  "rolle offen"
+]);
+
+function concreteParticipantRole(participant: EntityParticipant | null): string | null {
+  if (!participant) return null;
+  const parts = [participant.roleType?.label, participant.roleLabel]
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .filter((part) => !genericParticipantLabels.has(part.toLowerCase()));
+  const uniqueParts = [...new Set(parts)];
+  return uniqueParts.length > 0 ? uniqueParts.join(" · ") : null;
+}
+
+function compactText(value: string | null | undefined): string | null {
+  const text = value
+    ?.replace(/[*_`>#-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return null;
+  if (["beschreibung", "kontext", "ziel", "noch offen", "noch offen."].includes(text.toLowerCase())) return null;
+  return text.length > 110 ? `${text.slice(0, 107).trim()}...` : text;
+}
+
+function markdownPreview(markdown: string | null | undefined): string | null {
+  if (!markdown) return null;
+  for (const line of markdown.split("\n")) {
+    const preview = compactText(line);
+    if (preview) return preview;
+  }
+  return null;
+}
+
+function personDescription(person: Person | undefined, participant: EntityParticipant | null, organizationRelationship: PartyRelationshipWithParties | null): string | null {
+  if (!person) return concreteParticipantRole(participant);
+  const title = [person.academicTitle, person.nameSuffix].map((part) => part?.trim()).filter(Boolean).join(" · ");
+  return (
+    (title || null)
+    ?? compactText(organizationRelationship?.roleLabel)
+    ?? concreteParticipantRole(participant)
+    ?? compactText(person.description)
+    ?? (organizationRelationship ? partyRelationshipLabel(organizationRelationship, person.id) : null)
+  );
+}
+
+function organizationDescription(organization: Organization | undefined, participant: EntityParticipant | null): string | null {
+  return (
+    compactText(organization?.organizationType)
+    ?? markdownPreview(organization?.markdown)
+    ?? concreteParticipantRole(participant)
+  );
+}
+
+function relationshipConnectsPersonAndOrganization(relationship: PartyRelationshipWithParties, personId: number, organizationId: number): boolean {
+  const connectsPersonToOrganization =
+    relationship.fromPartyId === personId
+      ? relationship.toParty.id === organizationId && relationship.toParty.type === "organization"
+      : relationship.toPartyId === personId && relationship.fromParty.id === organizationId && relationship.fromParty.type === "organization";
+  if (!connectsPersonToOrganization) return false;
+  return ["works_for", "member_of", "founder_of"].includes(relationship.relationshipType.key);
+}
+
+function relationshipToOrganization(personEntry: TaskParticipantEntry, organizationEntry: TaskParticipantEntry): PartyRelationshipWithParties | null {
+  if (personEntry.partyType !== "person") return null;
+  const personRelationship = personEntry.participant?.relationships?.find((relationship) => {
+    if (relationship.status !== "active") return false;
+    return relationshipConnectsPersonAndOrganization(relationship, personEntry.partyId, organizationEntry.partyId);
+  }) ?? null;
+  if (personRelationship) return personRelationship;
+  return organizationEntry.participant?.relationships?.find((relationship) => {
+    if (relationship.status !== "active") return false;
+    return relationshipConnectsPersonAndOrganization(relationship, personEntry.partyId, organizationEntry.partyId);
+  }) ?? null;
+}
+
 function ParticipantsPanel(props: {
   entityType: "initiative" | "task";
   entityId: number;
@@ -51,6 +146,8 @@ function ParticipantsPanel(props: {
   organizations: Organization[];
   roleTypes: ParticipantRoleType[];
   primaryContext?: PrimaryParticipantContext | null;
+  activitySummaries?: Record<number, PartyActivitySummary>;
+  organizationPeopleActivity?: Record<number, OrganizationPersonActivity[]>;
   surface?: "panel" | "section";
   createMode?: "inline" | "modal";
   onCreateParticipant: (input: {
@@ -64,6 +161,7 @@ function ParticipantsPanel(props: {
   onDeleteParticipant: (participantId: number) => Promise<void>;
   onOpenPerson?: (partyId: number) => void;
   onOpenOrganization?: (partyId: number) => void;
+  onOpenTask?: (taskId: number) => void;
 }) {
   const parties = [
     ...props.people.map((person) => ({ id: person.id, type: "person" as const, displayName: personName(person) })),
@@ -146,7 +244,32 @@ function ParticipantsPanel(props: {
       onOpen={primaryContextOpen ? () => primaryContextOpen(props.primaryContext!.partyId) : undefined}
     />
   ) : null;
-  const relationList = props.surface === "section" ? (
+  const relationList = props.surface === "section" && props.entityType === "task" ? (
+    <TaskParticipantsRelationList
+      participants={participants}
+      primaryContext={props.primaryContext ?? null}
+      people={props.people}
+      organizations={props.organizations}
+      activitySummaries={props.activitySummaries ?? {}}
+      organizationPeopleActivity={props.organizationPeopleActivity ?? {}}
+      busy={busy}
+      onOpenPerson={props.onOpenPerson}
+      onOpenOrganization={props.onOpenOrganization}
+      onOpenTask={props.onOpenTask}
+      onDeleteParticipant={async (participantId) => {
+        if (busy) return;
+        setBusy(true);
+        setError(null);
+        try {
+          await props.onDeleteParticipant(participantId);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Beteiligung konnte nicht entfernt werden.");
+        } finally {
+          setBusy(false);
+        }
+      }}
+    />
+  ) : props.surface === "section" ? (
     <RelationList emptyMode={createMode === "modal" ? "none" : "inline"} emptyTitle="Noch keine Beteiligten.">
       {primaryContextItem}
       {participants.map((participant) => {
@@ -309,6 +432,227 @@ function ParticipantsPanel(props: {
     <Panel title="Beteiligte">
       {content}
     </Panel>
+  );
+}
+
+function TaskParticipantsRelationList(props: {
+  participants: EntityParticipant[];
+  primaryContext: PrimaryParticipantContext | null;
+  people: Person[];
+  organizations: Organization[];
+  activitySummaries: Record<number, PartyActivitySummary>;
+  organizationPeopleActivity: Record<number, OrganizationPersonActivity[]>;
+  busy: boolean;
+  onOpenPerson?: (partyId: number) => void;
+  onOpenOrganization?: (partyId: number) => void;
+  onOpenTask?: (taskId: number) => void;
+  onDeleteParticipant: (participantId: number) => Promise<void>;
+}) {
+  const peopleById = new Map(props.people.map((person) => [person.id, person]));
+  const organizationsById = new Map(props.organizations.map((organization) => [organization.id, organization]));
+  const entries: TaskParticipantEntry[] = [
+    ...(props.primaryContext ? [{
+      key: `primary-context:${props.primaryContext.partyId}`,
+      partyId: props.primaryContext.partyId,
+      partyType: props.primaryContext.partyType,
+      displayName: props.primaryContext.displayName,
+      participant: null,
+      primaryContext: props.primaryContext
+    }] : []),
+    ...props.participants.map((participant) => ({
+      key: `participant:${participant.id}`,
+      partyId: participant.partyId,
+      partyType: participant.party.type,
+      displayName: participant.party.displayName,
+      participant,
+      primaryContext: null
+    }))
+  ];
+  const organizations = entries.filter((entry): entry is TaskParticipantEntry & { partyType: "organization" } => entry.partyType === "organization");
+  const people = entries.filter((entry): entry is TaskParticipantEntry & { partyType: "person" } => entry.partyType === "person");
+  const peopleByOrganization = new Map<number, TaskParticipantPersonEntry[]>();
+  const standalonePeople: TaskParticipantPersonEntry[] = [];
+
+  for (const personEntry of people) {
+    const organizationMatch = organizations
+      .map((organizationEntry) => ({
+        organizationEntry,
+        relationship: relationshipToOrganization(personEntry, organizationEntry)
+      }))
+      .find((match) => Boolean(match.relationship));
+
+    const displayPerson: TaskParticipantPersonEntry = {
+      ...personEntry,
+      organizationRelationship: organizationMatch?.relationship ?? null
+    };
+
+    if (organizationMatch?.relationship) {
+      const currentPeople = peopleByOrganization.get(organizationMatch.organizationEntry.partyId) ?? [];
+      currentPeople.push(displayPerson);
+      peopleByOrganization.set(organizationMatch.organizationEntry.partyId, currentPeople);
+    } else {
+      standalonePeople.push(displayPerson);
+    }
+  }
+
+  return (
+    <RelationList emptyMode="none" emptyTitle="Noch keine Beteiligten.">
+      {organizations.map((organizationEntry) => {
+        const organization = organizationsById.get(organizationEntry.partyId);
+        return (
+          <TaskParticipantCard
+            key={organizationEntry.key}
+            icon={<Building2 size={16} />}
+            title={organizationEntry.displayName}
+            meta={organizationDescription(organization, organizationEntry.participant)}
+            summary={props.activitySummaries[organizationEntry.partyId] ?? null}
+            onOpenTask={props.onOpenTask}
+            onOpen={props.onOpenOrganization ? () => props.onOpenOrganization?.(organizationEntry.partyId) : undefined}
+            actions={organizationEntry.participant ? (
+              <TaskParticipantDeleteButton
+                busy={props.busy}
+                label="Organisation aus Beteiligten entfernen"
+                onDelete={() => props.onDeleteParticipant(organizationEntry.participant!.id)}
+              />
+            ) : null}
+          >
+            {props.organizationPeopleActivity[organizationEntry.partyId]?.length ? (
+              <OrganizationPeopleActivityList
+                people={props.organizationPeopleActivity[organizationEntry.partyId]}
+                onOpenPerson={props.onOpenPerson}
+                onOpenTask={props.onOpenTask}
+              />
+            ) : (
+              (peopleByOrganization.get(organizationEntry.partyId) ?? []).map((personEntry) => (
+                <TaskParticipantNestedPerson
+                  key={personEntry.key}
+                  entry={personEntry}
+                  person={peopleById.get(personEntry.partyId)}
+                  summary={props.activitySummaries[personEntry.partyId] ?? null}
+                  busy={props.busy}
+                  onOpenPerson={props.onOpenPerson}
+                  onOpenTask={props.onOpenTask}
+                  onDeleteParticipant={props.onDeleteParticipant}
+                />
+              ))
+            )}
+          </TaskParticipantCard>
+        );
+      })}
+      {standalonePeople.map((personEntry) => (
+        <TaskParticipantCard
+          key={personEntry.key}
+          icon={<Users size={16} />}
+          title={personEntry.displayName}
+          meta={personDescription(peopleById.get(personEntry.partyId), personEntry.participant, personEntry.organizationRelationship)}
+          summary={props.activitySummaries[personEntry.partyId] ?? null}
+          onOpenTask={props.onOpenTask}
+          onOpen={props.onOpenPerson ? () => props.onOpenPerson?.(personEntry.partyId) : undefined}
+          actions={personEntry.participant ? (
+            <TaskParticipantDeleteButton
+              busy={props.busy}
+              label="Person aus Beteiligten entfernen"
+              onDelete={() => props.onDeleteParticipant(personEntry.participant!.id)}
+            />
+          ) : null}
+        />
+      ))}
+    </RelationList>
+  );
+}
+
+function TaskParticipantCard(props: {
+  icon: ReactNode;
+  title: string;
+  meta?: string | null;
+  summary?: PartyActivitySummary | null;
+  onOpenTask?: (taskId: number) => void;
+  onOpen?: () => void;
+  actions?: ReactNode;
+  children?: ReactNode;
+}) {
+  const content = (
+    <>
+      <div className="entity-icon">{props.icon}</div>
+      <div className="relation-item-copy">
+        <strong>{props.title}</strong>
+        {props.meta ? <p>{props.meta}</p> : null}
+      </div>
+    </>
+  );
+  return (
+    <article className={`task-participant-card${props.onOpen ? " relation-button" : ""}`}>
+      <div className="task-participant-card-main">
+        {props.onOpen ? (
+          <button type="button" className="task-participant-open" onClick={props.onOpen}>
+            {content}
+          </button>
+        ) : (
+          <div className="task-participant-open static">{content}</div>
+        )}
+        {props.actions ? <div className="relation-item-actions">{props.actions}</div> : null}
+      </div>
+      {props.summary ? (
+        <div className="task-participant-activity">
+          <PartyActivitySummaryCard summary={props.summary} compact onOpenTask={props.onOpenTask} />
+        </div>
+      ) : null}
+      {props.children ? <div className="task-participant-nested-list">{props.children}</div> : null}
+    </article>
+  );
+}
+
+function TaskParticipantNestedPerson(props: {
+  entry: TaskParticipantPersonEntry;
+  person: Person | undefined;
+  summary: PartyActivitySummary | null;
+  busy: boolean;
+  onOpenPerson?: (partyId: number) => void;
+  onOpenTask?: (taskId: number) => void;
+  onDeleteParticipant: (participantId: number) => Promise<void>;
+}) {
+  const label = personDescription(props.person, props.entry.participant, props.entry.organizationRelationship);
+  return (
+    <div className="task-participant-nested-person">
+      {props.onOpenPerson ? (
+        <button type="button" className="task-participant-nested-open" onClick={() => props.onOpenPerson?.(props.entry.partyId)}>
+          <span>{props.entry.displayName}</span>
+          {label ? <small>{label}</small> : null}
+        </button>
+      ) : (
+        <div className="task-participant-nested-copy">
+          <span>{props.entry.displayName}</span>
+          {label ? <small>{label}</small> : null}
+        </div>
+      )}
+      {props.entry.participant ? (
+        <TaskParticipantDeleteButton
+          busy={props.busy}
+          label="Person aus Beteiligten entfernen"
+          onDelete={() => props.onDeleteParticipant(props.entry.participant!.id)}
+        />
+      ) : null}
+      {props.summary ? (
+        <div className="task-participant-nested-activity">
+          <PartyActivitySummaryCard summary={props.summary} compact onOpenTask={props.onOpenTask} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TaskParticipantDeleteButton(props: { busy: boolean; label: string; onDelete: () => Promise<void> }) {
+  return (
+    <button
+      type="button"
+      className="icon-button compact"
+      disabled={props.busy}
+      title={props.label}
+      aria-label={props.label}
+      onClick={() => void props.onDelete()}
+    >
+      <Trash2 size={14} />
+    </button>
   );
 }
 

@@ -132,7 +132,7 @@ import { PartyActivitySummaryRepository } from "../repositories/party-activity-s
 import { StateEventRepository } from "../repositories/state-events.js";
 import type { CreateStateEventInput, StateEvent } from "../repositories/state-events.js";
 import { AppChatService } from "../chat/app-chat.js";
-import type { AppChatMessageResult } from "../chat/app-chat.js";
+import type { AppChatMessageResult, PreparedAppChatTurn } from "../chat/app-chat.js";
 import { AppChatRepository } from "../repositories/app-chat.js";
 import type { AppChatMessage } from "../repositories/app-chat.js";
 import { conversationContextSchema, listPromptTemplates } from "../chat/conversation-context.js";
@@ -1772,9 +1772,8 @@ const server = http.createServer(async (req, res) => {
           }
           const detail = error instanceof Error ? error.message : "Unknown agent error";
           const agentResult = { text: `Ich konnte den Agent-Turn nicht sauber abschließen: ${detail}`, activities: [] };
-          const result = chat.completePreparedTurn(prepared, agentResult);
-          const apiResult = appChatResultForApi(result);
-          send("activity", { activities: result.activities });
+          const apiResult = completePreparedTurnForSseError(prepared, agentResult, detail);
+          send("activity", { activities: apiResult.activities });
           let sentFirstAnswerDelta = false;
           for (const chunk of chunkText(apiResult.reply, 18)) {
             if (!sentFirstAnswerDelta) {
@@ -2308,6 +2307,26 @@ function appChatResultForApi(result: AppChatMessageResult): Omit<AppChatMessageR
     ...result,
     messages: result.messages.map(chatMessageForApi)
   };
+}
+
+function completePreparedTurnForSseError(
+  prepared: PreparedAppChatTurn,
+  agentResult: { text: string; activities: AppChatMessageResult["activities"] },
+  originalError: string
+): ReturnType<typeof appChatResultForApi> {
+  try {
+    return appChatResultForApi(chat.completePreparedTurn(prepared, agentResult));
+  } catch (persistError) {
+    return {
+      reply: `${agentResult.text}\n\nZusätzlich konnte die Fehlerantwort nicht im Chat gespeichert werden: ${persistError instanceof Error ? persistError.message : "Unknown persistence error"}`,
+      conversationId: prepared.conversationId,
+      context: prepared.context,
+      messages: [],
+      activities: [],
+      persistenceError: persistError instanceof Error ? persistError.message : "Unknown persistence error",
+      originalError
+    } as ReturnType<typeof appChatResultForApi>;
+  }
 }
 
 function stateEventForMediaLink(operation: string, link: MediaLink | MediaAttachment): Omit<CreateStateEventInput, "source"> {

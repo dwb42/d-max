@@ -4,6 +4,7 @@ import type { ToolDefinition } from "../core/tool-definitions.js";
 import { PartyTimelineRepository } from "../repositories/party-timeline.js";
 
 const timelineKindSchema = z.enum(["conversation", "letter_received", "letter_sent", "visit", "note"]);
+const timelineChannelSchema = z.enum(["phone", "meeting", "visit", "letter", "note", "other"]);
 const timelineDirectionSchema = z.enum(["inbound", "outbound", "bidirectional", "none"]);
 const timelinePartyRoleSchema = z.enum(["primary", "participant", "related", "organization_context"]);
 
@@ -17,6 +18,7 @@ const listPartyTimelineEntriesInput = z
 const createPartyTimelineEntryInput = z.object({
   partyId: z.number().int().positive(),
   kind: timelineKindSchema,
+  channel: timelineChannelSchema.nullable().optional(),
   direction: timelineDirectionSchema.optional(),
   occurredAt: z.string().trim().min(1).nullable().optional(),
   title: z.string().trim().min(1),
@@ -31,6 +33,7 @@ const createPartyTimelineEntryInput = z.object({
 const updatePartyTimelineEntryInput = z.object({
   id: z.number().int().positive(),
   kind: timelineKindSchema.optional(),
+  channel: timelineChannelSchema.nullable().optional(),
   direction: timelineDirectionSchema.optional(),
   occurredAt: z.string().trim().min(1).optional(),
   title: z.string().trim().min(1).optional(),

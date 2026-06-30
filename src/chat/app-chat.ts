@@ -310,6 +310,7 @@ export class AppChatService {
       replyChars: agentResult.text.length,
       activities: agentResult.activities.length
     });
+    this.repairPreparedTurnStorage(prepared);
     const assistantMessage = this.chatMessages.create({
       conversationId: prepared.conversationId,
       role: "assistant",
@@ -338,6 +339,41 @@ export class AppChatService {
       messages: [assistantMessage],
       activities: agentResult.activities
     };
+  }
+
+  private repairPreparedTurnStorage(prepared: PreparedAppChatTurn): void {
+    if (!this.conversations.findById(prepared.conversationId)) {
+      const resolved = resolveConversationContext(this.db, prepared.context);
+      this.conversations.createWithId(prepared.conversationId, {
+        title: null,
+        contextType: resolved.contextType,
+        contextEntityId: resolved.contextEntityId
+      });
+      addTurnTraceEvent(prepared.trace, "conversation_recreated_for_prepared_turn", {
+        conversationId: prepared.conversationId,
+        contextType: resolved.contextType,
+        contextEntityId: resolved.contextEntityId
+      });
+    }
+
+    this.db
+      .prepare(
+        `update app_chat_messages
+         set conversation_id = ?
+         where id = ?
+           and (conversation_id is null or conversation_id != ?)`
+      )
+      .run(prepared.conversationId, prepared.userMessageId, prepared.conversationId);
+
+    this.db
+      .prepare(
+        `update app_prompt_logs
+         set conversation_id = ?,
+             user_message_id = ?
+         where id = ?
+           and (conversation_id is null or conversation_id != ? or user_message_id is null or user_message_id != ?)`
+      )
+      .run(prepared.conversationId, prepared.userMessageId, prepared.promptLogId, prepared.conversationId, prepared.userMessageId);
   }
 
   private async runAgentSafely(

@@ -51,10 +51,13 @@ import type {
   ContactPointType,
   CreatePartyAddressInput,
   PartyAddress,
+  PartyActivitySummary,
   PartyContactPoint,
   PartyTimelineEntry,
+  PartyTimelineEntryChannel,
   PartyTimelineEntryDirection,
-  PartyTimelineEntryKind
+  PartyTimelineEntryKind,
+  OrganizationPersonActivity
 } from "./types.js";
 
 export async function fetchOverview(): Promise<AppOverview> {
@@ -934,10 +937,22 @@ export async function fetchPartyTimelineEntries(partyId: number): Promise<PartyT
   return response.entries;
 }
 
+export async function fetchPartyActivitySummaries(
+  partyIds: number[],
+  options: { includeOrganizationPeople?: boolean } = {}
+): Promise<{ summaries: PartyActivitySummary[]; organizationPeople?: Record<number, OrganizationPersonActivity[]> }> {
+  return request<{ summaries: PartyActivitySummary[]; organizationPeople?: Record<number, OrganizationPersonActivity[]> }>("/api/parties/activity-summaries", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ partyIds, includeOrganizationPeople: options.includeOrganizationPeople })
+  });
+}
+
 export async function createPartyTimelineEntry(
   partyId: number,
   input: {
     kind: PartyTimelineEntryKind;
+    channel?: PartyTimelineEntryChannel | null;
     direction?: PartyTimelineEntryDirection;
     occurredAt?: string | null;
     title: string;
@@ -958,6 +973,7 @@ export async function updatePartyTimelineEntry(
   entryId: number,
   input: {
     kind?: PartyTimelineEntryKind;
+    channel?: PartyTimelineEntryChannel | null;
     direction?: PartyTimelineEntryDirection;
     occurredAt?: string | null;
     title?: string;

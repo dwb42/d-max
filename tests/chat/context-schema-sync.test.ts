@@ -16,6 +16,12 @@ const CONTEXT_RELEVANT_TABLES = [
   "task_checklist_items",
   "party_timeline_entries",
   "party_timeline_entry_parties",
+  "gmail_mailboxes",
+  "gmail_messages",
+  "gmail_message_participants",
+  "gmail_message_party_links",
+  "gmail_message_party_visibility",
+  "gmail_message_attachments",
   "media_assets",
   "media_links",
   "parties",
@@ -33,7 +39,7 @@ const CONTEXT_RELEVANT_TABLES = [
   "calendar_event_visibility"
 ];
 
-const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "2dfcb75c08e76db453e008f5ea95e3afe3922156a2001ff7decf8521e0f752e4";
+const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "8c8fd8e0450189aef34ec790a8dbd19af5cc14e73e5a77a0dc5bb049457a73ea";
 
 describe("context resolver schema synchronization", () => {
   let db: Database.Database;

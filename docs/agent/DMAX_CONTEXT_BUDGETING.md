@@ -1,6 +1,6 @@
 # DMAX Context Budgeting
 
-Date: 2026-05-14
+Date: 2026-06-30
 
 ## Purpose
 
@@ -49,8 +49,16 @@ Current defaults:
 | `habit` | context data 10000 chars; same detail caps as `idea`. |
 | `task` | context data 9000 chars; category background 2500 chars; initiative markdown 3500 chars; sibling tasks 18; sibling checklist details 8 tasks / 5 items; same-category 5/type; media/participants 20. |
 | `tasks` | context data 10000 chars; open tasks 40. |
+| `person` | no fixed total context-data cap. Critical SQLite context is emitted completely: identity/description, full local Gmail history, full manual communication history, all relevant party tasks, and related DMAX task/initiative/calendar context. Lower-priority orientation data is capped: contact points 20, addresses 20, other relationships 30. |
+| `organization` | no fixed total context-data cap. Critical SQLite context is emitted completely: identity/Markdown, active related people with descriptions and role labels, full local Gmail/manual communication for the organization plus active related people, all relevant party tasks, and related DMAX task/initiative/calendar context. Lower-priority orientation data is capped: contact points 20, addresses 20, other relationships 30. |
 
-The final context data also passes through a total line budget. If a branch-specific formatter underestimates growth, the total budget can still truncate the data section and records a `context-data-total` block.
+Most context modes also pass through a total context-data budget. If a
+branch-specific formatter underestimates growth, that total budget can still
+truncate the data section and records a `context-data-total` block. `person`
+and `organization` are the intentional exception for critical relationship
+work: they have no fixed total context-data cap in `contextDataBudgets`, so the
+complete local communication/task/DMAX context is emitted unless a future
+product decision changes that contract.
 
 ## Deduplication
 
@@ -103,9 +111,46 @@ Sections:
 
 The UI is defensive: missing payloads, partial payloads, or legacy string payloads fall back to warnings plus raw output instead of crashing.
 
+## Party Detail Contexts
+
+Person and organization detail contexts intentionally distinguish critical
+relationship work from lower-priority orientation data.
+
+Critical context is not count-capped:
+
+- current person/organization identity and description;
+- active organization people, including person description, relationship label,
+  role label, and salutation/gender signal from the existing person model;
+- all stored local Gmail messages linked to the party context, newest first,
+  including inbound/outbound direction, sender/recipients, subject, and full
+  stored body;
+- all manual party timeline entries, newest first;
+- all relevant party-owned or participant tasks/measures, open and done;
+- related initiative/project/task/calendar context with initiative Markdown.
+
+For organizations, the party context includes direct organization activity plus
+activity/communication for active related people so that messages matched to an
+employee contact point are still available on the organization page.
+
+Gmail is read-only context here. The agent receives only synchronized SQLite
+records from `gmail_messages` and link tables. DMAX does not expose Gmail
+live-read, draft, send, archive, trash, or mutation tools to OpenClaw.
+
+Lower-priority orientation data may be capped and documented in the debug
+payload:
+
+- contact points;
+- postal addresses;
+- non-critical extra party relationships;
+- technical metadata and auxiliary facts.
+
+The party response guidance asks the agent to detect contradictions between
+communication and open measures prompt-contextually, cite evidence, and suggest
+changes before mutating DMAX state.
+
 ## Open Points
 
 - The text wrapper is still mixed English/German outside Category Detail. This remains intentionally unchanged in Phase 1.5 to avoid broad prompt-template churn.
 - `loadedEntities` and `omittedEntities` are diagnostic, not a complete raw data mirror.
-- Calendar/workblock/communication context is still out of scope.
+- Calendar/workblock context is still partial outside party detail contexts.
 - The Prompt Inspector now has a structured debug view, but it is still developer-oriented and not a polished user-facing context explainer.

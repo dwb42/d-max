@@ -65,6 +65,11 @@ Kontakt, Beschreibung, Anschriften, DMAX-Kontexte, and Metadaten. The right
 sidebar for organizations adds compact relationship panels between Anschriften
 and DMAX-Kontexte: Kontakt, Beschreibung, Anschriften, Personen,
 Organisationen, DMAX-Kontexte, Metadaten.
+Person and organization sidebars now include a compact `Aktivität` summary card
+from the shared party activity source. Organization `Personen` can render as a
+CRM-style activity list for active related people. Task detail `Beteiligte` uses
+the same badges and next-action widget for participant people, organizations,
+and organization rollups.
 
 Party detail headers use the established person/organization icon, show a
 DMAX-context breadcrumb when a party is attached to a task, initiative, or

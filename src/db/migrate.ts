@@ -32,6 +32,7 @@ export function migrate(databasePath?: string): void {
     migrateWhoDomain(db);
     migratePartyTaskContext(db);
     migratePartyTimelineDomain(db);
+    migratePartyTimelineChannels(db);
     migrateAppChatResearchSummary(db);
     migrateMindmapReviewDomain(db);
     db.exec(schema);
@@ -42,10 +43,252 @@ export function migrate(databasePath?: string): void {
     migratePromptLogs(db);
     migrateStateEvents(db);
     migrateWhoContextTypes(db);
+    migrateAppChatAutoincrementAndIntegrity(db);
     backfillConversationTitles(db);
   } finally {
     db.close();
   }
+}
+
+function migrateAppChatAutoincrementAndIntegrity(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "app_conversations") || !tableExists(db, "app_chat_messages")) {
+    return;
+  }
+
+  db.pragma("foreign_keys = OFF");
+  try {
+    rebuildAppConversationsWithAutoincrement(db);
+    rebuildAppChatMessagesWithAutoincrementAndCleanReferences(db);
+    rebuildAppPromptLogsWithAutoincrementAndCleanReferences(db);
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
+
+function rebuildAppConversationsWithAutoincrement(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "app_conversations")) {
+    return;
+  }
+
+  const sql = db.prepare("select sql from sqlite_master where type = 'table' and name = 'app_conversations'").get() as
+    | { sql: string }
+    | undefined;
+  if (sql?.sql.toLowerCase().includes("autoincrement")) {
+    return;
+  }
+
+  db.exec(`
+    create table app_conversations_next (
+      id integer primary key autoincrement,
+      title text,
+      context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations', 'category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization')),
+      context_entity_id integer,
+      created_at text not null,
+      updated_at text not null,
+      check (
+        (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations') and context_entity_id is null)
+        or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization') and context_entity_id is not null)
+      )
+    );
+    insert into app_conversations_next (id, title, context_type, context_entity_id, created_at, updated_at)
+      select id, title, context_type, context_entity_id, created_at, updated_at
+      from app_conversations
+      where context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations', 'category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization');
+    drop table app_conversations;
+    alter table app_conversations_next rename to app_conversations;
+    create index if not exists idx_app_conversations_context on app_conversations(context_type, context_entity_id, updated_at);
+  `);
+  advanceAutoincrementSequence(db, "app_conversations", maxReferencedConversationId(db));
+}
+
+function rebuildAppChatMessagesWithAutoincrementAndCleanReferences(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "app_chat_messages")) {
+    return;
+  }
+
+  db.exec(`
+    create table app_chat_messages_next (
+      id integer primary key autoincrement,
+      conversation_id integer references app_conversations(id),
+      role text not null check (role in ('user', 'assistant')),
+      content text not null,
+      source text not null default 'app_text' check (source in ('app_text', 'app_voice_message', 'system')),
+      audio_generation_status text not null default 'none' check (audio_generation_status in ('none', 'pending', 'ready', 'failed')),
+      audio_provider text,
+      audio_error text,
+      audio_generated_from_message_id integer references app_chat_messages(id),
+      audio_generated_at text,
+      research_summary_json text,
+      created_at text not null
+    );
+    insert into app_chat_messages_next (
+      id,
+      conversation_id,
+      role,
+      content,
+      source,
+      audio_generation_status,
+      audio_provider,
+      audio_error,
+      audio_generated_from_message_id,
+      audio_generated_at,
+      research_summary_json,
+      created_at
+    )
+      select
+        m.id,
+        case
+          when c.id is not null and m.created_at >= c.created_at then m.conversation_id
+          else null
+        end,
+        m.role,
+        m.content,
+        m.source,
+        coalesce(m.audio_generation_status, 'none'),
+        m.audio_provider,
+        m.audio_error,
+        case
+          when parent.id is not null and parent.id != m.id then m.audio_generated_from_message_id
+          else null
+        end,
+        m.audio_generated_at,
+        m.research_summary_json,
+        m.created_at
+      from app_chat_messages m
+      left join app_conversations c on c.id = m.conversation_id
+      left join app_chat_messages parent on parent.id = m.audio_generated_from_message_id;
+    drop table app_chat_messages;
+    alter table app_chat_messages_next rename to app_chat_messages;
+    create index if not exists idx_app_chat_messages_created_at on app_chat_messages(created_at, id);
+    create index if not exists idx_app_chat_messages_conversation_id on app_chat_messages(conversation_id, created_at, id);
+  `);
+}
+
+function rebuildAppPromptLogsWithAutoincrementAndCleanReferences(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "app_prompt_logs")) {
+    return;
+  }
+
+  db.exec(`
+    create table app_prompt_logs_next (
+      id integer primary key autoincrement,
+      conversation_id integer references app_conversations(id),
+      user_message_id integer references app_chat_messages(id),
+      openclaw_session_id text not null,
+      context_type text not null check (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations', 'category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization')),
+      context_entity_id integer,
+      user_input text not null,
+      system_instructions text not null,
+      context_data text not null,
+      memory_history text not null,
+      tools text not null,
+      final_prompt text not null,
+      context_payload_json text,
+      turn_trace text,
+      created_at text not null,
+      check (
+        (context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations') and context_entity_id is null)
+        or (context_type in ('category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization') and context_entity_id is not null)
+      )
+    );
+    insert into app_prompt_logs_next (
+      id,
+      conversation_id,
+      user_message_id,
+      openclaw_session_id,
+      context_type,
+      context_entity_id,
+      user_input,
+      system_instructions,
+      context_data,
+      memory_history,
+      tools,
+      final_prompt,
+      context_payload_json,
+      turn_trace,
+      created_at
+    )
+      select
+        p.id,
+        case
+          when c.id is not null and p.created_at >= c.created_at then p.conversation_id
+          else null
+        end,
+        case
+          when m.id is not null then p.user_message_id
+          else null
+        end,
+        p.openclaw_session_id,
+        p.context_type,
+        p.context_entity_id,
+        p.user_input,
+        p.system_instructions,
+        p.context_data,
+        p.memory_history,
+        p.tools,
+        p.final_prompt,
+        p.context_payload_json,
+        p.turn_trace,
+        p.created_at
+      from app_prompt_logs p
+      left join app_conversations c on c.id = p.conversation_id
+      left join app_chat_messages m on m.id = p.user_message_id
+      where p.context_type in ('global', 'categories', 'ideas', 'projects', 'habits', 'tasks', 'initiatives', 'people', 'organizations', 'category', 'idea', 'project', 'habit', 'initiative', 'task', 'person', 'organization');
+    drop table app_prompt_logs;
+    alter table app_prompt_logs_next rename to app_prompt_logs;
+    create index if not exists idx_app_prompt_logs_created_at on app_prompt_logs(created_at, id);
+    create index if not exists idx_app_prompt_logs_conversation_id on app_prompt_logs(conversation_id, created_at, id);
+    create index if not exists idx_app_prompt_logs_context on app_prompt_logs(context_type, context_entity_id, created_at);
+  `);
+}
+
+function maxReferencedConversationId(db: ReturnType<typeof openDatabase>): number {
+  const appPromptLogsSelect = tableExists(db, "app_prompt_logs")
+    ? "union all select conversation_id as id from app_prompt_logs where conversation_id is not null"
+    : "";
+  const row = db
+    .prepare(`
+      select coalesce(max(id), 0) as value
+      from (
+        select id from app_conversations
+        union all select conversation_id as id from app_chat_messages where conversation_id is not null
+        ${appPromptLogsSelect}
+      )
+    `)
+    .get() as { value: number } | undefined;
+  return row?.value ?? 0;
+}
+
+function advanceAutoincrementSequence(db: ReturnType<typeof openDatabase>, table: string, minSequence: number): void {
+  if (minSequence <= 0) {
+    return;
+  }
+
+  const existing = db.prepare("select seq from sqlite_sequence where name = ?").get(table) as { seq: number } | undefined;
+  if (existing) {
+    db.prepare("update sqlite_sequence set seq = max(seq, ?) where name = ?").run(minSequence, table);
+  } else {
+    db.prepare("insert into sqlite_sequence (name, seq) values (?, ?)").run(table, minSequence);
+  }
+}
+
+function migratePartyTimelineChannels(db: ReturnType<typeof openDatabase>): void {
+  if (!tableExists(db, "party_timeline_entries")) {
+    return;
+  }
+  ensureColumn(db, "party_timeline_entries", "channel", "text check (channel in ('phone', 'meeting', 'visit', 'letter', 'note', 'other'))");
+  db.exec(`
+    update party_timeline_entries
+    set channel = case
+      when kind in ('letter_received', 'letter_sent') then 'letter'
+      when kind = 'visit' then 'visit'
+      when kind = 'note' then 'note'
+      when kind = 'conversation' then 'other'
+      else 'other'
+    end
+    where channel is null;
+    create index if not exists idx_party_timeline_entries_channel on party_timeline_entries(channel, occurred_at desc, id desc);
+  `);
 }
 
 function migrateGmailPartyVisibility(db: ReturnType<typeof openDatabase>): void {

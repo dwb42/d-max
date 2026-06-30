@@ -93,6 +93,13 @@ participant_role_types, entity_participants, party_contact_points, party_address
 app_chat_messages, app_conversations, app_prompt_logs, app_state_events
 ```
 
+`app_chat_messages`, `app_conversations`, and `app_prompt_logs` use
+`integer primary key autoincrement`. Migrations rebuild older tables into that
+shape and clean invalid chat references by nulling orphaned or reused
+conversation/user-message links. This prevents SQLite rowid reuse from
+reattaching old app-chat messages or prompt logs to newly created contextual
+conversations.
+
 The Who dimension is implemented as a party identity layer. `parties` stores
 the shared `person` or `organization` identity and display name; for people this
 display name is an internal derived value from `first_name` and `last_name`, not
@@ -138,8 +145,11 @@ when the contact/relationship is the primary context of the measure. Additional
 participants still use `entity_participants`. `party_timeline_entries` plus
 `party_timeline_entry_parties` store manually documented communication history
 such as conversations, received/sent letters, visits, and notes; these entries
-are journal/history facts, not a second planning model. Future/planned actions
-remain tasks. Person and organization detail pages use the same party
+are journal/history facts, not a second planning model. Manual entries also
+carry a normalized `channel` (`phone`, `meeting`, `visit`, `letter`, `note`, or
+`other`) so communication summaries can count contact modes without guessing
+from prose. Future/planned actions remain tasks. Person and organization detail
+pages use the same party
 communication layout: the main column shows open party-owned measures above a
 unified `Historie`, and completed party-owned measures appear in that history
 beside manual communication entries and Gmail messages. The right profile
@@ -148,6 +158,14 @@ and for organizations compact person/organization relationship panels. Party
 measure editing uses a wide markdown-sized modal for longer notes. Manual party
 timeline entries are exposed through API routes and OpenClaw tools; person and
 organization support uses the same party-level data model.
+`POST /api/parties/activity-summaries` returns reusable party activity summaries
+for people and organizations, including Gmail inbound/outbound counts, manual
+channel counts, party-owned measure totals, contact date bounds, and the next
+open party-owned measure. When requested, organization summaries roll up direct
+organization activity plus active related people and return a compact per-person
+CRM activity list. Task detail `Beteiligte`, person detail, and organization
+detail use this same summary source; full histories remain on party detail
+pages.
 The organization detail page edits core fields in a header-triggered modal and
 keeps inline editing for name and organization type.
 Contact point rows are executable where possible: email rows open the Gmail
@@ -470,6 +488,12 @@ entrypoint. It generates audio only for a final persisted assistant message,
 stores the binary through the media-asset pipeline, returns the normal chat
 message API shape with `audioAttachment`, and leaves the text reply intact if
 TTS fails.
+Prepared browser chat turns repair their local storage before the assistant
+reply is persisted: if a conversation row disappeared while OpenClaw was
+running, DMAX recreates the conversation id from the prepared context and
+reattaches the user message and prompt log. SSE error handling also returns a
+streamed fallback if assistant-message persistence fails after headers were
+sent, instead of crashing the HTTP response.
 
 ## Runtime And Provider State
 
@@ -508,15 +532,30 @@ TTS fails.
   workspace runtime instructions from `openclaw/workspace/`.
 - The core DMAX chat context modes are `categories`, `category`,
   `initiatives`, `ideas`, `projects`, `habits`, `idea`, `project`, `habit`,
-  and `task`. Each mode has runtime instructions and response guidance from the
-  same source used by `/prompt-vorlagen`, so prompt-template display and runtime
-  behavior stay synchronized.
+  `task`, `people`, `organizations`, `person`, and `organization`. Core prompt
+  templates are still shown for the main planning contexts in
+  `/prompt-vorlagen`; runtime response guidance for party detail contexts lives
+  in the same resolver.
 - Context data is mode-specific and budgeted. Detail contexts include current
   entity memory, category Markdown background, relevant parent/child
   initiative hierarchy, sibling or same-category neighbors, tasks, media, and
   participants when available. List and overview contexts include compact
   cross-type initiative summaries, category excerpts, task summaries, relation
   summaries, and for `habits` a compact list of life areas without habits.
+- Person and organization detail contexts intentionally do not use a fixed
+  total context-data cap for critical relationship work. They emit complete
+  local SQLite context for identity/description, active organization people,
+  full stored Gmail history, full manual party communication history, all
+  relevant party-owned or participant tasks, and related initiative/task/calendar
+  context. For organizations this includes communication for active related
+  people so employee-matched messages are available on the organization page.
+  Lower-priority orientation data such as contact points, postal addresses, and
+  extra relationships is capped and recorded in the debug payload.
+- Gmail in app-chat context is read-only local database context from
+  synchronized `gmail_messages` and related link tables. OpenClaw still has no
+  DMAX Gmail tools for live read, draft, send, archive, trash, or mutation; the
+  agent may use stored communication as evidence and suggest DMAX task changes,
+  but must not claim Gmail actions.
 - Context budgets, caps, truncation, omitted entities, and deduplication are
   recorded in `context_payload_json`. Category Detail has an initiative-context
   total budget, Initiatives Overview emits category background once, and
@@ -549,6 +588,12 @@ TTS fails.
   trajectory, subagent, and completed-reply parsing lives in
   `src/chat/openclaw-activities.ts`; `src/chat/openclaw-agent.ts` owns gateway
   lifecycle and session orchestration.
+- Prepared OpenClaw sessions are cached only when an external gateway is
+  configured or the local gateway port is currently bound. If the local gateway
+  is gone, the cached prepared-session entry is invalidated before reuse. When
+  DMAX force-restarts the local gateway, it also clears stale gateway start
+  promises, prewarm state, readiness cache, and WebSocket connections so the
+  next ensure path starts a fresh gateway instead of joining a dead start.
 - The embedded OpenClaw gateway client loader resolves the installed
   `GatewayClient` export dynamically from global OpenClaw `client-*.js` bundles
   and supports gateway protocol 3-4. This keeps the app-chat and production

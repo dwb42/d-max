@@ -101,6 +101,22 @@ export class AppConversationRepository {
     return this.findById(Number(result.lastInsertRowid))!;
   }
 
+  createWithId(id: number, input: CreateAppConversationInput, now = nowIso()): AppConversation {
+    const existing = this.findById(id);
+    if (existing) {
+      return existing;
+    }
+
+    const entityId = normalizedEntityId(input.contextType, input.contextEntityId);
+    this.db
+      .prepare(
+        "insert into app_conversations (id, title, context_type, context_entity_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?)"
+      )
+      .run(id, input.title ?? null, input.contextType, entityId, now, now);
+
+    return this.findById(id)!;
+  }
+
   updateTitle(id: number, title: string | null): AppConversation {
     this.db.prepare("update app_conversations set title = ? where id = ?").run(title, id);
     return this.findById(id)!;

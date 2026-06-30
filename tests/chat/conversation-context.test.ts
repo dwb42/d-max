@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type Database from "better-sqlite3";
+import { GmailRepository } from "../../src/gmail/gmail-repository.js";
 import { listPromptTemplates, resolveConversationContext } from "../../src/chat/conversation-context.js";
 import { CategoryRepository } from "../../src/repositories/categories.js";
 import { InitiativeRelationRepository } from "../../src/repositories/initiative-relations.js";
 import { InitiativeRepository } from "../../src/repositories/initiatives.js";
 import { MediaAssetRepository } from "../../src/repositories/media-assets.js";
 import { MediaLinkRepository } from "../../src/repositories/media-links.js";
-import { EntityParticipantRepository, OrganizationRepository, PartyAddressRepository, PartyContactPointRepository, PersonRepository } from "../../src/repositories/parties.js";
+import { EntityParticipantRepository, OrganizationRepository, PartyAddressRepository, PartyContactPointRepository, PartyRelationshipRepository, PersonRepository, RelationshipTypeRepository } from "../../src/repositories/parties.js";
+import { PartyTimelineRepository } from "../../src/repositories/party-timeline.js";
 import { TaskChecklistItemRepository } from "../../src/repositories/task-checklist-items.js";
 import { TaskRepository } from "../../src/repositories/tasks.js";
 import { createTestDatabase } from "../helpers/test-db.js";
@@ -595,6 +597,176 @@ describe("resolveConversationContext", () => {
     expect(organizationContext.agentContextBlock).toContain("Main Street 1");
     expect(peopleContext.contextType).toBe("people");
     expect(peopleContext.agentContextBlock).toContain("preferred contact: email clara@example.com");
+  });
+
+  it("includes complete local Gmail, manual communication, and all relevant party tasks for a person", () => {
+    const person = new PersonRepository(db).create({
+      firstName: "Info",
+      lastName: "Abend",
+      description: "Kontakt fuer Veranstaltungsanmeldungen."
+    });
+    new PartyContactPointRepository(db).create({ partyId: person.id, type: "email", value: "infoabend@example.com", isPreferred: true });
+    const tasks = new TaskRepository(db);
+    const openTask = tasks.create({
+      primaryPartyId: person.id,
+      title: "Nächsten Infoabend prüfen und anmelden",
+      notes: "Prüfen, ob Anmeldung noch offen ist."
+    });
+    const doneTask = tasks.complete(tasks.create({
+      primaryPartyId: person.id,
+      title: "Alte Unterlagen prüfen",
+      notes: "Erledigte Maßnahme darf im Kontext nicht verschwinden."
+    }).id, "2026-06-20T09:00:00.000Z");
+
+    new PartyTimelineRepository(db).create({
+      partyId: person.id,
+      kind: "conversation",
+      channel: "phone",
+      occurredAt: "2026-01-05T09:00:00.000Z",
+      title: "Telefonische Vorabklaerung",
+      body: "Alter Hinweis: Teilnahme ist grundsätzlich möglich."
+    });
+
+    const gmail = new GmailRepository(db);
+    const mailbox = gmail.upsertMailbox({ accountLabel: "dietrich@example.com" });
+    const matches = gmail.matchesForEmails(["infoabend@example.com"]);
+    gmail.upsertMessage({
+      mailboxId: mailbox.id,
+      gmailMessageId: "old-infoabend",
+      gmailThreadId: "thread-infoabend",
+      historyId: null,
+      labelIds: ["INBOX"],
+      direction: "inbound",
+      messageDate: "2026-01-10T10:00:00.000Z",
+      subject: "Infoabend Details",
+      from: [{ name: "Infoabend Team", email: "infoabend@example.com" }],
+      to: [{ name: "Dietrich", email: "dietrich@example.com" }],
+      cc: [],
+      bcc: [],
+      plainBody: "Vollständiger alter Mailinhalt mit entscheidender Zusage: ALTE_ZUSAGE_INFOABEND.",
+      htmlBody: null,
+      snippet: "Alter Snippet",
+      attachments: []
+    }, matches);
+    gmail.upsertMessage({
+      mailboxId: mailbox.id,
+      gmailMessageId: "new-infoabend",
+      gmailThreadId: "thread-infoabend",
+      historyId: null,
+      labelIds: ["SENT"],
+      direction: "outbound",
+      messageDate: "2026-06-28T10:00:00.000Z",
+      subject: "Anmeldung Infoabend",
+      from: [{ name: "Dietrich", email: "dietrich@example.com" }],
+      to: [{ name: "Infoabend Team", email: "infoabend@example.com" }],
+      cc: [],
+      bcc: [],
+      plainBody: "Ich habe mich zum Infoabend angemeldet. Vollständige neue Mail bestaetigt die Anmeldung.",
+      htmlBody: null,
+      snippet: "Neue Anmeldung",
+      attachments: []
+    }, matches);
+
+    const resolved = resolveConversationContext(db, { type: "person", partyId: person.id });
+
+    expect(resolved.agentContextBlock).toContain("Complete local communication history (3, newest first; Gmail 2, manual 1):");
+    expect(resolved.agentContextBlock).toContain("ALTE_ZUSAGE_INFOABEND");
+    expect(resolved.agentContextBlock).toContain("Ich habe mich zum Infoabend angemeldet.");
+    expect(resolved.agentContextBlock.indexOf("new-infoabend")).toBeLessThan(resolved.agentContextBlock.indexOf("old-infoabend"));
+    expect(resolved.agentContextBlock).toContain(openTask.title);
+    expect(resolved.agentContextBlock).toContain(doneTask.title);
+    expect(resolved.contextPayload.limits).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Critical party context is not count-capped")
+      ])
+    );
+    expect(resolved.contextPayload.omittedEntities).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ entityType: "task" }),
+        expect.objectContaining({ entityType: "communication" })
+      ])
+    );
+  });
+
+  it("rolls active organization people and their local communication into organization agent context", () => {
+    const organizations = new OrganizationRepository(db);
+    const people = new PersonRepository(db);
+    const relationships = new PartyRelationshipRepository(db);
+    const relationshipTypes = new RelationshipTypeRepository(db);
+    const contacts = new PartyContactPointRepository(db);
+    const tasks = new TaskRepository(db);
+
+    const category = new CategoryRepository(db).create({ name: "CRM" });
+    const initiative = new InitiativeRepository(db).create({
+      categoryId: category.id,
+      name: "Schulkooperation",
+      markdown: "# Ziel\n\nKooperation mit der Organisation aufbauen."
+    });
+    const organization = organizations.create({ name: "Bildungshaus GmbH", markdown: "Organisation fuer lokale Bildungsangebote." });
+    const employee = people.create({
+      firstName: "Bianka",
+      lastName: "Kontakt",
+      salutation: "mrs",
+      description: "Bianka koordiniert Infoabende und Anmeldungen."
+    });
+    contacts.create({ partyId: employee.id, type: "email", value: "bianka@example.com" });
+    const worksFor = relationshipTypes.findByKey("works_for") ?? relationshipTypes.list()[0]!;
+    relationships.create({
+      fromPartyId: employee.id,
+      toPartyId: organization.id,
+      relationshipTypeId: worksFor.id,
+      roleLabel: "Infoabend-Koordination",
+      status: "active"
+    });
+    new EntityParticipantRepository(db).create({
+      partyId: employee.id,
+      entityType: "initiative",
+      entityId: initiative.id,
+      roleLabel: "Ansprechpartnerin"
+    });
+    tasks.create({
+      primaryPartyId: organization.id,
+      initiativeId: initiative.id,
+      title: "Nächsten Infoabend prüfen und anmelden"
+    });
+
+    const gmail = new GmailRepository(db);
+    const mailbox = gmail.upsertMailbox({ accountLabel: "dietrich@example.com" });
+    gmail.upsertMessage({
+      mailboxId: mailbox.id,
+      gmailMessageId: "employee-only-message",
+      gmailThreadId: null,
+      historyId: null,
+      labelIds: ["INBOX"],
+      direction: "inbound",
+      messageDate: "2026-06-29T10:00:00.000Z",
+      subject: "Bestätigung Infoabend",
+      from: [{ name: "Bianka Kontakt", email: "bianka@example.com" }],
+      to: [{ name: "Dietrich", email: "dietrich@example.com" }],
+      cc: [],
+      bcc: [],
+      plainBody: "Ihre Anmeldung zum Infoabend ist bestätigt. Diese Mail ist nur mit der Person verknüpft.",
+      htmlBody: null,
+      snippet: "Anmeldung bestätigt",
+      attachments: []
+    }, gmail.matchesForEmails(["bianka@example.com"]));
+
+    const resolved = resolveConversationContext(db, { type: "organization", partyId: organization.id });
+
+    expect(resolved.agentContextBlock).toContain("Organization people (1, complete active related people):");
+    expect(resolved.agentContextBlock).toContain("Bianka koordiniert Infoabende");
+    expect(resolved.agentContextBlock).toContain("Infoabend-Koordination");
+    expect(resolved.agentContextBlock).toContain("salutation/gender signal: mrs");
+    expect(resolved.agentContextBlock).toContain("employee-only-message");
+    expect(resolved.agentContextBlock).toContain("Ihre Anmeldung zum Infoabend ist bestätigt.");
+    expect(resolved.agentContextBlock).toContain("Kooperation mit der Organisation aufbauen.");
+    expect(resolved.agentContextBlock).toContain("Ansprechpartnerin");
+    expect(resolved.contextPayload.children).toEqual(
+      expect.arrayContaining([
+        "1 active organization people",
+        "1 complete local Gmail messages"
+      ])
+    );
   });
 
   it("lists prompt templates for navigation contexts", () => {

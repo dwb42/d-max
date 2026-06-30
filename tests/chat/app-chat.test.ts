@@ -230,6 +230,34 @@ describe("AppChatService", () => {
     expect(messages[1].content).toContain("agent timeout");
   });
 
+  it("repairs a prepared turn when the conversation row disappears before the assistant reply is stored", async () => {
+    service = new AppChatService(db, async (_message, options) => {
+      db.pragma("foreign_keys = OFF");
+      try {
+        db.prepare("delete from app_conversations where id = ?").run(options.conversationId);
+        db.prepare("update app_chat_messages set conversation_id = null where conversation_id = ?").run(options.conversationId);
+        db.prepare("update app_prompt_logs set conversation_id = null where conversation_id = ?").run(options.conversationId);
+      } finally {
+        db.pragma("foreign_keys = ON");
+      }
+      return { text: "OK", activities: [] };
+    });
+
+    const result = await service.handleMessage({
+      message: "Technischer Health-Test",
+      context: { type: "global" }
+    });
+
+    expect(result.reply).toBe("OK");
+    expect(db.prepare("select id from app_conversations where id = ?").get(result.conversationId)).toBeTruthy();
+    const messages = service.listMessages({ conversationId: result.conversationId });
+    expect(messages.map((message) => message.content)).toEqual(["Technischer Health-Test", "OK"]);
+    expect(service.listPromptLogs().at(-1)).toMatchObject({
+      conversationId: result.conversationId,
+      userMessageId: messages[0].id
+    });
+  });
+
   it("rejects concurrent turns in the same conversation before persisting a duplicate user message", async () => {
     let releaseAgent!: () => void;
     let agentStarted!: () => void;

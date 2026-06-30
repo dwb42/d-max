@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { CalendarDays, CheckCircle2, Circle, Pencil, Plus, Trash2, X } from "lucide-react";
 import { DescriptionBlock, EditModal, EmptyState, EntityDetailPage, EntityHeader, ErrorState, InlineEditableText, MetadataGrid, SectionBlock } from "../../components/ui/index.js";
-import type { Category, Initiative, Organization, ParticipantRoleType, Person, Task, TaskChecklistItem, TaskDetail } from "../../types.js";
+import { fetchPartyActivitySummaries } from "../../api.js";
+import type { Category, Initiative, Organization, OrganizationPersonActivity, ParticipantRoleType, PartyActivitySummary, Person, Task, TaskChecklistItem, TaskDetail } from "../../types.js";
 import { MediaAttachmentsPanel, ParticipantsPanel } from "./SharedDetailPanels.js";
-import { type UpdateTaskInput, datePart, displayInitiativeName, dropAfter, formatDateTimeForUi, formatTaskDueDate, initiativeTypeLabel, moveIdToDropPosition, personName, taskPriorityLabel, taskPriorityOptions, taskStatusLabel } from "./detailUtils.js";
+import { type UpdateTaskInput, datePart, displayInitiativeName, dropAfter, formatDateTimeForUi, formatTaskDueDate, initiativeTypeLabel, moveIdToDropPosition, personName, taskPriorityOptions, taskStatusLabel } from "./detailUtils.js";
 
 export function TaskHeaderTitle(props: {
   task: Task | null;
@@ -123,6 +124,7 @@ export function TaskDetailView(props: {
   onDeleteParticipant: (participantId: number) => Promise<void>;
   onOpenPerson: (partyId: number) => void;
   onOpenOrganization: (partyId: number) => void;
+  onOpenTask?: (taskId: number) => void;
   onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void>;
   onMoveTask: (taskId: number, targetProjectId: number) => Promise<void>;
   onCreateChecklistItem: (taskId: number, name: string) => Promise<void>;
@@ -135,6 +137,44 @@ export function TaskDetailView(props: {
   onReorderMedia: (taskId: number, linkIds: number[]) => Promise<void>;
 }) {
   const [moveProjectModalOpen, setMoveProjectModalOpen] = useState(false);
+  const [activitySummaries, setActivitySummaries] = useState<Record<number, PartyActivitySummary>>({});
+  const [organizationPeopleActivity, setOrganizationPeopleActivity] = useState<Record<number, OrganizationPersonActivity[]>>({});
+
+  const summaryPartyKey = props.detail
+    ? [
+        props.detail.task.primaryPartyId,
+        ...(props.detail.participants ?? []).map((participant) => participant.partyId)
+      ].filter(Boolean).join(":")
+    : "";
+
+  useEffect(() => {
+    const partyIds = props.detail
+      ? [
+          props.detail.task.primaryPartyId,
+          ...(props.detail.participants ?? []).map((participant) => participant.partyId)
+        ].filter((partyId): partyId is number => Boolean(partyId))
+      : [];
+    if (partyIds.length === 0) {
+      setActivitySummaries({});
+      setOrganizationPeopleActivity({});
+      return;
+    }
+    let cancelled = false;
+    fetchPartyActivitySummaries(partyIds, { includeOrganizationPeople: true })
+      .then((response) => {
+        if (cancelled) return;
+        setActivitySummaries(Object.fromEntries(response.summaries.map((summary) => [summary.partyId, summary])));
+        setOrganizationPeopleActivity(response.organizationPeople ?? {});
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setActivitySummaries({});
+        setOrganizationPeopleActivity({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.detail?.task.id, summaryPartyKey]);
 
   if (props.loadError) {
     return (
@@ -174,7 +214,7 @@ export function TaskDetailView(props: {
     meta: "Primär · Organisationsmaßnahme",
     detail: "Diese Maßnahme hängt direkt an dieser Organisation."
   } : null;
-  const checklistDone = checklistItems.filter((item) => item.status === "done").length;
+
   const currentCategoryId = category?.id ?? null;
   const moveProjectCandidates = props.projects
     .filter((project) => project.type === "project" && project.id !== task.initiativeId && project.status !== "archived")
@@ -184,52 +224,46 @@ export function TaskDetailView(props: {
       return displayInitiativeName(left).localeCompare(displayInitiativeName(right)) || left.id - right.id;
     });
   const aside = (
-    <MetadataGrid
-      items={[
-        { label: "Status", value: taskStatusLabel(task.status) },
-        { label: "Priorität", value: taskPriorityLabel(task.priority) },
-        { label: "Fällig", value: task.dueAt ? formatTaskDueDate(task.dueAt) : "Ohne Fälligkeitsdatum" },
-        {
-          label: "Projekt",
-          value: initiative ? (
-            <span className="task-project-metadata">
-              <span>{displayInitiativeName(initiative)}</span>
-              <button
-                type="button"
-                className="metadata-edit-button"
-                disabled={moveProjectCandidates.length === 0}
-                title={moveProjectCandidates.length === 0 ? "Kein anderes Projekt verfügbar" : "Projekt ändern"}
-                aria-label="Projekt dieser Maßnahme ändern"
-                onClick={() => setMoveProjectModalOpen(true)}
-              >
-                <Pencil size={13} />
-              </button>
-            </span>
-          ) : null
-        },
-        { label: "Lebensbereich", value: category?.name ?? null },
-        { label: "Checkliste", value: checklistItems.length > 0 ? `${checklistDone}/${checklistItems.length}` : null },
-        { label: "Beteiligte", value: participants.length + (primaryContext ? 1 : 0) > 0 ? String(participants.length + (primaryContext ? 1 : 0)) : null },
-        { label: "Medien", value: mediaAttachments.length > 0 ? String(mediaAttachments.length) : null },
-        { label: "Erstellt", value: task.createdAt ? formatDateTimeForUi(task.createdAt) : null },
-        { label: "Aktualisiert", value: task.updatedAt ? formatDateTimeForUi(task.updatedAt) : null },
-        { label: "Erledigt", value: task.completedAt ? formatDateTimeForUi(task.completedAt) : null }
-      ]}
-    />
+    <>
+      <TaskChecklistPanel
+        task={task}
+        items={checklistItems}
+        onCreateItem={props.onCreateChecklistItem}
+        onUpdateItem={props.onUpdateChecklistItem}
+        onDeleteItem={props.onDeleteChecklistItem}
+        onReorderItems={props.onReorderChecklistItems}
+      />
+      <MetadataGrid
+        items={[
+          { label: "Erstellt am", value: task.createdAt ? formatDateTimeForUi(task.createdAt) : null },
+          { label: "Aktualisiert am", value: task.updatedAt ? formatDateTimeForUi(task.updatedAt) : null },
+          {
+            label: "Projekt / Initiative",
+            value: initiative ? (
+              <span className="task-project-metadata">
+                <span>{displayInitiativeName(initiative)}</span>
+                <button
+                  type="button"
+                  className="metadata-edit-button"
+                  disabled={moveProjectCandidates.length === 0}
+                  title={moveProjectCandidates.length === 0 ? "Kein anderes Projekt verfügbar" : "Projekt / Initiative ändern"}
+                  aria-label="Projekt oder Initiative dieser Maßnahme ändern"
+                  onClick={() => setMoveProjectModalOpen(true)}
+                >
+                  <Pencil size={13} />
+                </button>
+              </span>
+            ) : null
+          }
+        ]}
+      />
+    </>
   );
 
   return (
     <>
       <EntityDetailPage className="task-detail" aside={aside}>
         <TaskNotesPanel task={task} onUpdateTask={props.onUpdateTask} />
-        <TaskChecklistPanel
-          task={task}
-          items={checklistItems}
-          onCreateItem={props.onCreateChecklistItem}
-          onUpdateItem={props.onUpdateChecklistItem}
-          onDeleteItem={props.onDeleteChecklistItem}
-          onReorderItems={props.onReorderChecklistItems}
-        />
         <ParticipantsPanel
           entityType="task"
           entityId={task.id}
@@ -238,12 +272,15 @@ export function TaskDetailView(props: {
           organizations={props.organizations}
           roleTypes={props.participantRoleTypes}
           primaryContext={primaryContext}
+          activitySummaries={activitySummaries}
+          organizationPeopleActivity={organizationPeopleActivity}
           surface="section"
           createMode="modal"
           onCreateParticipant={props.onCreateParticipant}
           onDeleteParticipant={props.onDeleteParticipant}
           onOpenPerson={props.onOpenPerson}
           onOpenOrganization={props.onOpenOrganization}
+          onOpenTask={props.onOpenTask}
         />
         <MediaAttachmentsPanel
           entityType="task"

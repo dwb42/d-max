@@ -255,10 +255,7 @@ export async function runOpenClawSessionTurn(
   traceOpenClaw(diagnostics, "openclaw_warmup_wait_finished");
 
   try {
-    traceOpenClaw(diagnostics, "openclaw_gateway_responsive_check_started");
-    await ensureResponsiveOpenClawGateway({ configPath, stateDir, diagnostics });
-    traceOpenClaw(diagnostics, "openclaw_gateway_responsive_check_finished");
-    await prewarmOpenClawGatewayOnce({ configPath, stateDir, diagnostics });
+    traceOpenClaw(diagnostics, "openclaw_gateway_responsive_check_skipped_for_prepared_session_turn");
     return await runOpenClawGatewaySessionTurn(message, input, {
       configPath,
       stateDir,
@@ -298,16 +295,24 @@ export async function prepareOpenClawSession(
   const configPath = options.configPath ?? env.dmaxOpenClawConfigPath;
   const cached = getCachedPreparedSession(stateDir, input.key);
   if (cached) {
-    traceOpenClaw(options.diagnostics, "openclaw_sessions_create_skipped_cached", {
+    if (isExternalOpenClawGatewayConfigured() || isOpenClawGatewayPortBound()) {
+      traceOpenClaw(options.diagnostics, "openclaw_sessions_create_skipped_cached", {
+        sessionKey: input.key,
+        sessionId: cached.sessionId
+      });
+      traceOpenClaw(options.diagnostics, "openclaw_session_prepare_finished", {
+        sessionKey: input.key,
+        sessionId: cached.sessionId,
+        source: "cache"
+      });
+      return cached;
+    }
+
+    forgetCachedPreparedSession(stateDir, input.key, cached);
+    traceOpenClaw(options.diagnostics, "openclaw_sessions_cache_invalidated_gateway_unbound", {
       sessionKey: input.key,
       sessionId: cached.sessionId
     });
-    traceOpenClaw(options.diagnostics, "openclaw_session_prepare_finished", {
-      sessionKey: input.key,
-      sessionId: cached.sessionId,
-      source: "cache"
-    });
-    return cached;
   }
 
   const promiseKey = `${stateDir}:${input.key}`;
@@ -551,6 +556,9 @@ async function restartOpenClawGateway(options: { configPath: string; stateDir: s
     }
   }
   gatewayProcess = null;
+  gatewayStartPromise = null;
+  invalidateOpenClawGatewayConnection();
+  markOpenClawGatewayNotReady();
   gatewayPrewarmCompletedKey = null;
   gatewayPrewarmFailedKey = null;
   await ensureOpenClawGateway({ ...options, readyTimeoutMs: GATEWAY_READY_DEADLINE_MS });
@@ -670,6 +678,7 @@ async function stopOpenClawGatewayListeners(diagnostics?: ChatTurnDiagnosticCont
     }
   }
   gatewayProcess = null;
+  gatewayStartPromise = null;
   gatewayPrewarmCompletedKey = null;
   gatewayPrewarmFailedKey = null;
   markOpenClawGatewayNotReady();
@@ -880,6 +889,16 @@ function cachePreparedSession(sessionKey: string, stateDir: string, prepared: Op
   };
   preparedSessionsByKey.set(preparedSessionCacheKey(stateDir, sessionKey), normalized);
   preparedSessionsByKey.set(preparedSessionCacheKey(stateDir, normalized.key), normalized);
+}
+
+function forgetCachedPreparedSession(stateDir: string, sessionKey: string, prepared: OpenClawPreparedSession): void {
+  preparedSessionsByKey.delete(preparedSessionCacheKey(stateDir, sessionKey));
+  preparedSessionsByKey.delete(preparedSessionCacheKey(stateDir, prepared.key));
+  for (const [key, value] of preparedSessionsByKey.entries()) {
+    if (value.sessionId === prepared.sessionId) {
+      preparedSessionsByKey.delete(key);
+    }
+  }
 }
 
 function readPreparedSessionFromRegistry(stateDir: string, sessionKey: string): OpenClawPreparedSession | null {

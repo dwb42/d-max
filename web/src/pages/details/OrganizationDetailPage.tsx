@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Blocks, Building2, ClipboardList, Plus, Users } from "lucide-react";
 import { DescriptionBlock, EditModal, EmptyState, EntityDetailPage, ErrorState, MetadataGrid, RelationGroup, RelationItem, RelationList, SectionBlock } from "../../components/ui/index.js";
-import { AddressBlock, ContactPointList } from "../../components/party/index.js";
+import { AddressBlock, ContactPointList, OrganizationPeopleActivityList, PartyActivitySummaryCard } from "../../components/party/index.js";
 import type { AddressInput, ContactPointInput } from "../../components/party/index.js";
-import type { EntityParticipant, Initiative, Organization, OrganizationDetail, PartyRelationshipWithParties, Person, RelationshipType, Task } from "../../types.js";
+import { fetchPartyActivitySummaries } from "../../api.js";
+import type { EntityParticipant, Initiative, Organization, OrganizationDetail, OrganizationPersonActivity, PartyActivitySummary, PartyRelationshipWithParties, Person, RelationshipType, Task } from "../../types.js";
 import { entityTypeLabel, formatDateTimeForUi, participantRoleSummary, personName } from "./detailUtils.js";
 import { PartyHistorySection, PartyTasksSection } from "./PartyDetailSections.js";
 import type { EmailComposeDraft } from "./PartyDetailSections.js";
@@ -47,6 +48,31 @@ export function OrganizationDetailView(props: {
   const organization = props.detail?.organization;
   const [composeDraft, setComposeDraft] = useState<EmailComposeDraft | null>(null);
   const [partyTaskVersion, setPartyTaskVersion] = useState(0);
+  const [activitySummary, setActivitySummary] = useState<PartyActivitySummary | null>(null);
+  const [organizationPeopleActivity, setOrganizationPeopleActivity] = useState<OrganizationPersonActivity[]>([]);
+
+  useEffect(() => {
+    if (!organization?.id) {
+      setActivitySummary(null);
+      setOrganizationPeopleActivity([]);
+      return;
+    }
+    let cancelled = false;
+    fetchPartyActivitySummaries([organization.id], { includeOrganizationPeople: true })
+      .then((response) => {
+        if (cancelled) return;
+        setActivitySummary(response.summaries[0] ?? null);
+        setOrganizationPeopleActivity(response.organizationPeople?.[organization.id] ?? []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setActivitySummary(null);
+        setOrganizationPeopleActivity([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organization?.id, partyTaskVersion]);
 
   if (props.loadError) {
     return (
@@ -93,10 +119,12 @@ export function OrganizationDetailView(props: {
             composeDraft={composeDraft}
             onComposeDraftChange={setComposeDraft}
             taskRefreshKey={partyTaskVersion}
+            onActivityChanged={() => setPartyTaskVersion((version) => version + 1)}
             onOpenTask={props.onOpenTask}
           />
         </main>
         <aside className="party-detail-sidebar">
+          <PartyActivitySummaryCard summary={activitySummary} title="Aktivität" onOpenTask={props.onOpenTask} />
           <ContactPointList
             partyId={organization.id}
             contactPoints={props.detail.contactPoints}
@@ -132,9 +160,11 @@ export function OrganizationDetailView(props: {
             organizations={props.organizations}
             relationshipTypes={props.relationshipTypes}
             relationships={props.detail.relationships}
+            peopleActivity={organizationPeopleActivity}
             onCreateRelationship={props.onCreateRelationship}
             onOpenPerson={props.onOpenPerson}
             onOpenOrganization={props.onOpenOrganization}
+            onOpenTask={props.onOpenTask}
           />
           <OrganizationParticipationsSection
             organization={organization}
@@ -282,6 +312,7 @@ function OrganizationRelationsSection(props: {
   organizations: Organization[];
   relationshipTypes: RelationshipType[];
   relationships: OrganizationDetail["relationships"];
+  peopleActivity: OrganizationPersonActivity[];
   onCreateRelationship: (input: {
     fromPartyId: number;
     toPartyId: number;
@@ -291,6 +322,7 @@ function OrganizationRelationsSection(props: {
   }) => Promise<void>;
   onOpenPerson: (partyId: number) => void;
   onOpenOrganization: (partyId: number) => void;
+  onOpenTask: (taskId: number) => void;
 }) {
   const [personManagerOpen, setPersonManagerOpen] = useState(false);
   const [organizationManagerOpen, setOrganizationManagerOpen] = useState(false);
@@ -348,24 +380,33 @@ function OrganizationRelationsSection(props: {
           </button>
         )}
       >
-        {memberRelationships.map((relationship) => {
-          const person = relationship.fromPartyId === props.organization.id ? relationship.toParty : relationship.fromParty;
-          const direction =
-            relationship.relationshipType.directionality === "symmetric"
-              ? relationship.relationshipType.label
-              : relationship.fromPartyId === person.id
+        {props.peopleActivity.length > 0 ? (
+          <OrganizationPeopleActivityList
+            people={props.peopleActivity}
+            initialVisible={8}
+            onOpenPerson={props.onOpenPerson}
+            onOpenTask={props.onOpenTask}
+          />
+        ) : (
+          memberRelationships.map((relationship) => {
+            const person = relationship.fromPartyId === props.organization.id ? relationship.toParty : relationship.fromParty;
+            const direction =
+              relationship.relationshipType.directionality === "symmetric"
                 ? relationship.relationshipType.label
-                : relationship.relationshipType.inverseLabel ?? relationship.relationshipType.label;
-          return (
-            <RelationItem
-              key={relationship.id}
-              icon={<Users size={16} />}
-              title={person.displayName}
-              meta={[direction, relationship.roleLabel].filter(Boolean).join(" · ")}
-              onOpen={() => props.onOpenPerson(person.id)}
-            />
-          );
-        })}
+                : relationship.fromPartyId === person.id
+                  ? relationship.relationshipType.label
+                  : relationship.relationshipType.inverseLabel ?? relationship.relationshipType.label;
+            return (
+              <RelationItem
+                key={relationship.id}
+                icon={<Users size={16} />}
+                title={person.displayName}
+                meta={[direction, relationship.roleLabel].filter(Boolean).join(" · ")}
+                onOpen={() => props.onOpenPerson(person.id)}
+              />
+            );
+          })
+        )}
       </RelationGroup>
       <RelationGroup
         title="Organisationen"

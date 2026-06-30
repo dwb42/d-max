@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { Archive, Blocks, Building2, CheckCircle2, Circle, ClipboardList, Forward, Inbox, Mail, MessageSquareText, Plus, Reply, ReplyAll, Send, Trash2, Users } from "lucide-react";
 import { ConfirmModal, DescriptionBlock, EditModal, EmptyState, EntityDetailPage, ErrorState, MetadataGrid, RelationItem, RelationList, SectionBlock } from "../../components/ui/index.js";
-import { AddressBlock, ContactPointList } from "../../components/party/index.js";
+import { AddressBlock, ContactPointList, PartyActivitySummaryCard } from "../../components/party/index.js";
 import type { AddressInput, ContactPointInput } from "../../components/party/index.js";
-import { archivePartyGmailMessage, createGmailDraft, createPartyTimelineEntry, createTask, deletePartyTimelineEntry, fetchGmailMailboxes, fetchPartyGmailMessages, fetchPartyTasks, fetchPartyTimelineEntries, sendGmailDraft, trashPartyGmailMessage, updatePartyTimelineEntry, updateTask, updateTaskStatus } from "../../api.js";
-import type { EntityParticipant, GmailAuthStatus, GmailMailboxWithStatus, GmailMessage, Initiative, Organization, Party, PartyRelationshipWithParties, PartyTimelineEntry, PartyTimelineEntryKind, Person, PersonDetail, RelationshipType, Task } from "../../types.js";
-import { entityTypeLabel, formatDateTimeForUi, formatTaskDueDate, participantRoleSummary, partyRelationshipLabel, personName, salutationLabel, taskPriorityLabel, taskStatusLabel } from "./detailUtils.js";
+import { archivePartyGmailMessage, createGmailDraft, createPartyTimelineEntry, createTask, deletePartyTimelineEntry, fetchGmailMailboxes, fetchPartyActivitySummaries, fetchPartyGmailMessages, fetchPartyTasks, fetchPartyTimelineEntries, sendGmailDraft, trashPartyGmailMessage, updatePartyTimelineEntry, updateTask, updateTaskStatus } from "../../api.js";
+import type { EntityParticipant, GmailAuthStatus, GmailMailboxWithStatus, GmailMessage, Initiative, Organization, Party, PartyActivitySummary, PartyRelationshipWithParties, PartyTimelineEntry, PartyTimelineEntryChannel, PartyTimelineEntryKind, Person, PersonDetail, RelationshipType, Task } from "../../types.js";
+import { entityTypeLabel, formatDateTimeForUi, formatTaskDueDate, participantRoleSummary, partyRelationshipLabel, personName, salutationLabel, taskPriorityLabel } from "./detailUtils.js";
 
 export type EmailComposeDraft = {
   to: string;
@@ -58,6 +58,25 @@ export function PersonDetailView(props: {
   const person = props.detail?.person;
   const [composeDraft, setComposeDraft] = useState<EmailComposeDraft | null>(null);
   const [partyTaskVersion, setPartyTaskVersion] = useState(0);
+  const [activitySummary, setActivitySummary] = useState<PartyActivitySummary | null>(null);
+
+  useEffect(() => {
+    if (!person?.id) {
+      setActivitySummary(null);
+      return;
+    }
+    let cancelled = false;
+    fetchPartyActivitySummaries([person.id])
+      .then((response) => {
+        if (!cancelled) setActivitySummary(response.summaries[0] ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setActivitySummary(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [person?.id, partyTaskVersion]);
 
   if (props.loadError) {
     return (
@@ -106,10 +125,12 @@ export function PersonDetailView(props: {
             composeDraft={composeDraft}
             onComposeDraftChange={setComposeDraft}
             taskRefreshKey={partyTaskVersion}
+            onActivityChanged={() => setPartyTaskVersion((version) => version + 1)}
             onOpenTask={props.onOpenTask}
           />
         </main>
         <aside className="party-detail-sidebar">
+          <PartyActivitySummaryCard summary={activitySummary} title="Aktivität" onOpenTask={props.onOpenTask} />
           <ContactPointList
             partyId={person.id}
             contactPoints={props.detail.contactPoints}
@@ -164,6 +185,7 @@ export function PartyHistorySection(props: {
   composeDraft?: EmailComposeDraft | null;
   onComposeDraftChange?: (draft: EmailComposeDraft | null) => void;
   taskRefreshKey?: number;
+  onActivityChanged?: () => void;
   onOpenTask?: (taskId: number) => void;
 }) {
   const [messages, setMessages] = useState<GmailMessage[]>([]);
@@ -308,6 +330,7 @@ export function PartyHistorySection(props: {
         return next;
       });
       await loadEntries();
+      props.onActivityChanged?.();
     } catch (err) {
       setTimelineError(err instanceof Error ? err.message : "Kommunikationsnotiz konnte nicht gelöscht werden.");
     } finally {
@@ -392,6 +415,7 @@ export function PartyHistorySection(props: {
                       </div>
                       <div className="party-email-meta">
                         <span>Typ: {partyTimelineKindLabel(entry.kind)}</span>
+                        <span>Kanal: {partyTimelineChannelLabel(entry.channel)}</span>
                         <span>Zeitpunkt: {formatDateTimeForUi(entry.occurredAt)}</span>
                         <span>Aktualisiert: {formatDateTimeForUi(entry.updatedAt)}</span>
                       </div>
@@ -481,6 +505,7 @@ export function PartyHistorySection(props: {
             await createPartyTimelineEntry(props.partyId, input);
             setCreateOpen(false);
             await loadEntries();
+            props.onActivityChanged?.();
           }}
         />
       ) : null}
@@ -492,6 +517,7 @@ export function PartyHistorySection(props: {
             await updatePartyTimelineEntry(props.partyId, editingEntry.id, input);
             setEditingEntry(null);
             await loadEntries();
+            props.onActivityChanged?.();
           }}
         />
       ) : null}
@@ -513,6 +539,7 @@ export function PartyHistorySection(props: {
           onSent={async () => {
             setComposeDraft(null);
             await load(true);
+            props.onActivityChanged?.();
           }}
         />
       ) : null}
@@ -585,32 +612,12 @@ export function PartyTasksSection(props: {
       {!loading && !error && sortedTasks.length > 0 ? (
         <div className="relation-list">
           {sortedTasks.map((task) => (
-            <RelationItem
+            <PartyTaskItem
               key={task.id}
-              icon={(
-                <TaskStatusIconButton
-                  task={task}
-                  disabled={busyTaskId !== null}
-                  onToggle={() => void toggleTaskStatus(task)}
-                />
-              )}
-              title={task.title}
-              meta={[
-                taskStatusLabel(task.status),
-                taskPriorityLabel(task.priority),
-                task.dueAt ? `Fällig ${formatPartyTaskDueAt(task.dueAt)}` : null
-              ].filter(Boolean).join(" · ")}
-              detail={task.notes}
-              actions={(
-                <button
-                  type="button"
-                  className="secondary-action compact"
-                  disabled={busyTaskId !== null}
-                  onClick={() => setEditingTask(task)}
-                >
-                  Anpassen
-                </button>
-              )}
+              task={task}
+              disabled={busyTaskId !== null}
+              onToggleStatus={() => void toggleTaskStatus(task)}
+              onEdit={() => setEditingTask(task)}
               onOpen={() => props.onOpenTask(task.id)}
             />
           ))}
@@ -640,6 +647,55 @@ export function PartyTasksSection(props: {
         />
       ) : null}
     </SectionBlock>
+  );
+}
+
+function PartyTaskItem(props: {
+  task: Task;
+  disabled: boolean;
+  onToggleStatus: () => void;
+  onEdit: () => void;
+  onOpen: () => void;
+}) {
+  const dueDisplay = formatPartyTaskDueDisplay(props.task.dueAt);
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    props.onOpen();
+  };
+
+  return (
+    <div
+      className="relation-item relation-button party-task-item"
+      role="button"
+      tabIndex={0}
+      aria-label={`Maßnahme öffnen: ${props.task.title}`}
+      onClick={props.onOpen}
+      onKeyDown={onKeyDown}
+    >
+      <div className="entity-icon">
+        <TaskStatusIconButton task={props.task} disabled={props.disabled} onToggle={props.onToggleStatus} />
+      </div>
+      <div className="relation-item-copy party-task-copy">
+        <span className={`party-task-due-line ${dueDisplay.tone}`}>{dueDisplay.label}</span>
+        <strong>{props.task.title}</strong>
+        {props.task.notes ? <span>{props.task.notes}</span> : null}
+      </div>
+      <div
+        className="relation-item-actions"
+        onClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="secondary-action compact"
+          disabled={props.disabled}
+          onClick={props.onEdit}
+        >
+          Anpassen
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -783,10 +839,11 @@ function PartyTaskCreateModal(props: {
 function PartyTimelineEntryModal(props: {
   entry?: PartyTimelineEntry | null;
   onCancel: () => void;
-  onSave: (input: { kind: PartyTimelineEntryKind; direction: PartyTimelineEntry["direction"]; occurredAt: string | null; title: string; body: string | null }) => Promise<void>;
+  onSave: (input: { kind: PartyTimelineEntryKind; channel: PartyTimelineEntryChannel; direction: PartyTimelineEntry["direction"]; occurredAt: string | null; title: string; body: string | null }) => Promise<void>;
 }) {
   const initialDate = props.entry?.occurredAt ? new Date(props.entry.occurredAt) : new Date();
   const [kind, setKind] = useState<PartyTimelineEntryKind>(props.entry?.kind ?? "conversation");
+  const [channel, setChannel] = useState<PartyTimelineEntryChannel>(props.entry?.channel ?? defaultPartyTimelineChannel(props.entry?.kind ?? "conversation"));
   const [occurredAt, setOccurredAt] = useState(() => formatLocalDateTimeInput(initialDate));
   const [title, setTitle] = useState(props.entry?.title ?? "");
   const [body, setBody] = useState(props.entry?.body ?? "");
@@ -807,6 +864,7 @@ function PartyTimelineEntryModal(props: {
         try {
           await props.onSave({
             kind,
+            channel,
             direction: defaultPartyTimelineDirection(kind),
             occurredAt: localDateTimeInputToIso(occurredAt),
             title: title.trim(),
@@ -828,7 +886,15 @@ function PartyTimelineEntryModal(props: {
       <div className="modal-two-column">
         <label>
           Typ
-          <select value={kind} disabled={saving} onChange={(event) => setKind(event.target.value as PartyTimelineEntryKind)}>
+          <select
+            value={kind}
+            disabled={saving}
+            onChange={(event) => {
+              const nextKind = event.target.value as PartyTimelineEntryKind;
+              setKind(nextKind);
+              setChannel(defaultPartyTimelineChannel(nextKind));
+            }}
+          >
             <option value="conversation">Gespräch</option>
             <option value="letter_received">Brief erhalten</option>
             <option value="letter_sent">Brief gesendet</option>
@@ -836,6 +902,19 @@ function PartyTimelineEntryModal(props: {
             <option value="note">Notiz</option>
           </select>
         </label>
+        <label>
+          Kanal
+          <select value={channel} disabled={saving} onChange={(event) => setChannel(event.target.value as PartyTimelineEntryChannel)}>
+            <option value="phone">Telefon</option>
+            <option value="meeting">Meeting</option>
+            <option value="visit">Besuch</option>
+            <option value="letter">Brief</option>
+            <option value="note">Notiz</option>
+            <option value="other">Sonstiges</option>
+          </select>
+        </label>
+      </div>
+      <div className="modal-two-column">
         <label>
           Zeitpunkt
           <input type="datetime-local" value={occurredAt} disabled={saving} onChange={(event) => setOccurredAt(event.target.value)} />
@@ -862,6 +941,45 @@ function taskDueAtToLocalDateTimeInput(value: string | null): string {
 
 function formatPartyTaskDueAt(value: string): string {
   return value.includes("T") ? formatDateTimeForUi(value) : formatTaskDueDate(value);
+}
+
+function formatPartyTaskDueDisplay(value: string | null): { label: string; tone: "future" | "today" | "past" | "none" } {
+  if (!value) return { label: "Ohne Datum", tone: "none" };
+  const dueDate = partyTaskDueCalendarDate(value);
+  if (!dueDate) return { label: value, tone: "none" };
+
+  const now = new Date();
+  const today = { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() };
+  const dayDelta = Math.round(
+    (Date.UTC(dueDate.year, dueDate.month - 1, dueDate.day) - Date.UTC(today.year, today.month - 1, today.day)) / 86_400_000
+  );
+  const dateLabel = `${String(dueDate.day).padStart(2, "0")}.${String(dueDate.month).padStart(2, "0")}.${dueDate.year}`;
+
+  if (dayDelta === 0) return { label: `Heute, ${dateLabel}`, tone: "today" };
+
+  const weekday = new Intl.DateTimeFormat("de-DE", { weekday: "long" }).format(new Date(dueDate.year, dueDate.month - 1, dueDate.day));
+  const relativeLabel = dayDelta > 0
+    ? `in ${dayDelta} ${dayDelta === 1 ? "Tag" : "Tagen"}`
+    : `vor ${Math.abs(dayDelta)} ${Math.abs(dayDelta) === 1 ? "Tag" : "Tagen"}`;
+  return {
+    label: `${weekday}, ${dateLabel} · ${relativeLabel}`,
+    tone: dayDelta > 0 ? "future" : "past"
+  };
+}
+
+function partyTaskDueCalendarDate(value: string): { year: number; month: number; day: number } | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split("-").map(Number);
+    return { year, month, day };
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return {
+    year: date.getFullYear(),
+    month: date.getMonth() + 1,
+    day: date.getDate()
+  };
 }
 
 function partyTaskHistoryDate(task: Task): string {
@@ -1249,11 +1367,27 @@ function partyTimelineKindLabel(kind: PartyTimelineEntryKind): string {
   return "Notiz";
 }
 
+function partyTimelineChannelLabel(channel: PartyTimelineEntryChannel): string {
+  if (channel === "phone") return "Telefon";
+  if (channel === "meeting") return "Meeting";
+  if (channel === "visit") return "Besuch";
+  if (channel === "letter") return "Brief";
+  if (channel === "note") return "Notiz";
+  return "Sonstiges";
+}
+
 function defaultPartyTimelineDirection(kind: PartyTimelineEntryKind): PartyTimelineEntry["direction"] {
   if (kind === "letter_received") return "inbound";
   if (kind === "letter_sent") return "outbound";
   if (kind === "conversation" || kind === "visit") return "bidirectional";
   return "none";
+}
+
+function defaultPartyTimelineChannel(kind: PartyTimelineEntryKind): PartyTimelineEntryChannel {
+  if (kind === "letter_received" || kind === "letter_sent") return "letter";
+  if (kind === "visit") return "visit";
+  if (kind === "note") return "note";
+  return "other";
 }
 
 function PersonCoreModal(props: {

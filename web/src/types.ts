@@ -359,11 +359,13 @@ export type OrganizationDetail = {
 };
 
 export type PartyTimelineEntryKind = "conversation" | "letter_received" | "letter_sent" | "visit" | "note";
+export type PartyTimelineEntryChannel = "phone" | "meeting" | "visit" | "letter" | "note" | "other";
 export type PartyTimelineEntryDirection = "inbound" | "outbound" | "bidirectional" | "none";
 
 export type PartyTimelineEntry = {
   id: number;
   kind: PartyTimelineEntryKind;
+  channel: PartyTimelineEntryChannel;
   direction: PartyTimelineEntryDirection;
   occurredAt: string;
   title: string;
@@ -381,6 +383,48 @@ export type PartyTimelineEntry = {
     createdAt: string;
     updatedAt: string;
   }>;
+};
+
+export type PartyNextAction = {
+  taskId: number;
+  title: string;
+  dueAt: string | null;
+  status: Task["status"];
+  priority: Task["priority"];
+};
+
+export type PartyActivityStats = {
+  emailInbound: number;
+  emailOutbound: number;
+  phone: number;
+  meeting: number;
+  visit: number;
+  letters: number;
+  manualTotal: number;
+  measureTotal: number;
+  openMeasureTotal: number;
+};
+
+export type PartyActivitySummary = {
+  partyId: number;
+  partyType: PartyType;
+  displayName: string;
+  contactSince: string | null;
+  lastContactAt: string | null;
+  channelsUsed: string[];
+  stats: PartyActivityStats;
+  nextAction: PartyNextAction | null;
+  rollupIncludesPeople?: boolean;
+  rollupPartyIds?: number[];
+};
+
+export type OrganizationPersonActivity = {
+  partyId: number;
+  displayName: string;
+  relationshipLabel: string;
+  roleLabel: string | null;
+  startedOn: string | null;
+  summary: PartyActivitySummary;
 };
 
 export type CalendarEntryType = "initiative_focus" | "task_work" | "standalone";

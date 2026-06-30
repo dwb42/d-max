@@ -94,6 +94,13 @@ export function readBuffer(req: http.IncomingMessage, maxBytes: number): Promise
 }
 
 export function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+  if (res.headersSent || res.writableEnded) {
+    if (!res.writableEnded) {
+      res.end();
+    }
+    return;
+  }
+
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "http://localhost:5173",
