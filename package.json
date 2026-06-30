@@ -16,6 +16,7 @@
     "mcp": "node scripts/run-ts-or-built.mjs src/mcp/server.ts dist/src/mcp/server.js",
     "smoke:mcp": "tsx scripts/mcp-smoke.ts",
     "diagnostics:chat-turn": "tsx scripts/analyze-chat-turn.ts",
+    "diagnostics:codex-context": "tsx scripts/measure-codex-context.ts",
     "validate:prod-topology": "tsx scripts/validate-prod-topology.ts",
     "voice:capability:xai": "tsx scripts/xai-realtime-capability.ts",
     "voice:agent": "tsx src/voice/livekit-agent.ts",

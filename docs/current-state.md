@@ -501,8 +501,11 @@ TTS fails.
 - Browser app-chat context is assembled by
   `src/chat/conversation-context.ts`. The resolver builds a text context block
   plus structured debug payload and sends the final text to OpenClaw as the
-  session message together with the user's message. OpenClaw still contributes
-  its workspace runtime instructions from `openclaw/workspace/`.
+  session message together with the user's message. Static prompt-section
+  definitions and template listing live in
+  `src/chat/conversation-prompt-templates.ts`, while resolver state assembly
+  remains in `src/chat/conversation-context.ts`. OpenClaw still contributes its
+  workspace runtime instructions from `openclaw/workspace/`.
 - The core DMAX chat context modes are `categories`, `category`,
   `initiatives`, `ideas`, `projects`, `habits`, `idea`, `project`, `habit`,
   and `task`. Each mode has runtime instructions and response guidance from the
@@ -542,7 +545,10 @@ TTS fails.
   it also follows OpenClaw registry session replacement, merges main-agent,
   `dmax-research`, and `dmax-google-workspace` trajectory activities, and can
   return a concise activity-based fallback when OpenClaw reports completion but
-  no final assistant transcript entry is available.
+  no final assistant transcript entry is available. OpenClaw activity,
+  trajectory, subagent, and completed-reply parsing lives in
+  `src/chat/openclaw-activities.ts`; `src/chat/openclaw-agent.ts` owns gateway
+  lifecycle and session orchestration.
 - The embedded OpenClaw gateway client loader resolves the installed
   `GatewayClient` export dynamically from global OpenClaw `client-*.js` bundles
   and supports gateway protocol 3-4. This keeps the app-chat and production
@@ -829,6 +835,13 @@ Implemented behavior:
 
 Implemented in `src/api/server.ts`.
 
+The API server is still a single Node `http` router for route orchestration, but
+shared request schemas live in `src/api/request-schemas.ts`, stateless HTTP
+helpers live in `src/api/http-utils.ts`, and URL/query parsers live in
+`src/api/query-parsers.ts`. Route handlers should keep repository/service
+coordination in `server.ts` and move only reusable stateless helpers into those
+support modules.
+
 After all explicit API routes, the server handles production static web
 serving. Paths under `/api` remain API-only. Other `GET`/`HEAD` requests first
 try a real file in `DMAX_WEB_DIST_DIR`; missing non-asset paths fall back to
@@ -1010,12 +1023,18 @@ Known issue:
 
 - Current forward-looking technical plan:
   `docs/architecture/DMAX_NEXT_WORK_PLAN.md`. Recommended next sequence is
-  DMAX drawer/context extraction, a small `App.tsx` orchestration decomposition,
-  config/prompts/debug containment, then product-specific deferred work.
+  product-specific deferred work plus task-scoped decomposition when touching a
+  still-large route, API, or agent orchestration surface.
 - `App.tsx` still owns app shell, route parsing, data loading, mutation
-  callbacks, DMAX drawer/chat behavior, utility/debug surfaces, and
-  calendar/planning surfaces. List and detail route compositions are already
-  extracted.
+  callbacks, LiveKit setup, and high-level route orchestration. List and detail
+  route compositions are extracted, and config, prompt/debug, DMAX drawer/chat,
+  Planning Canvas, timeline, onboarding, and legacy initiative-list surfaces now
+  live under `web/src/pages/*`. Do not split remaining orchestration just for
+  token savings; tie further extraction to concrete route or behavior work.
+- Codex coding-session context should use the targeted-entry workflow in
+  `docs/agent/CODEX_CONTEXT_MANAGEMENT.md`, not the old broad freshness list.
+  `npm run diagnostics:codex-context` measures the current context profile and
+  largest contributors.
 - Product-specific deferred UI/domain work includes task filtering/archived
   tasks, `RelationshipManager`, `TechnicalMetadataDisclosure`, habit
   frequency/recurrence semantics, category reordering, and richer list-level

@@ -6,7 +6,10 @@ Date: 2026-05-14
 
 DMAX context assembly now treats context as a budgeted resource. The resolver should not only load more data; it should make explicit choices about what is current, parent, child, sibling, neighbor, or background, and it should document those choices in the prompt log debug payload.
 
-The implementation lives in `src/chat/conversation-context.ts`.
+The resolver implementation lives in `src/chat/conversation-context.ts`.
+Static prompt-section definitions and template listing live in
+`src/chat/conversation-prompt-templates.ts` so future context work can inspect
+runtime data assembly without loading the full prompt-template catalog.
 
 ## Runtime Shape
 

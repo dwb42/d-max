@@ -3,25 +3,34 @@
 ## Freshness
 
 Before advising on architecture/features or saying a capability is missing,
-inspect the current repo. Start with:
+inspect the current repo. Code is authoritative when Markdown disagrees.
+
+Freshness must be targeted, not bulk-loaded. Start with `docs/memory-map.md`,
+then use `rg` to identify the smallest relevant set of current code and docs.
+Open only the needed line ranges. Do not read the following large files or
+directories end-to-end by default: `docs/current-state.md`, `src/api/server.ts`,
+`src/chat/openclaw-agent.ts`, `src/chat/conversation-context.ts`,
+`web/src/App.tsx`, `tests/`, `docs/archive/`, or `docs/ui/archive/`.
+
+Use this candidate map only when the task is relevant:
 
 ```text
-docs/current-state.md
-docs/memory-map.md
-README.md
-data/schema.sql
-src/core/tool-definitions.ts
-src/tools/*
-src/api/server.ts
-src/chat/*
-src/voice/*
-web/src/App.tsx
-openclaw/workspace/AGENTS.md
-openclaw/workspace/TOOLS.md
-tests/
+Implemented state: docs/current-state.md, README.md, data/schema.sql
+Tools/API: src/core/tool-definitions.ts, src/tools/*, src/api/server.ts
+Agent/chat: src/chat/*, openclaw/workspace/AGENTS.md, openclaw/workspace/TOOLS.md
+Voice: src/voice/*
+Frontend: docs/ui/*.md, web/src/App.tsx, web/src/components/*, web/src/pages/*
+Tests: tests/
 ```
 
-Code is authoritative when Markdown disagrees.
+For large-file inspection, prefer `rg -n "specificTerm" <path>` followed by a
+small `sed -n 'start,endp'` window. Avoid broad `rg` over `docs src web tests`
+unless the pattern is narrow and archives/build outputs are excluded. If a task
+requires a broad audit, state that choice and keep command output capped.
+
+For Codex context-budget work, use `docs/agent/CODEX_CONTEXT_MANAGEMENT.md` and
+`npm run diagnostics:codex-context` to compare the legacy bulk-load baseline
+against the optimized targeted-entry workflow.
 
 ## Product Boundaries
 

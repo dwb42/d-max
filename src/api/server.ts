@@ -1,7 +1,94 @@
 import http from "node:http";
-import { createReadStream, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { URL } from "node:url";
 import { z } from "zod";
+import {
+  taskDueAtBody,
+  updateTaskBody,
+  calendarDateQuery,
+  calendarDateTime,
+  calendarEntryType,
+  calendarEventVisibilitySurface,
+  calendarHiddenSurfaceQuery,
+  calendarEventVisibilityHiddenScope,
+  createCalendarEntryBody,
+  updateCalendarEntryBody,
+  calendarBindingLocalEntityType,
+  createGoogleEventFromDmaxBody,
+  createGoogleEventBody,
+  updateGoogleOnlyEventBody,
+  createGoogleOnlyEventBody,
+  createCalendarEventVisibilityBody,
+  linkGoogleEventBody,
+  unlinkCalendarBindingBody,
+  createCalendarSourceBody,
+  updateCalendarSourceBody,
+  googleCalendarAuthUrlBody,
+  googleCalendarDisconnectBody,
+  upsertGmailMailboxBody,
+  updateGmailMailboxBody,
+  gmailAddressList,
+  optionalGmailAddressList,
+  createGmailDraftBody,
+  sendGmailDraftBody,
+  gmailLimitQuery,
+  createCategoryBody,
+  updateCategoryBody,
+  partySalutationBody,
+  participantEntityTypeBody,
+  contactPointTypeBody,
+  relationshipStatusBody,
+  partyDateBody,
+  createPersonBody,
+  updatePersonBody,
+  createOrganizationBody,
+  updateOrganizationBody,
+  createPartyRelationshipBody,
+  createEntityParticipantBody,
+  updateEntityParticipantBody,
+  createPartyContactPointBody,
+  updatePartyContactPointBody,
+  createPartyAddressBody,
+  updatePartyAddressBody,
+  partyTimelineEntryKindBody,
+  partyTimelineEntryChannelBody,
+  partyTimelineEntryDirectionBody,
+  partyTimelineEntryPartyRoleBody,
+  partyTimelineRelatedPartiesBody,
+  createPartyTimelineEntryBody,
+  updatePartyTimelineEntryBody,
+  partyActivitySummariesBody,
+  initiativeDateBody,
+  projectPhaseBody,
+  createInitiativeBody,
+  updateInitiativeBody,
+  reorderCategoriesBody,
+  reorderInitiativesBody,
+  createInitiativeRelationBody,
+  planningCanvasCoordinate,
+  mindmapCoordinate,
+  createPlanningCanvasNodeBody,
+  updatePlanningCanvasNodeBody,
+  createMindmapFreestyleNodeBody,
+  updateMindmapNodeBody,
+  replaceMindmapFreestyleNodesBody,
+  reorderTasksBody,
+  createTaskBody,
+  createTaskChecklistItemBody,
+  updateTaskChecklistItemBody,
+  reorderTaskChecklistItemsBody,
+  createMediaLinkBody,
+  updateMediaLinkBody,
+  updateMediaAssetBody,
+  reanalyzeMediaAssetBody,
+  reorderMediaLinksBody,
+  voiceSessionBody,
+  chatMessageBody,
+  prewarmOpenClawBody,
+  internalToolBody,
+  browserDiagnosticBody,
+  createConversationBody
+} from "./request-schemas.js";
 import { env } from "../config/env.js";
 import { openDatabase } from "../db/connection.js";
 import { migrate } from "../db/migrate.js";
@@ -19,7 +106,6 @@ import { CalendarEntryRepository } from "../repositories/calendar-entries.js";
 import { CalendarSourceRepository } from "../repositories/calendar-sources.js";
 import { InitiativeRelationRepository } from "../repositories/initiative-relations.js";
 import { InitiativeRepository } from "../repositories/initiatives.js";
-import type { InitiativeStatus, InitiativeType } from "../repositories/initiatives.js";
 import { InitiativeMindmapRepository } from "../repositories/initiative-mindmap.js";
 import { PlanningCanvasRepository } from "../repositories/planning-canvas.js";
 import { MediaAssetRepository } from "../repositories/media-assets.js";
@@ -42,6 +128,7 @@ import type { TaskStatus } from "../repositories/tasks.js";
 import { TaskRepository } from "../repositories/tasks.js";
 import { TaskChecklistItemRepository } from "../repositories/task-checklist-items.js";
 import { PartyTimelineRepository } from "../repositories/party-timeline.js";
+import { PartyActivitySummaryRepository } from "../repositories/party-activity-summary.js";
 import { StateEventRepository } from "../repositories/state-events.js";
 import type { CreateStateEventInput, StateEvent } from "../repositories/state-events.js";
 import { AppChatService } from "../chat/app-chat.js";
@@ -61,9 +148,36 @@ import { transcribeAudio } from "../chat/openai-transcription.js";
 import { synthesizeSpeech } from "../chat/text-to-speech.js";
 import { createLiveKitVoiceSession } from "./livekit.js";
 import { sendStaticWebAsset } from "./static-files.js";
-import { createChatTurnTraceId, recordChatTurnDiagnosticEvent } from "../diagnostics/chat-turns.js";
+import { recordChatTurnDiagnosticEvent } from "../diagnostics/chat-turns.js";
 import { createToolRunner } from "../mcp/tool-registry.js";
 import { startTelegramBot, type TelegramBotController } from "../telegram/bot.js";
+import {
+  chunkText,
+  decodeHeaderValue,
+  delay,
+  getRequestTraceId,
+  isAbortError,
+  isRecord,
+  readBuffer,
+  readJson,
+  sendHtmlRedirect,
+  sendJson,
+  sendMediaFile
+} from "./http-utils.js";
+import {
+  parseConversationContextQuery,
+  parseMediaEntityTarget,
+  parseOptionalContactPointType,
+  parseOptionalGraphDepth,
+  parseOptionalInitiativeRelationType,
+  parseOptionalInitiativeType,
+  parseOptionalNonNegativeInt,
+  parseOptionalParticipantEntityType,
+  parseOptionalPositiveInt,
+  parseOptionalRelationshipStatus,
+  parseOptionalStatus,
+  parsePlanningCanvasFilters
+} from "./query-parsers.js";
 
 const port = env.dmaxApiPort;
 
@@ -96,6 +210,7 @@ const partyAddresses = new PartyAddressRepository(db);
 const tasks = new TaskRepository(db);
 const taskChecklistItems = new TaskChecklistItemRepository(db);
 const partyTimeline = new PartyTimelineRepository(db);
+const partyActivitySummaries = new PartyActivitySummaryRepository(db);
 const stateEvents = new StateEventRepository(db);
 const chat = new AppChatService(db);
 const chatMessages = new AppChatRepository(db);
@@ -495,6 +610,12 @@ const server = http.createServer(async (req, res) => {
       const body = googleCalendarDisconnectBody.parse(await readJson(req));
       googleWorkspaceAuth.disconnect(body.accountLabel ?? "");
       sendJson(res, 200, { disconnected: true });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/parties/activity-summaries") {
+      const body = partyActivitySummariesBody.parse(await readJson(req));
+      sendJson(res, 200, partyActivitySummaries.listSummaries(body.partyIds, { includeOrganizationPeople: body.includeOrganizationPeople }));
       return;
     }
 
@@ -1869,644 +1990,11 @@ function shutdown(): void {
   });
 }
 
-const taskDueAtBody = z
-  .string()
-  .trim()
-  .regex(/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{3})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/, "Expected YYYY-MM-DD or ISO datetime")
-  .nullable();
-
-const updateTaskBody = z.object({
-  initiativeId: z.number().int().positive().nullable().optional(),
-  primaryPartyId: z.number().int().positive().nullable().optional(),
-  title: z.string().trim().min(1).optional(),
-  status: z.enum(["open", "done"]).optional(),
-  priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
-  notes: z.string().trim().min(1).nullable().optional(),
-  dueAt: taskDueAtBody.optional()
-});
-
-const calendarDateQuery = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
-const calendarDateTime = z.string().trim().min(1);
-const calendarEntryType = z.enum(["initiative_focus", "task_work", "standalone"]);
-const calendarEventVisibilitySurface = z.enum(["planning_canvas", "calendar", "global"]);
-const calendarHiddenSurfaceQuery = calendarEventVisibilitySurface.nullish().transform((value) => value ?? null);
-const calendarEventVisibilityHiddenScope = z.enum(["event", "recurring_instance", "recurring_series"]);
-
-const createCalendarEntryBody = z.object({
-  type: calendarEntryType,
-  title: z.string().trim().min(1),
-  startAt: calendarDateTime,
-  endAt: calendarDateTime,
-  initiativeId: z.number().int().positive().nullable().optional(),
-  taskId: z.number().int().positive().nullable().optional(),
-  notes: z.string().nullable().optional()
-});
-
-const updateCalendarEntryBody = z.object({
-  type: calendarEntryType.optional(),
-  title: z.string().trim().min(1).optional(),
-  startAt: calendarDateTime.optional(),
-  endAt: calendarDateTime.optional(),
-  status: z.enum(["open", "done"]).optional(),
-  initiativeId: z.number().int().positive().nullable().optional(),
-  taskId: z.number().int().positive().nullable().optional(),
-  notes: z.string().nullable().optional()
-});
-
-const calendarBindingLocalEntityType = z.enum(["calendar_entry", "initiative_project_span"]);
-
-const createGoogleEventFromDmaxBody = z.object({
-  localEntityType: calendarBindingLocalEntityType,
-  localEntityId: z.number().int().positive(),
-  calendarSourceId: z.number().int().positive()
-});
-
-const createGoogleEventBody = z.union([
-  createGoogleEventFromDmaxBody,
-  z.object({
-    calendarSourceId: z.number().int().positive(),
-    title: z.string().trim().min(1),
-    startAt: z.string().trim().min(1),
-    endAt: z.string().trim().min(1),
-    allDay: z.boolean()
-  })
-]);
-
-const updateGoogleOnlyEventBody = z.object({
-  calendarSourceId: z.number().int().positive(),
-  externalEventId: z.string().trim().min(1),
-  title: z.string().trim().min(1),
-  startAt: z.string().trim().min(1),
-  endAt: z.string().trim().min(1),
-  allDay: z.boolean()
-});
-
-const createGoogleOnlyEventBody = z.object({
-  calendarSourceId: z.number().int().positive(),
-  title: z.string().trim().min(1),
-  startAt: z.string().trim().min(1),
-  endAt: z.string().trim().min(1),
-  allDay: z.boolean()
-});
-
-const createCalendarEventVisibilityBody = z.object({
-  provider: z.literal("google").optional(),
-  surface: calendarEventVisibilitySurface,
-  hiddenScope: calendarEventVisibilityHiddenScope,
-  calendarSourceId: z.number().int().positive().nullable().optional(),
-  externalCalendarId: z.string().trim().min(1),
-  externalEventId: z.string().trim().min(1).nullable().optional(),
-  recurringEventId: z.string().trim().min(1).nullable().optional(),
-  originalStartAt: z.string().trim().min(1).nullable().optional(),
-  iCalUID: z.string().trim().min(1).nullable().optional(),
-  titleSnapshot: z.string().trim().min(1),
-  startAtSnapshot: z.string().trim().min(1).nullable().optional(),
-  endAtSnapshot: z.string().trim().min(1).nullable().optional()
-});
-
-const linkGoogleEventBody = z.object({
-  calendarSourceId: z.number().int().positive(),
-  externalCalendarId: z.string().trim().min(1),
-  externalEventId: z.string().trim().min(1),
-  externalEtag: z.string().nullable().optional(),
-  externalUpdatedAt: z.string().nullable().optional(),
-  title: z.string().trim().min(1),
-  startAt: z.string().trim().min(1),
-  endAt: z.string().trim().min(1),
-  allDay: z.boolean(),
-  initialDirection: z.enum(["google_to_dmax", "dmax_to_google"]).optional(),
-  target: z.discriminatedUnion("type", [
-    z.object({ type: z.literal("existing_project_span"), initiativeId: z.number().int().positive() }),
-    z.object({ type: z.literal("new_project"), categoryId: z.number().int().positive(), name: z.string().trim().min(1).optional() }),
-    z.object({ type: z.literal("existing_project_entry"), initiativeId: z.number().int().positive() }),
-    z.object({ type: z.literal("existing_task_entry"), taskId: z.number().int().positive() }),
-    z.object({ type: z.literal("new_task_entry"), initiativeId: z.number().int().positive(), title: z.string().trim().min(1).optional() })
-  ])
-});
-
-const unlinkCalendarBindingBody = z.object({
-  deleteGoogleEvent: z.boolean().optional()
-});
-
-const createCalendarSourceBody = z.object({
-  provider: z.literal("google").optional(),
-  accountLabel: z.string().trim().min(1),
-  calendarId: z.string().trim().min(1),
-  displayName: z.string().trim().min(1),
-  color: z.string().trim().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
-  enabled: z.boolean().optional(),
-  readOnly: z.boolean().optional()
-});
-
-const updateCalendarSourceBody = z.object({
-  accountLabel: z.string().trim().min(1).optional(),
-  calendarId: z.string().trim().min(1).optional(),
-  displayName: z.string().trim().min(1).optional(),
-  color: z.string().trim().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),
-  enabled: z.boolean().optional(),
-  readOnly: z.boolean().optional()
-});
-
-const googleCalendarAuthUrlBody = z.object({
-  loginHint: z.string().trim().min(1).nullable().optional()
-});
-
-const googleCalendarDisconnectBody = z.object({
-  accountLabel: z.string().trim().min(1).nullable().optional()
-});
-
-const upsertGmailMailboxBody = z.object({
-  accountLabel: z.string().trim().min(1),
-  displayName: z.string().trim().min(1).nullable().optional(),
-  emailAddress: z.string().trim().min(1).nullable().optional(),
-  enabled: z.boolean().optional(),
-  syncEnabled: z.boolean().optional(),
-  sendEnabled: z.boolean().optional(),
-  signature: z.string().nullable().optional()
-});
-
-const updateGmailMailboxBody = z.object({
-  displayName: z.string().trim().min(1).nullable().optional(),
-  emailAddress: z.string().trim().min(1).nullable().optional(),
-  enabled: z.boolean().optional(),
-  syncEnabled: z.boolean().optional(),
-  sendEnabled: z.boolean().optional(),
-  signature: z.string().nullable().optional()
-});
-
-const gmailAddressList = z.array(z.string().trim().email()).min(1);
-const optionalGmailAddressList = z.array(z.string().trim().email()).optional();
-
-const createGmailDraftBody = z.object({
-  mailboxId: z.number().int().positive(),
-  to: gmailAddressList,
-  cc: optionalGmailAddressList,
-  bcc: optionalGmailAddressList,
-  subject: z.string().trim().min(1),
-  body: z.string().trim().min(1)
-});
-
-const sendGmailDraftBody = z.object({
-  mailboxId: z.number().int().positive(),
-  draftId: z.string().trim().min(1),
-  confirmed: z.boolean()
-});
-
-const gmailLimitQuery = z.coerce.number().int().positive().max(200).optional().transform((value) => value ?? 50);
-
-const createCategoryBody = z.object({
-  name: z.string().trim().min(1),
-  description: z.string().nullable().optional(),
-  color: z.string().trim().regex(/^#[0-9a-f]{6}$/i).nullable().optional()
-});
-
-const updateCategoryBody = z.object({
-  name: z.string().trim().min(1).optional(),
-  description: z.string().nullable().optional(),
-  color: z.string().trim().regex(/^#[0-9a-f]{6}$/i).nullable().optional()
-});
-
-const partySalutationBody = z.enum(["mr", "mrs", "unknown"]);
-const participantEntityTypeBody = z.enum(["initiative", "task", "calendar_entry"]);
-const contactPointTypeBody = z.enum(["email", "phone", "whatsapp", "signal", "telegram", "linkedin", "website", "other"]);
-const relationshipStatusBody = z.enum(["active", "inactive"]);
-const partyDateBody = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable();
-
-const createPersonBody = z.object({
-  firstName: z.string().trim().min(1).nullable().optional(),
-  lastName: z.string().trim().min(1).nullable().optional(),
-  salutation: partySalutationBody.optional(),
-  academicTitle: z.string().trim().min(1).nullable().optional(),
-  nameSuffix: z.string().trim().min(1).nullable().optional(),
-  description: z.string().nullable().optional()
-});
-
-const updatePersonBody = createPersonBody.partial();
-
-const createOrganizationBody = z.object({
-  name: z.string().trim().min(1),
-  displayName: z.string().trim().min(1).optional(),
-  legalName: z.string().trim().min(1).nullable().optional(),
-  organizationType: z.string().trim().min(1).nullable().optional(),
-  markdown: z.string().nullable().optional()
-});
-
-const updateOrganizationBody = createOrganizationBody.partial();
-
-const createPartyRelationshipBody = z.object({
-  fromPartyId: z.number().int().positive(),
-  toPartyId: z.number().int().positive(),
-  relationshipTypeId: z.number().int().positive(),
-  roleLabel: z.string().trim().min(1).nullable().optional(),
-  startedOn: partyDateBody.optional(),
-  endedOn: partyDateBody.optional(),
-  status: relationshipStatusBody.optional()
-});
-
-const createEntityParticipantBody = z.object({
-  partyId: z.number().int().positive(),
-  entityType: participantEntityTypeBody,
-  entityId: z.number().int().positive(),
-  roleTypeId: z.number().int().positive().nullable().optional(),
-  roleLabel: z.string().trim().min(1).nullable().optional(),
-  isPrimary: z.boolean().optional()
-});
-
-const updateEntityParticipantBody = z.object({
-  roleTypeId: z.number().int().positive().nullable().optional(),
-  roleLabel: z.string().trim().min(1).nullable().optional(),
-  isPrimary: z.boolean().optional()
-});
-
-const createPartyContactPointBody = z.object({
-  partyId: z.number().int().positive(),
-  type: contactPointTypeBody,
-  label: z.string().trim().min(1).nullable().optional(),
-  value: z.string().trim().min(1),
-  normalizedValue: z.string().trim().min(1).nullable().optional(),
-  isPrimary: z.boolean().optional(),
-  isPreferred: z.boolean().optional(),
-  canSend: z.boolean().optional(),
-  canReceive: z.boolean().optional(),
-  provider: z.string().trim().min(1).nullable().optional()
-});
-
-const updatePartyContactPointBody = createPartyContactPointBody.omit({ partyId: true }).partial();
-
-const createPartyAddressBody = z.object({
-  partyId: z.number().int().positive(),
-  label: z.string().trim().min(1).nullable().optional(),
-  line1: z.string().trim().min(1),
-  line2: z.string().trim().min(1).nullable().optional(),
-  postalCode: z.string().trim().min(1).nullable().optional(),
-  city: z.string().trim().min(1).nullable().optional(),
-  region: z.string().trim().min(1).nullable().optional(),
-  country: z.string().trim().min(1).nullable().optional(),
-  isPrimary: z.boolean().optional()
-});
-
-const updatePartyAddressBody = createPartyAddressBody.omit({ partyId: true }).partial();
-
-const partyTimelineEntryKindBody = z.enum(["conversation", "letter_received", "letter_sent", "visit", "note"]);
-const partyTimelineEntryDirectionBody = z.enum(["inbound", "outbound", "bidirectional", "none"]);
-const partyTimelineEntryPartyRoleBody = z.enum(["primary", "participant", "related", "organization_context"]);
-const partyTimelineRelatedPartiesBody = z.array(z.object({
-  partyId: z.number().int().positive(),
-  role: partyTimelineEntryPartyRoleBody.optional()
-})).optional();
-
-const createPartyTimelineEntryBody = z.object({
-  kind: partyTimelineEntryKindBody,
-  direction: partyTimelineEntryDirectionBody.optional(),
-  occurredAt: z.string().trim().min(1).nullable().optional(),
-  title: z.string().trim().min(1),
-  body: z.string().nullable().optional(),
-  relatedTaskId: z.number().int().positive().nullable().optional(),
-  parties: partyTimelineRelatedPartiesBody
-});
-
-const updatePartyTimelineEntryBody = z.object({
-  kind: partyTimelineEntryKindBody.optional(),
-  direction: partyTimelineEntryDirectionBody.optional(),
-  occurredAt: z.string().trim().min(1).optional(),
-  title: z.string().trim().min(1).optional(),
-  body: z.string().nullable().optional(),
-  relatedTaskId: z.number().int().positive().nullable().optional()
-});
-
-const initiativeDateBody = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable();
-const projectPhaseBody = z.enum(["planning", "doing"]);
-
-const createInitiativeBody = z.object({
-  categoryId: z.number().int().positive(),
-  parentId: z.number().int().positive().nullable().optional(),
-  type: z.enum(["idea", "project", "habit"]).optional(),
-  projectPhase: projectPhaseBody.optional(),
-  name: z.string().trim().min(1),
-  summary: z.string().trim().min(1).nullable().optional(),
-  markdown: z.string().optional(),
-  startDate: initiativeDateBody.optional(),
-  endDate: initiativeDateBody.optional(),
-  isLocked: z.boolean().optional()
-});
-
-const updateInitiativeBody = z.object({
-  categoryId: z.number().int().positive().optional(),
-  parentId: z.number().int().positive().nullable().optional(),
-  type: z.enum(["idea", "project", "habit"]).optional(),
-  projectPhase: projectPhaseBody.optional(),
-  name: z.string().trim().min(1).optional(),
-  status: z.enum(["active", "paused", "completed", "archived"]).optional(),
-  summary: z.string().trim().min(1).nullable().optional(),
-  markdown: z.string().optional(),
-  startDate: initiativeDateBody.optional(),
-  endDate: initiativeDateBody.optional(),
-  isLocked: z.boolean().optional()
-});
-
-const reorderCategoriesBody = z.object({
-  categoryIds: z.array(z.number().int().positive()).min(1)
-});
-
-const reorderInitiativesBody = z.union([
-  z.object({
-    categoryId: z.number().int().positive(),
-    initiativeIds: z.array(z.number().int().positive()).min(1)
-  }),
-  z
-    .object({
-      categoryId: z.number().int().positive(),
-      projectIds: z.array(z.number().int().positive()).min(1)
-    })
-    .transform((body) => ({ categoryId: body.categoryId, initiativeIds: body.projectIds }))
-]);
-
-const createInitiativeRelationBody = z.object({
-  predecessorInitiativeId: z.number().int().positive(),
-  successorInitiativeId: z.number().int().positive(),
-  relationType: z.literal("precedes").optional()
-});
-
-const planningCanvasCoordinate = z.number().finite().min(0).max(100000);
-const mindmapCoordinate = z.number().finite().min(-100000).max(100000);
-
-const createPlanningCanvasNodeBody = z.object({
-  canvasId: z.number().int().positive().optional(),
-  initiativeId: z.number().int().positive(),
-  x: planningCanvasCoordinate,
-  y: planningCanvasCoordinate,
-  width: planningCanvasCoordinate.nullable().optional(),
-  height: planningCanvasCoordinate.nullable().optional(),
-  collapsed: z.boolean().optional()
-});
-
-const updatePlanningCanvasNodeBody = z.object({
-  x: planningCanvasCoordinate.optional(),
-  y: planningCanvasCoordinate.optional(),
-  width: planningCanvasCoordinate.nullable().optional(),
-  height: planningCanvasCoordinate.nullable().optional(),
-  collapsed: z.boolean().optional()
-});
-
-const createMindmapFreestyleNodeBody = z.object({
-  parentNodeKey: z.string().trim().min(1).nullable().optional(),
-  label: z.string().trim().nullable().optional(),
-  x: mindmapCoordinate.optional(),
-  y: mindmapCoordinate.optional()
-});
-
-const updateMindmapNodeBody = z.object({
-  label: z.string().trim().min(1).optional(),
-  x: mindmapCoordinate.optional(),
-  y: mindmapCoordinate.optional(),
-  width: mindmapCoordinate.nonnegative().nullable().optional(),
-  height: mindmapCoordinate.nonnegative().nullable().optional(),
-  collapsed: z.boolean().optional(),
-  parentNodeKey: z.string().trim().min(1).nullable().optional()
-});
-
-const replaceMindmapFreestyleNodesBody = z.object({
-  nodes: z.array(z.object({
-    nodeKey: z.string().trim().min(1),
-    parentNodeKey: z.string().trim().min(1).nullable(),
-    label: z.string().trim(),
-    x: mindmapCoordinate,
-    y: mindmapCoordinate,
-    width: mindmapCoordinate.nonnegative().nullable().optional(),
-    height: mindmapCoordinate.nonnegative().nullable().optional(),
-    collapsed: z.boolean().optional()
-  }))
-});
-
-const reorderTasksBody = z.union([
-  z.object({
-    initiativeId: z.number().int().positive(),
-    taskIds: z.array(z.number().int().positive()).min(1)
-  }),
-  z
-    .object({
-      projectId: z.number().int().positive(),
-      taskIds: z.array(z.number().int().positive()).min(1)
-    })
-    .transform((body) => ({ initiativeId: body.projectId, taskIds: body.taskIds }))
-]);
-
-const createTaskBody = z.object({
-  initiativeId: z.number().int().positive().nullable().optional(),
-  primaryPartyId: z.number().int().positive().nullable().optional(),
-  title: z.string().trim().min(1),
-  priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
-  notes: z.string().trim().min(1).nullable().optional(),
-  dueAt: taskDueAtBody.optional()
-}).refine((body) => body.initiativeId || body.primaryPartyId, {
-  message: "initiativeId or primaryPartyId is required"
-});
-
-const createTaskChecklistItemBody = z.object({
-  name: z.string().trim().min(1)
-});
-
-const updateTaskChecklistItemBody = z.object({
-  name: z.string().trim().min(1).optional(),
-  status: z.enum(["todo", "done"]).optional()
-});
-
-const reorderTaskChecklistItemsBody = z.object({
-  itemIds: z.array(z.number().int().positive()).min(1)
-});
-
-const mediaEntityTypeBody = z.enum(["category", "initiative", "task", "calendar_entry", "app_chat_message"]);
-
-const createMediaLinkBody = z.object({
-  assetId: z.number().int().positive(),
-  entityType: mediaEntityTypeBody,
-  entityId: z.number().int().positive(),
-  caption: z.string().nullable().optional(),
-  role: z.string().trim().min(1).nullable().optional()
-});
-
-const updateMediaLinkBody = z.object({
-  caption: z.string().nullable().optional(),
-  role: z.string().trim().min(1).nullable().optional()
-});
-
-const updateMediaAssetBody = z.object({
-  summary: z.string().nullable().optional(),
-  textExcerpt: z.string().nullable().optional(),
-  transcript: z.string().nullable().optional()
-});
-
-const reanalyzeMediaAssetBody = z.object({
-  prompt: z.string().nullable().optional()
-});
-
-const reorderMediaLinksBody = z.object({
-  entityType: mediaEntityTypeBody,
-  entityId: z.number().int().positive(),
-  linkIds: z.array(z.number().int().positive()).min(1)
-});
-
-const voiceSessionBody = z.object({
-  mode: z.literal("drive")
-});
-
-const chatMessageBody = z.object({
-  message: z.string().trim().min(1),
-  conversationId: z.number().int().positive().nullable().optional(),
-  context: conversationContextSchema.nullable().optional(),
-  source: z.enum(["app_text", "app_voice_message"]).optional()
-});
-
-const prewarmOpenClawBody = z.object({
-  context: conversationContextSchema.nullable().optional()
-});
-
-const internalToolBody = z.object({
-  input: z.unknown().optional(),
-  traceId: z.string().trim().min(1).max(160).optional()
-});
-
-const browserDiagnosticBody = z.object({
-  traceId: z.string().trim().min(1).max(120),
-  event: z.string().trim().min(1).max(120),
-  ts: z.string().trim().min(1),
-  msFromTraceStart: z.number().finite().nonnegative().optional(),
-  detail: z.record(z.unknown()).optional()
-});
-
-const createConversationBody = z.object({
-  context: conversationContextSchema
-});
-
-function parseConversationContextQuery(url: URL) {
-  const contextType = z
-    .enum([
-      "global",
-      "categories",
-      "ideas",
-      "projects",
-      "habits",
-      "tasks",
-      "initiatives",
-      "people",
-      "organizations",
-      "category",
-      "idea",
-      "project",
-      "habit",
-      "initiative",
-      "task",
-      "person",
-      "organization"
-    ])
-    .parse(url.searchParams.get("contextType"));
-  const entityId = parseOptionalPositiveInt(url.searchParams.get("contextEntityId"));
-
-  if (contextType === "global") {
-    return { type: "global" as const };
-  }
-
-  if (["categories", "ideas", "projects", "habits", "tasks", "initiatives", "people", "organizations"].includes(contextType)) {
-    return { type: contextType } as
-      | { type: "categories" }
-      | { type: "ideas" }
-      | { type: "projects" }
-      | { type: "habits" }
-      | { type: "tasks" }
-      | { type: "initiatives" }
-      | { type: "people" }
-      | { type: "organizations" };
-  }
-
-  if (!entityId) {
-    throw new Error(`contextEntityId is required for ${contextType} conversations`);
-  }
-
-  if (contextType === "category") return { type: "category" as const, categoryId: entityId };
-  if (contextType === "idea" || contextType === "project" || contextType === "habit" || contextType === "initiative") {
-    return { type: contextType, initiativeId: entityId } as
-      | { type: "idea"; initiativeId: number }
-      | { type: "project"; initiativeId: number }
-      | { type: "habit"; initiativeId: number }
-      | { type: "initiative"; initiativeId: number };
-  }
-  if (contextType === "task") return { type: "task" as const, taskId: entityId };
-  return { type: contextType, partyId: entityId } as { type: "person"; partyId: number } | { type: "organization"; partyId: number };
-}
-
-function parseOptionalStatus(status: string | null): InitiativeStatus | undefined {
-  if (status === "active" || status === "paused" || status === "completed" || status === "archived") {
-    return status;
-  }
-
-  return undefined;
-}
-
-function parseOptionalInitiativeType(type: string | null): InitiativeType | undefined {
-  if (type === "idea" || type === "project" || type === "habit") {
-    return type;
-  }
-
-  return undefined;
-}
-
-function parseOptionalInitiativeRelationType(type: string | null): "precedes" | undefined {
-  return type === "precedes" ? "precedes" : undefined;
-}
-
-function parseOptionalParticipantEntityType(type: string | null): "initiative" | "task" | "calendar_entry" | undefined {
-  return type === "initiative" || type === "task" || type === "calendar_entry" ? type : undefined;
-}
-
-function parseOptionalContactPointType(type: string | null): "email" | "phone" | "whatsapp" | "signal" | "telegram" | "linkedin" | "website" | "other" | undefined {
-  if (
-    type === "email" ||
-    type === "phone" ||
-    type === "whatsapp" ||
-    type === "signal" ||
-    type === "telegram" ||
-    type === "linkedin" ||
-    type === "website" ||
-    type === "other"
-  ) {
-    return type;
-  }
-  return undefined;
-}
-
-function parseOptionalRelationshipStatus(status: string | null): "active" | "inactive" | undefined {
-  return status === "active" || status === "inactive" ? status : undefined;
-}
-
-function parsePlanningCanvasFilters(url: URL) {
-  return {
-    search: url.searchParams.get("search")?.trim() || undefined,
-    categoryId: parseOptionalPositiveInt(url.searchParams.get("categoryId")) ?? undefined,
-    type: parseOptionalInitiativeType(url.searchParams.get("type")),
-    status: parseOptionalStatus(url.searchParams.get("status")),
-    includeArchived: url.searchParams.get("includeArchived") === "true"
-  };
-}
-
-function parseOptionalGraphDepth(value: string | null): number | undefined {
-  const parsed = parseOptionalNonNegativeInt(value);
-  return parsed === null ? undefined : Math.min(parsed, 20);
-}
-
 function latestPromptLogCreatedAt(conversationId: number): string | null {
   const row = db
     .prepare("select created_at from app_prompt_logs where conversation_id = ? order by created_at desc, id desc limit 1")
     .get(conversationId) as { created_at: string } | undefined;
   return row?.created_at ?? null;
-}
-
-function parseOptionalPositiveInt(value: string | null): number | null {
-  if (!value) {
-    return null;
-  }
-
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 async function createGoogleEventFromDmax(input: z.infer<typeof createGoogleEventFromDmaxBody>) {
@@ -2737,15 +2225,6 @@ function projectCalendarBindingForApi(initiativeId: number) {
   };
 }
 
-function parseOptionalNonNegativeInt(value: string | null): number | null {
-  if (!value) {
-    return null;
-  }
-
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
-}
-
 function emitApiStateEvent(input: Omit<CreateStateEventInput, "source">): StateEvent {
   return stateEvents.create({ source: "api", ...input });
 }
@@ -2770,19 +2249,6 @@ async function syncGmailMailboxesForParty(partyId: number): Promise<void> {
       throw error;
     }
   }
-}
-
-function parseMediaEntityTarget(url: URL): { entityType: MediaEntityType; entityId: number; caption?: string | null } {
-  const entityType = mediaEntityTypeBody.parse(url.searchParams.get("entityType"));
-  const entityId = parseOptionalPositiveInt(url.searchParams.get("entityId"));
-  if (!entityId) {
-    throw new Error("entityId is required for media attachments");
-  }
-  return {
-    entityType,
-    entityId,
-    caption: url.searchParams.get("caption")
-  };
 }
 
 function ensureMediaEntityExists(entityType: MediaEntityType, entityId: number): void {
@@ -2889,40 +2355,6 @@ function stateScopeForMediaEntity(entityType: MediaEntityType, entityId: number)
   return {};
 }
 
-function decodeHeaderValue(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
-function sendHtmlRedirect(res: http.ServerResponse, path: string): void {
-  const target = new URL(path, env.dmaxWebBaseUrl).toString();
-  res.writeHead(302, {
-    location: target,
-    "content-type": "text/html; charset=utf-8"
-  });
-  res.end(`<!doctype html><meta http-equiv="refresh" content="0;url=${escapeHtml(target)}"><a href="${escapeHtml(target)}">Return to DMAX</a>`);
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
-function getRequestTraceId(req: http.IncomingMessage): string {
-  const header = req.headers["x-dmax-trace-id"];
-  if (typeof header === "string" && header.trim()) {
-    return header.trim().slice(0, 120);
-  }
-
-  return createChatTurnTraceId();
-}
-
 function authorizeInternalToolRequest(req: http.IncomingMessage): boolean {
   const token = env.dmaxInternalToolToken?.trim();
   if (!token) {
@@ -2932,10 +2364,6 @@ function authorizeInternalToolRequest(req: http.IncomingMessage): boolean {
   const authorization = req.headers.authorization;
   const value = Array.isArray(authorization) ? authorization[0] : authorization;
   return value === `Bearer ${token}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function recordApiDiagnostic(
@@ -3020,77 +2448,4 @@ async function sendSse(
       res.end();
     }
   }
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
-}
-
-function chunkText(text: string, size: number): string[] {
-  const chunks: string[] = [];
-  for (let index = 0; index < text.length; index += size) {
-    chunks.push(text.slice(index, index + size));
-  }
-  return chunks;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function readJson(req: http.IncomingMessage): Promise<unknown> {
-  const body = await readBody(req);
-  return body ? JSON.parse(body) : {};
-}
-
-function readBody(req: http.IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.setEncoding("utf8");
-    req.on("data", (chunk) => {
-      body += chunk;
-    });
-    req.on("end", () => resolve(body));
-    req.on("error", reject);
-  });
-}
-
-function readBuffer(req: http.IncomingMessage, maxBytes: number): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let total = 0;
-    req.on("data", (chunk: Buffer) => {
-      total += chunk.length;
-      if (total > maxBytes) {
-        reject(new Error(`Request body exceeds ${maxBytes} bytes.`));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
-  });
-}
-
-function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "http://localhost:5173",
-    "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
-    "access-control-allow-headers": "authorization,content-type,x-dmax-trace-id,x-file-name",
-    "access-control-expose-headers": "x-dmax-trace-id"
-  });
-  res.end(JSON.stringify(body));
-}
-
-function sendMediaFile(res: http.ServerResponse, mimeType: string, filePath: string): void {
-  const stat = statSync(filePath);
-  res.writeHead(200, {
-    "content-type": mimeType,
-    "content-length": stat.size,
-    "cache-control": "private, max-age=3600",
-    "access-control-allow-origin": "http://localhost:5173"
-  });
-  createReadStream(filePath).pipe(res);
 }

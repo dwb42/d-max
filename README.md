@@ -14,6 +14,17 @@ Frontend UI governance lives in [docs/ui/](docs/ui/).
 Forward-looking post-UI-refactor technical planning lives in
 [docs/architecture/DMAX_NEXT_WORK_PLAN.md](docs/architecture/DMAX_NEXT_WORK_PLAN.md).
 
+For Codex coding-session context hygiene, read
+[docs/agent/CODEX_CONTEXT_MANAGEMENT.md](docs/agent/CODEX_CONTEXT_MANAGEMENT.md)
+and run:
+
+```bash
+npm run diagnostics:codex-context
+```
+
+The diagnostic compares the old broad freshness-load baseline with the current
+targeted-entry workflow and lists the largest context contributors.
+
 ## Local Setup
 
 ```bash

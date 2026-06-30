@@ -39,6 +39,11 @@ This file defines where Markdown-based memory and configuration belongs.
   current implemented context system, prefer `docs/current-state.md`,
   `docs/agent/DMAX_CONTEXT_BUDGETING.md`, and
   `docs/agent/DMAX_CONTEXT_RESPONSE_CONTRACTS.md`.
+- `docs/agent/CODEX_CONTEXT_MANAGEMENT.md` is the current guide for keeping
+  Codex coding sessions small. It documents the targeted-entry workflow,
+  `npm run diagnostics:codex-context`, high-impact module extractions, and the
+  stop line for avoiding token-saving refactors that would reduce working
+  quality.
 - Durable initiative memory lives in `initiatives.markdown`; durable
   organization description/context memory lives in `organizations.markdown`.
   People have a lightweight free-text `people.description`; there is still no

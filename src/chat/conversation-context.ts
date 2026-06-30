@@ -1,5 +1,9 @@
 import { z } from "zod";
 import type Database from "better-sqlite3";
+import { GmailRepository } from "../gmail/gmail-repository.js";
+import type { GmailAddress, GmailMessage } from "../gmail/gmail-repository.js";
+import { CalendarEntryRepository } from "../repositories/calendar-entries.js";
+import type { CalendarEntry } from "../repositories/calendar-entries.js";
 import { CategoryRepository } from "../repositories/categories.js";
 import { InitiativeRelationRepository } from "../repositories/initiative-relations.js";
 import type { InitiativeRelationWithInitiatives } from "../repositories/initiative-relations.js";
@@ -15,7 +19,9 @@ import {
   PartyRelationshipRepository,
   PersonRepository
 } from "../repositories/parties.js";
-import type { EntityParticipantWithParty, PartyAddress, PartyContactPoint, PartyRelationshipWithParties, Person } from "../repositories/parties.js";
+import type { EntityParticipantWithParty, Organization, PartyAddress, PartyContactPoint, PartyRelationshipWithParties, Person } from "../repositories/parties.js";
+import { PartyActivitySummaryRepository } from "../repositories/party-activity-summary.js";
+import type { OrganizationPersonActivity, PartyActivitySummary } from "../repositories/party-activity-summary.js";
 import { TaskChecklistItemRepository } from "../repositories/task-checklist-items.js";
 import type { TaskChecklistItem } from "../repositories/task-checklist-items.js";
 import { TaskRepository } from "../repositories/tasks.js";
@@ -23,6 +29,9 @@ import type { Task } from "../repositories/tasks.js";
 import { PartyTimelineRepository } from "../repositories/party-timeline.js";
 import type { PartyTimelineEntry } from "../repositories/party-timeline.js";
 import type { ConversationContextType } from "../repositories/app-conversations.js";
+import { buildPromptSections } from "./conversation-prompt-templates.js";
+export { listPromptTemplates } from "./conversation-prompt-templates.js";
+export type { PromptTemplateDefinition } from "./conversation-prompt-templates.js";
 
 export const conversationContextSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("global") }),
@@ -82,7 +91,7 @@ export type ConversationContextDebugPayload = {
 };
 
 type ContextEntityRole = "current" | "parent" | "child" | "sibling" | "neighbor" | "related";
-type ContextEntityType = "category" | "initiative" | "task" | "relation" | "media" | "participant" | "party" | "unknown";
+type ContextEntityType = "category" | "initiative" | "task" | "relation" | "media" | "participant" | "party" | "communication" | "unknown";
 type ContextOmissionReason = "budget" | "cap" | "duplicate" | "not_relevant" | "missing_data";
 type ContextBlockKind =
   | "instructions"
@@ -148,279 +157,6 @@ export type ContextBudgetSummary = {
   cap?: number;
   used?: number;
 };
-
-export type PromptTemplateDefinition = {
-  id: string;
-  name: string;
-  route: string;
-  effectiveContext: ConversationContext["type"];
-  displayContext: string;
-  systemInstructions: string;
-  contextDataTemplate: string;
-  finalPromptTemplate: string;
-};
-
-const promptTemplateSpecs: Array<{
-  id: string;
-  name: string;
-  route: string;
-  type: ConversationContext["type"];
-  displayContext?: string;
-  meaning: string;
-  contextDataLines: string[];
-}> = [
-  {
-    id: "global",
-    name: "Global",
-    route: "Global Chat",
-    type: "global",
-    meaning: "Global DMAX chat without a focused UI entity.",
-    contextDataLines: [
-      "Use the tools to inspect initiatives or tasks when the user asks for specific state.",
-      "Do not assume an initiative or task target unless the user names one clearly."
-    ]
-  },
-  {
-    id: "categories-list",
-    name: "Categories List View",
-    route: "/categories",
-    type: "categories",
-    meaning: "Focused on the overall initiatives and life-areas overview.",
-    contextDataLines: [
-      "Life areas / categories ({{category_count}}):",
-      "- #{{category_id}} {{category_name}} ({{category_color}})",
-      "  Description markdown: {{category_description_markdown}}",
-      "  Initiatives ({{initiative_count}}):",
-      "  - #{{initiative_id}} [{{initiative_type}}] {{initiative_name}}; status: {{initiative_status}}: {{initiative_summary_or_memory}}",
-      "Active initiatives ({{active_initiative_count}}):",
-      "- #{{initiative_id}} [{{initiative_type}}] {{initiative_name}} ({{date_range}}): {{initiative_summary_or_memory}}",
-      "Initiative precedence relations ({{initiative_relation_count}}):",
-      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}} -> #{{successor_initiative_id}} {{successor_initiative_name}}",
-      "Planning canvas: {{placed_initiative_count}} placed initiatives; {{unplaced_initiative_count}} unplaced non-archived initiatives.",
-      "Open execution surface summary: {{open_task_count}} open tasks are already represented in per-category task lists; global duplicate task lines omitted."
-    ]
-  },
-  {
-    id: "category-detail",
-    name: "Category Detail View",
-    route: "/categories/:categoryName",
-    type: "category",
-    meaning: "Fokussiert auf einen Lebensbereich, seine Markdown-Beschreibung und zugehoerigen Ideen, Projekten und Gewohnheiten (Initiativen).",
-    contextDataLines: [
-      "Lebensbereich: #{{category_id}} {{category_name}}",
-      "Markdown-Beschreibung:",
-      "{{category_description_markdown}}",
-      "Ideen in diesem Lebensbereich ({{idea_count}}):",
-      "- #{{idea_id}} {{idea_name}}; status: {{idea_status}}",
-      "  Markdown:",
-      "  {{idea_markdown}}",
-      "Projekte in diesem Lebensbereich ({{project_count}}):",
-      "- #{{project_id}} {{project_name}}; status: {{project_status}}; Zeitraum: {{project_date_range}}; locked: {{project_timeframe_locked}}",
-      "  Markdown:",
-      "  {{project_markdown}}",
-      "Initiative-Reihenfolge in/mit diesem Lebensbereich ({{initiative_relation_count}}):",
-      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}} -> #{{successor_initiative_id}} {{successor_initiative_name}}",
-      "Gewohnheiten in diesem Lebensbereich ({{habit_count}}):",
-      "- #{{habit_id}} {{habit_name}}; status: {{habit_status}}",
-      "  Markdown:",
-      "  {{habit_markdown}}",
-      "Offene Aufgaben in diesem Lebensbereich ({{open_task_count}}, wichtigste zuerst):",
-      "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
-    ]
-  },
-  {
-    id: "initiatives-overview",
-    name: "Initiatives Overview",
-    route: "/calendar/timeline, /planning-canvas",
-    type: "initiatives",
-    meaning: "Initiativen-Overview = globaler Alignment-Agent.",
-    contextDataLines: [
-      "Initiatives overview ({{initiative_count}}):",
-      "Life area backgrounds ({{category_count}} categories, shown once):",
-      "- #{{category_id}} {{category_name}}: {{category_description_excerpt}}",
-      "Initiatives grouped by type and life area:",
-      "Ideas:",
-      "  #{{category_id}} {{category_name}}:",
-      "    - #{{idea_id}} [Idea] {{idea_name}}; status: {{idea_status}}; summary: {{idea_summary_or_memory}}",
-      "Projects:",
-      "  #{{category_id}} {{category_name}}:",
-      "    - #{{project_id}} [Project] {{project_name}}; status: {{project_status}}; time span: {{date_range}}; locked: {{timeframe_locked}}",
-      "Habits:",
-      "  #{{category_id}} {{category_name}}:",
-      "    - #{{habit_id}} [Habit] {{habit_name}}; status: {{habit_status}}; summary: {{habit_summary_or_memory}}",
-      "Initiative precedence relations ({{initiative_relation_count}}):",
-      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}} -> #{{successor_initiative_id}} {{successor_initiative_name}}",
-      "Open tasks across initiatives ({{open_task_count}}, showing highest-signal first):",
-      "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
-    ]
-  },
-  {
-    id: "ideas-list",
-    name: "Ideen List View",
-    route: "/ideas",
-    type: "ideas",
-    meaning: "Focused on ideas across life areas.",
-    contextDataLines: [
-      "Ideas grouped by life area ({{idea_count}}):",
-      "- #{{initiative_id}} {{initiative_name}}; status: {{initiative_status}}: {{initiative_summary_or_memory}}",
-      "Idea precedence relations ({{initiative_relation_count}}):",
-      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}} -> #{{successor_initiative_id}} {{successor_initiative_name}}",
-      "Open tasks connected to ideas ({{open_task_count}}, showing highest-signal first):",
-      "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
-    ]
-  },
-  {
-    id: "ideas-detail",
-    name: "Ideen Detail View",
-    route: "/initiatives/:id where type=idea",
-    type: "idea",
-    meaning: "Focused on one idea. Use the initiative markdown as durable idea memory.",
-    contextDataLines: [
-      "Initiative: #{{initiative_id}} {{initiative_name}}; type: idea (Idea); status: {{initiative_status}}; time span: none; summary: {{initiative_summary}}",
-      "Category: #{{category_id}} {{category_name}} ({{category_color}})",
-      "Initiative memory markdown:",
-      "{{initiative_markdown}}",
-      "Mindmap summary: {{mindmap_summary}}",
-      "Predecessors ({{predecessor_count}}):",
-      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}}",
-      "Successors ({{successor_count}}):",
-      "- #{{successor_initiative_id}} {{successor_initiative_name}}",
-      "Media attachments ({{media_attachment_count}}):",
-      "- #{{media_asset_id}} [{{media_kind}}/{{media_mime_type}}, {{media_byte_size}}] {{media_original_name}}; caption: {{media_caption}}; summary/excerpt: {{media_summary_or_excerpt}}",
-      "Tasks ({{task_count}}, open/high-signal first):",
-      "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
-    ]
-  },
-  {
-    id: "projects-list",
-    name: "Projekte List View",
-    route: "/projects",
-    type: "projects",
-    meaning: "Focused on projects across life areas.",
-    contextDataLines: [
-      "Projects grouped by life area ({{project_count}}):",
-      "- #{{initiative_id}} {{initiative_name}}; status: {{initiative_status}}; time span: {{date_range}}; locked: {{timeframe_locked}}: {{initiative_summary_or_memory}}",
-      "Project precedence relations ({{initiative_relation_count}}):",
-      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}} -> #{{successor_initiative_id}} {{successor_initiative_name}}",
-      "Open tasks connected to projects ({{open_task_count}}, showing highest-signal first):",
-      "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
-    ]
-  },
-  {
-    id: "projects-detail",
-    name: "Projekte Detail View",
-    route: "/initiatives/:id where type=project",
-    type: "project",
-    meaning: "Focused on one project. Use the initiative markdown as durable project memory.",
-    contextDataLines: [
-      "Initiative: #{{initiative_id}} {{initiative_name}}; type: project (Project); status: {{initiative_status}}; time span: {{startDate}} to {{endDate}}; locked: {{timeframe_locked}}; summary: {{initiative_summary}}",
-      "Category: #{{category_id}} {{category_name}} ({{category_color}})",
-      "Initiative memory markdown:",
-      "{{initiative_markdown}}",
-      "Mindmap summary: {{mindmap_summary}}",
-      "Predecessors ({{predecessor_count}}):",
-      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}}",
-      "Successors ({{successor_count}}):",
-      "- #{{successor_initiative_id}} {{successor_initiative_name}}",
-      "Media attachments ({{media_attachment_count}}):",
-      "- #{{media_asset_id}} [{{media_kind}}/{{media_mime_type}}, {{media_byte_size}}] {{media_original_name}}; caption: {{media_caption}}; summary/excerpt: {{media_summary_or_excerpt}}",
-      "Tasks ({{task_count}}, open/high-signal first):",
-      "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
-    ]
-  },
-  {
-    id: "habits-list",
-    name: "Gewohnheiten List View",
-    route: "/habits",
-    type: "habits",
-    meaning: "Focused on habits across life areas.",
-    contextDataLines: [
-      "Habits grouped by life area ({{habit_count}}):",
-      "- #{{initiative_id}} {{initiative_name}}; status: {{initiative_status}}: {{initiative_summary_or_memory}}",
-      "Habit precedence relations ({{initiative_relation_count}}):",
-      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}} -> #{{successor_initiative_id}} {{successor_initiative_name}}",
-      "Life areas without habits ({{category_without_habit_count}}, compact):",
-      "- #{{category_id}} {{category_name}}: {{category_description_excerpt}}",
-      "Open tasks connected to habits ({{open_task_count}}, showing highest-signal first):",
-      "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
-    ]
-  },
-  {
-    id: "habits-detail",
-    name: "Gewohnheiten Detail View",
-    route: "/initiatives/:id where type=habit",
-    type: "habit",
-    meaning: "Focused on one habit. Use the initiative markdown as durable habit memory.",
-    contextDataLines: [
-      "Initiative: #{{initiative_id}} {{initiative_name}}; type: habit (Habit); status: {{initiative_status}}; time span: none; summary: {{initiative_summary}}",
-      "Category: #{{category_id}} {{category_name}} ({{category_color}})",
-      "Initiative memory markdown:",
-      "{{initiative_markdown}}",
-      "Mindmap summary: {{mindmap_summary}}",
-      "Predecessors ({{predecessor_count}}):",
-      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}}",
-      "Successors ({{successor_count}}):",
-      "- #{{successor_initiative_id}} {{successor_initiative_name}}",
-      "Media attachments ({{media_attachment_count}}):",
-      "- #{{media_asset_id}} [{{media_kind}}/{{media_mime_type}}, {{media_byte_size}}] {{media_original_name}}; caption: {{media_caption}}; summary/excerpt: {{media_summary_or_excerpt}}",
-      "Tasks ({{task_count}}, open/high-signal first):",
-      "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}"
-    ]
-  },
-  {
-    id: "tasks-list",
-    name: "Tasks List View",
-    route: "/tasks",
-    type: "tasks",
-    meaning: "Focused on the cross-initiative task execution surface.",
-    contextDataLines: [
-      "Open tasks across DMAX ({{open_task_count}}, showing highest-signal first):",
-      "- #{{task_id}} {{task_title}}; status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}; initiative: #{{initiative_id}} {{initiative_name}}; category: #{{category_id}} {{category_name}}"
-    ]
-  },
-  {
-    id: "tasks-detail",
-    name: "Tasks Detail View",
-    route: "/tasks/:id",
-    type: "task",
-    meaning: "Focused on one task and its surrounding initiative context.",
-    contextDataLines: [
-      "Task: #{{task_id}} {{task_title}}",
-      "Status: {{task_status}}; priority: {{task_priority}}; due: {{task_due_at}}; completed: {{task_completed_at}}",
-      "Checklist ({{checklist_item_count}}):",
-      "- #{{checklist_item_id}} [{{checklist_item_status}}] {{checklist_item_name}}",
-      "Notes: {{task_notes}}",
-      "Media attachments ({{media_attachment_count}}):",
-      "- #{{media_asset_id}} [{{media_kind}}/{{media_mime_type}}, {{media_byte_size}}] {{media_original_name}}; caption: {{media_caption}}; summary/excerpt: {{media_summary_or_excerpt}}",
-      "Initiative: #{{initiative_id}} {{initiative_name}}; type: {{initiative_type}}; status: {{initiative_status}}; time span: {{initiative_time_span}}; locked: {{initiative_timeframe_locked}}; summary: {{initiative_summary}}",
-      "Category: #{{category_id}} {{category_name}} ({{category_color}})",
-      "Initiative memory excerpt:",
-      "{{initiative_markdown_excerpt}}",
-      "Initiative predecessors ({{predecessor_count}}):",
-      "- #{{predecessor_initiative_id}} {{predecessor_initiative_name}}",
-      "Initiative successors ({{successor_count}}):",
-      "- #{{successor_initiative_id}} {{successor_initiative_name}}",
-      "Sibling tasks in same initiative ({{sibling_task_count}}, showing highest-signal first):",
-      "- #{{sibling_task_id}} {{sibling_task_title}}; status: {{sibling_task_status}}; priority: {{sibling_task_priority}}"
-    ]
-  }
-];
-
-export function listPromptTemplates(): PromptTemplateDefinition[] {
-  return promptTemplateSpecs.map((spec) => {
-    const sections = buildPromptSections(spec.type, spec.meaning, spec.contextDataLines);
-    return {
-      id: spec.id,
-      name: spec.name,
-      route: spec.route,
-      effectiveContext: spec.type,
-      displayContext: spec.displayContext ?? spec.type,
-      systemInstructions: sections.promptSections.systemInstructions,
-      contextDataTemplate: sections.promptSections.contextData,
-      finalPromptTemplate: `${sections.agentContextBlock}\n\nUser message:\n{{user_message}}`
-    };
-  });
-}
 
 export function conversationContextFromStorage(contextType: ConversationContextType, contextEntityId: number | null): ConversationContext {
   switch (contextType) {
@@ -704,13 +440,10 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   const mediaLinks = new MediaLinkRepository(db);
   const people = new PersonRepository(db);
   const organizations = new OrganizationRepository(db);
-  const partyRelationships = new PartyRelationshipRepository(db);
   const entityParticipants = new EntityParticipantRepository(db);
   const partyContactPoints = new PartyContactPointRepository(db);
-  const partyAddresses = new PartyAddressRepository(db);
   const tasks = new TaskRepository(db);
   const taskChecklistItems = new TaskChecklistItemRepository(db);
-  const partyTimeline = new PartyTimelineRepository(db);
 
   if (context.type === "global") {
     return buildResolvedContext({
@@ -1329,56 +1062,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   }
 
   if (context.type === "person" || context.type === "organization") {
-    const person = context.type === "person" ? people.findById(context.partyId) : null;
-    const organization = context.type === "organization" ? organizations.findById(context.partyId) : null;
-    const party = person ?? organization;
-    if (!party) {
-      throw new Error(`${context.type === "person" ? "Person" : "Organization"} not found: ${context.partyId}`);
-    }
-
-    const relationships = partyRelationships.list({ partyId: party.id });
-    const participants = entityParticipants.list({ partyId: party.id });
-    const contacts = partyContactPoints.list({ partyId: party.id });
-    const addresses = partyAddresses.list({ partyId: party.id });
-    const partyTasks = tasks.list({ primaryPartyId: party.id });
-    const timelineEntries = partyTimeline.listForParty(party.id, 20);
-    const header =
-      person !== null
-        ? `Person: #${person.id} ${formatPersonName(person)}; salutation: ${person.salutation}; first: ${person.firstName ?? "none"}; last: ${person.lastName ?? "none"}; title: ${person.academicTitle ?? "none"}; description: ${person.description?.trim() ? "described" : "missing"}`
-        : `Organization: #${organization!.id} ${organization!.displayName}; name: ${organization!.name}; legal name: ${organization!.legalName ?? "none"}; type: ${organization!.organizationType ?? "none"}`;
-    const lines = [
-      header,
-      ...(person ? [`Person description:\n${truncate(person.description || "No person description yet.", 3000)}`] : []),
-      ...(organization ? [`Organization description markdown:\n${truncate(organization.markdown || "No organization description yet.", 3000)}`] : []),
-      `Contact points (${contacts.length}):`,
-      ...contacts.slice(0, 20).map(formatContactPoint),
-      `Postal addresses (${addresses.length}):`,
-      ...addresses.slice(0, 20).map(formatPartyAddress),
-      `Relationships (${relationships.length}):`,
-      ...relationships.slice(0, 30).map((relationship) => formatPartyRelationship(relationship, party.id)),
-      `Party-owned tasks (${partyTasks.length}, open first):`,
-      ...rankTasks(partyTasks).slice(0, 20).map(formatPartyTask),
-      `Manual communication entries (${timelineEntries.length}, newest first):`,
-      ...timelineEntries.slice(0, 20).map(formatPartyTimelineEntry),
-      `DMAX participations (${participants.length}):`,
-      ...participants.slice(0, 30).map(formatEntityParticipant)
-    ];
-
-    return buildResolvedContext({
-      context,
-      storage,
-      title: person ? formatPersonName(person) : organization!.displayName,
-      promptType: context.type,
-      description: `Focused on one ${context.type} in the Who dimension.`,
-      lines,
-      payload: {
-        dataSources: ["people", "organizations", "party_relationships", "entity_participants", "party_contact_points", "party_addresses", "tasks", "party_timeline_entries"],
-        current: [`${context.type} #${party.id} ${person ? formatPersonName(person) : organization!.displayName}`],
-        children: [`${contacts.length} contact points`, `${addresses.length} postal addresses`, `${partyTasks.length} party-owned tasks`, `${timelineEntries.length} manual communication entries`, `${participants.length} DMAX participations`],
-        neighbors: [`${relationships.length} party relationships`],
-        limits: ["Contacts capped at 20.", "Addresses capped at 20.", "Relationships capped at 30.", "Party tasks capped at 20.", "Manual communication entries capped at 20.", "Participations capped at 30."]
-      }
-    });
+    return buildPartyAgentResolvedContext(db, context, storage);
   }
 
   if (context.type === "idea" || context.type === "project" || context.type === "habit" || context.type === "initiative") {
@@ -1515,8 +1199,8 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
         blocks,
         budgets
       }
-    });
-  }
+  });
+}
 
   const task = tasks.findById(context.taskId);
   if (!task) {
@@ -1662,366 +1346,255 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   });
 }
 
+const partyAgentSecondaryLimits = {
+  contactPoints: 20,
+  addresses: 20,
+  otherRelationships: 30
+};
+
+type PartyAgentContextMode = Extract<ConversationContext, { type: "person" | "organization" }>;
+
+function buildPartyAgentResolvedContext(
+  db: Database.Database,
+  context: PartyAgentContextMode,
+  storage: { contextType: ConversationContextType; contextEntityId: number | null }
+): ResolvedConversationContext {
+  const people = new PersonRepository(db);
+  const organizations = new OrganizationRepository(db);
+  const partyRelationships = new PartyRelationshipRepository(db);
+  const entityParticipants = new EntityParticipantRepository(db);
+  const partyContactPoints = new PartyContactPointRepository(db);
+  const partyAddresses = new PartyAddressRepository(db);
+  const tasks = new TaskRepository(db);
+  const initiatives = new InitiativeRepository(db);
+  const categories = new CategoryRepository(db);
+  const calendarEntries = new CalendarEntryRepository(db);
+  const gmail = new GmailRepository(db);
+  const partyTimeline = new PartyTimelineRepository(db);
+  const partyActivitySummaries = new PartyActivitySummaryRepository(db);
+
+  const person = context.type === "person" ? people.findById(context.partyId) : null;
+  const organization = context.type === "organization" ? organizations.findById(context.partyId) : null;
+  const focusParty = person ?? organization;
+  if (!focusParty) {
+    throw new Error(`${context.type === "person" ? "Person" : "Organization"} not found: ${context.partyId}`);
+  }
+
+  const relationships = partyRelationships.list({ partyId: focusParty.id });
+  const organizationPeople = organization
+    ? listActiveOrganizationPeopleForAgent(relationships, organization.id, people)
+    : [];
+  const criticalPartyIds = uniqueNumbers([focusParty.id, ...organizationPeople.map((entry) => entry.person.id)]);
+  const participants = uniqueById(criticalPartyIds.flatMap((partyId) => entityParticipants.list({ partyId })));
+  const contacts = partyContactPoints.list({ partyId: focusParty.id });
+  const addresses = partyAddresses.list({ partyId: focusParty.id });
+  const activityResponse = partyActivitySummaries.listSummaries([focusParty.id], { includeOrganizationPeople: context.type === "organization" });
+  const activitySummary = activityResponse.summaries[0] ?? null;
+  const organizationPeopleActivity = organization ? activityResponse.organizationPeople?.[organization.id] ?? [] : [];
+
+  const primaryTasks = uniqueById(criticalPartyIds.flatMap((partyId) => tasks.list({ primaryPartyId: partyId })));
+  const participantTasks = uniqueById(participants.flatMap((participant) => participant.entityType === "task" ? [tasks.findById(participant.entityId)].filter(isPresent) : []));
+  const allRelevantTasks = sortPartyAgentTasks(uniqueById([...primaryTasks, ...participantTasks]));
+  const openTasks = allRelevantTasks.filter((task) => task.status !== "done");
+  const doneTasks = allRelevantTasks.filter((task) => task.status === "done");
+
+  const gmailMessages = uniqueById(criticalPartyIds.flatMap((partyId) => gmail.listAllMessagesForParty(partyId)));
+  const manualEntries = uniqueById(criticalPartyIds.flatMap((partyId) => partyTimeline.listAllForParty(partyId)));
+  const communicationItems = [
+    ...gmailMessages.map((message) => ({
+      occurredAt: message.messageDate,
+      line: formatPartyAgentGmailMessage(message, focusParty.id)
+    })),
+    ...manualEntries.map((entry) => ({
+      occurredAt: entry.occurredAt,
+      line: formatPartyAgentTimelineEntry(entry)
+    }))
+  ].sort((left, right) => compareIsoDesc(left.occurredAt, right.occurredAt));
+
+  const relatedCalendarEntries = uniqueById(participants.flatMap((participant) => participant.entityType === "calendar_entry" ? [calendarEntries.findById(participant.entityId)].filter(isPresent) : []));
+  const relatedTaskIds = new Set<number>([
+    ...allRelevantTasks.map((task) => task.id),
+    ...relatedCalendarEntries.flatMap((entry) => entry.taskId ? [entry.taskId] : [])
+  ]);
+  const relatedTasks = uniqueById([...allRelevantTasks, ...[...relatedTaskIds].map((taskId) => tasks.findById(taskId)).filter(isPresent)]);
+  const relatedInitiativeIds = new Set<number>([
+    ...participants.flatMap((participant) => participant.entityType === "initiative" ? [participant.entityId] : []),
+    ...relatedTasks.flatMap((task) => task.initiativeId ? [task.initiativeId] : []),
+    ...relatedCalendarEntries.flatMap((entry) => entry.initiativeId ? [entry.initiativeId] : [])
+  ]);
+  const relatedInitiatives = [...relatedInitiativeIds].map((initiativeId) => initiatives.findById(initiativeId)).filter(isPresent);
+
+  const focusOtherRelationships = relationships.filter((relationship) => !organizationPeople.some((entry) => entry.relationship.id === relationship.id));
+  const shownOtherRelationships = focusOtherRelationships.slice(0, partyAgentSecondaryLimits.otherRelationships);
+  const omittedOtherRelationships = focusOtherRelationships.slice(partyAgentSecondaryLimits.otherRelationships);
+  const shownContacts = prioritizeContactPoints(contacts).slice(0, partyAgentSecondaryLimits.contactPoints);
+  const shownAddresses = prioritizeAddresses(addresses).slice(0, partyAgentSecondaryLimits.addresses);
+
+  const loadedEntities: ContextDebugEntity[] = [
+    debugEntity({
+      role: "current",
+      entityType: "party",
+      id: String(focusParty.id),
+      title: context.type === "person" ? formatPersonName(person!) : organization!.displayName,
+      kind: context.type,
+      includedFields: context.type === "person"
+        ? ["id", "name", "salutation", "description"]
+        : ["id", "name", "legalName", "organizationType", "markdown"]
+    }),
+    ...organizationPeople.map((entry) => debugEntity({
+      role: "child" as const,
+      entityType: "party" as const,
+      id: String(entry.person.id),
+      title: formatPersonName(entry.person),
+      kind: "organization_person",
+      includedFields: ["id", "name", "salutation", "description", "relationshipRoleLabel"]
+    })),
+    ...allRelevantTasks.map((task) => debugEntity({ role: "child" as const, entityType: "task" as const, id: String(task.id), title: task.title, kind: task.status })),
+    ...gmailMessages.map((message) => debugEntity({ role: "child" as const, entityType: "communication" as const, id: `gmail:${message.id}`, title: message.subject ?? "(no subject)", kind: message.direction })),
+    ...manualEntries.map((entry) => debugEntity({ role: "child" as const, entityType: "communication" as const, id: `manual:${entry.id}`, title: entry.title, kind: entry.kind })),
+    ...relatedInitiatives.map((initiative) => debugEntity({ role: "related" as const, entityType: "initiative" as const, id: String(initiative.id), title: initiative.name, kind: initiative.type })),
+    ...relatedCalendarEntries.map((entry) => debugEntity({ role: "related" as const, entityType: "unknown" as const, id: String(entry.id), title: entry.title, kind: "calendar_entry" }))
+  ];
+  const omittedEntities: ContextOmittedEntity[] = [
+    ...contacts.slice(partyAgentSecondaryLimits.contactPoints).map((contact) => omittedEntity({ role: "related", entityType: "party", id: `contact:${contact.id}`, title: contact.value, reason: "cap" as const })),
+    ...addresses.slice(partyAgentSecondaryLimits.addresses).map((address) => omittedEntity({ role: "related", entityType: "party", id: `address:${address.id}`, title: address.line1, reason: "cap" as const })),
+    ...omittedOtherRelationships.map((relationship) => omittedEntity({ role: "neighbor", entityType: "relation", id: String(relationship.id), title: formatPartyRelationshipTitle(relationship, focusParty.id), reason: "cap" as const }))
+  ];
+
+  const communicationText = communicationItems.map((item) => item.line).join("\n");
+  const taskText = allRelevantTasks.map((task) => formatPartyAgentTask(task, focusParty.id, initiatives, categories)).join("\n");
+  const relatedContextText = [
+    ...relatedInitiatives.map((initiative) => formatPartyAgentInitiativeContext(initiative, categories)),
+    ...relatedTasks.filter((task) => !allRelevantTasks.some((candidate) => candidate.id === task.id)).map((task) => formatPartyAgentTask(task, focusParty.id, initiatives, categories)),
+    ...relatedCalendarEntries.map((entry) => formatPartyAgentCalendarContext(entry, tasks, initiatives))
+  ].join("\n");
+  const blocks = [
+    createDebugBlock(
+      `party:${focusParty.id}:critical-communication`,
+      "contextData",
+      "Critical complete local communication history",
+      communicationText.length,
+      communicationText.length,
+      { entityType: "party", entityId: String(focusParty.id), source: "gmail_messages + party_timeline_entries" }
+    ),
+    createDebugBlock(
+      `party:${focusParty.id}:critical-tasks`,
+      "contextData",
+      "Critical complete relevant tasks",
+      taskText.length,
+      taskText.length,
+      { entityType: "party", entityId: String(focusParty.id), source: "tasks" }
+    ),
+    createDebugBlock(
+      `party:${focusParty.id}:critical-dmax-context`,
+      "contextData",
+      "Critical DMAX initiative/task/calendar context",
+      relatedContextText.length,
+      relatedContextText.length,
+      { entityType: "party", entityId: String(focusParty.id), source: "entity_participants + tasks + initiatives + calendar_entries" }
+    )
+  ];
+
+  const title = context.type === "person" ? formatPersonName(person!) : organization!.displayName;
+  const lines = [
+    "Party agent context priority policy:",
+    "- Critical context is complete from local SQLite and is not capped by fixed count/character budgets: identity/description, organization people, local communication history, relevant tasks, and DMAX project/task/calendar context.",
+    "- Lower-priority orientation data may be capped: contact points, postal addresses, extra relationships, and technical metadata.",
+    "- Gmail context is read-only local database context from synchronized gmail_messages. Do not live-read Gmail, send Gmail, edit Gmail, archive Gmail, trash Gmail, or claim a Gmail action happened.",
+    "",
+    context.type === "person" ? formatPartyAgentPersonHeader(person!) : formatPartyAgentOrganizationHeader(organization!),
+    context.type === "person"
+      ? `Person description:\n${person!.description || "No person description yet."}`
+      : `Organization description markdown:\n${organization!.markdown || "No organization description yet."}`,
+    ...(organization
+      ? [
+          `Organization people (${organizationPeople.length}, complete active related people):`,
+          ...(organizationPeople.length ? organizationPeople.map(formatOrganizationPersonForAgent) : ["none"]),
+          `Organization people activity summary (${organizationPeopleActivity.length}):`,
+          ...(organizationPeopleActivity.length ? organizationPeopleActivity.map(formatOrganizationPersonActivityForAgent) : ["none"])
+        ]
+      : []),
+    `Activity summary: ${activitySummary ? formatPartyActivitySummaryForAgent(activitySummary) : "none"}`,
+    `Contact points (${contacts.length}): lower-priority; shown ${shownContacts.length}`,
+    ...(shownContacts.length ? shownContacts.map(formatContactPoint) : ["none"]),
+    `Postal addresses (${addresses.length}): lower-priority; shown ${shownAddresses.length}`,
+    ...(shownAddresses.length ? shownAddresses.map(formatPartyAddress) : ["none"]),
+    `Other party relationships (${focusOtherRelationships.length}, lower-priority; shown ${shownOtherRelationships.length}):`,
+    ...(shownOtherRelationships.length ? shownOtherRelationships.map((relationship) => formatPartyRelationship(relationship, focusParty.id)) : ["none"]),
+    `Relevant tasks/measures (${allRelevantTasks.length}, complete; open ${openTasks.length}, done ${doneTasks.length}):`,
+    ...(allRelevantTasks.length ? allRelevantTasks.map((task) => formatPartyAgentTask(task, focusParty.id, initiatives, categories)) : ["none"]),
+    `DMAX participations (${participants.length}):`,
+    ...(participants.length ? participants.map(formatEntityParticipant) : ["none"]),
+    `DMAX project/task/calendar context (${relatedInitiatives.length} initiatives/projects, ${relatedCalendarEntries.length} calendar entries; complete for related entities):`,
+    ...(relatedContextText ? relatedContextText.split("\n") : ["none"]),
+    `Complete local communication history (${communicationItems.length}, newest first; Gmail ${gmailMessages.length}, manual ${manualEntries.length}):`,
+    ...(communicationItems.length ? communicationItems.map((item) => item.line) : ["none"])
+  ];
+
+  return buildResolvedContext({
+    context,
+    storage,
+    title,
+    promptType: context.type,
+    description: `Focused on one ${context.type} in the Who dimension with complete local communication, measures, and DMAX relationship context.`,
+    lines,
+    payload: {
+      dataSources: [
+        "people",
+        "organizations",
+        "party_relationships",
+        "entity_participants",
+        "party_contact_points",
+        "party_addresses",
+        "tasks",
+        "initiatives",
+        "categories",
+        "calendar_entries",
+        "party_timeline_entries",
+        "gmail_messages",
+        "gmail_message_party_links"
+      ],
+      current: [`${context.type} #${focusParty.id} ${title}`],
+      children: [
+        `${organizationPeople.length} active organization people`,
+        `${allRelevantTasks.length} complete relevant tasks`,
+        `${gmailMessages.length} complete local Gmail messages`,
+        `${manualEntries.length} complete manual communication entries`,
+        `${participants.length} DMAX participations`
+      ],
+      related: [`${relatedInitiatives.length} related initiatives/projects`, `${relatedCalendarEntries.length} related calendar entries`],
+      neighbors: [`${relationships.length} party relationships`],
+      limits: [
+        "Critical party context is not count-capped: identity/description, organization people, complete local communication history, complete relevant tasks, and related DMAX context are emitted in full.",
+        `Lower-priority contact points shown up to ${partyAgentSecondaryLimits.contactPoints}.`,
+        `Lower-priority postal addresses shown up to ${partyAgentSecondaryLimits.addresses}.`,
+        `Lower-priority other relationships shown up to ${partyAgentSecondaryLimits.otherRelationships}.`,
+        "Gmail context is read-only and sourced only from local SQLite; no Gmail live-read or Gmail mutation tools are exposed."
+      ],
+      notes: [
+        "Use communication/task contradictions prompt-contextually; do not implement deterministic rule-engine behavior.",
+        "Suggest task changes with evidence first. Mutate durable DMAX state only when Dietrich explicitly asks and existing tool rules allow it."
+      ],
+      loadedEntities,
+      omittedEntities,
+      blocks,
+      budgets: [
+        budgetSummary(context.type, "Critical local communication history", { emittedChars: communicationText.length }),
+        budgetSummary(context.type, "Critical relevant task context", { emittedChars: taskText.length }),
+        budgetSummary(context.type, "Critical DMAX context", { emittedChars: relatedContextText.length }),
+        budgetSummary(context.type, "Lower-priority contact points", { cap: partyAgentSecondaryLimits.contactPoints, used: shownContacts.length }),
+        budgetSummary(context.type, "Lower-priority addresses", { cap: partyAgentSecondaryLimits.addresses, used: shownAddresses.length }),
+        budgetSummary(context.type, "Lower-priority relationships", { cap: partyAgentSecondaryLimits.otherRelationships, used: shownOtherRelationships.length })
+      ]
+    }
+  });
+}
+
 export function buildContextualAgentMessage(userMessage: string, resolved: ResolvedConversationContext): string {
   return `${resolved.agentContextBlock}
 
 User message:
 ${userMessage}`;
-}
-
-function buildPromptSections(type: ConversationContext["type"], description: string, lines: string[]): {
-  agentContextBlock: string;
-  promptSections: ConversationPromptSections;
-} {
-  if (type === "category") {
-    return buildGermanCategoryPromptSections(type, description, lines);
-  }
-
-  const contextData = ["Context data:", ...lines.filter(Boolean)].join("\n");
-  const contextSpecificInstructions = instructionsForContextType(type);
-  const systemInstructions = [
-    "Current DMAX conversation context:",
-    `Type: ${type}`,
-    `Meaning: ${description}`,
-    "",
-    "Context contract:",
-    "- Treat this as the active focus for this turn.",
-    "- Context is not an automatic instruction to mutate durable state.",
-    "- Durable changes must go through DMAX tools and existing confirmation rules.",
-    "- If the requested mutation target is ambiguous, ask before creating or changing initiatives/tasks.",
-    "- Use tools to fetch more detail when the current context is not enough.",
-    "",
-    "Initiative type guidance:",
-    "- Initiatives have type: idea, project, or habit.",
-    "- Use type=idea for loose thoughts, impulses, possibilities, and brainstorming; ideas are not time-bound.",
-    "- Use type=project for concrete goal-oriented work with an outcome; initiatives of that type can have startDate and endDate as YYYY-MM-DD.",
-    "- Use type=habit for ongoing practices and recurring life/business care; habits usually have no clear start/end date.",
-    "- categoryId is required; use the system Inbox category when category placement is unclear.",
-    "- Changing an existing initiative's type is a lifecycle decision and requires confirmation.",
-    "- A repeated request is not explicit confirmation for a lifecycle change.",
-    "- A requiresConfirmation tool result means the change was not applied.",
-    "- Initiative mindmaps are inspectable through summarizeInitiativeMindmap/getInitiativeMindmap. For complex restructuring, use draftMindmapChanges to show a patch preview and commitMindmapChangeDraft only after explicit confirmation.",
-    "- Mindmap structural edits through the agent are limited to freestyle nodes; derived root, branch, task, and media nodes are read-only context. Do not convert freestyle nodes into tasks/initiatives unless asked.",
-    "",
-    "Life area/category description guidance:",
-    "- Categories are life areas and have a Markdown description field named description.",
-    "- Help Dietrich develop category descriptions iteratively through structured and open questions.",
-    "- Useful category description sections: Scope, Aktuelle Situation, Zielbild / Zielzustand, Massnahmen auf hoher Ebene.",
-    "- Use updateCategory to persist category description changes.",
-    ...responsePolicyLines(),
-    ...contextSpecificInstructions
-  ].join("\n");
-  const agentContextBlock = [
-    "Current DMAX conversation context:",
-    `Type: ${type}`,
-    `Meaning: ${description}`,
-    "",
-    contextData,
-    "",
-    "Context contract:",
-    "- Treat this as the active focus for this turn.",
-    "- Context is not an automatic instruction to mutate durable state.",
-    "- Durable changes must go through DMAX tools and existing confirmation rules.",
-    "- If the requested mutation target is ambiguous, ask before creating or changing initiatives/tasks.",
-    "- Use tools to fetch more detail when the current context is not enough.",
-    "",
-    "Initiative type guidance:",
-    "- Initiatives have type: idea, project, or habit.",
-    "- Use type=idea for loose thoughts, impulses, possibilities, and brainstorming; ideas are not time-bound.",
-    "- Use type=project for concrete goal-oriented work with an outcome; initiatives of that type can have startDate and endDate as YYYY-MM-DD.",
-    "- Use type=habit for ongoing practices and recurring life/business care; habits usually have no clear start/end date.",
-    "- categoryId is required; use the system Inbox category when category placement is unclear.",
-    "- Changing an existing initiative's type is a lifecycle decision and requires confirmation.",
-    "- A repeated request is not explicit confirmation for a lifecycle change.",
-    "- A requiresConfirmation tool result means the change was not applied.",
-    "- Initiative mindmaps are inspectable through summarizeInitiativeMindmap/getInitiativeMindmap. For complex restructuring, use draftMindmapChanges to show a patch preview and commitMindmapChangeDraft only after explicit confirmation.",
-    "- Mindmap structural edits through the agent are limited to freestyle nodes; derived root, branch, task, and media nodes are read-only context. Do not convert freestyle nodes into tasks/initiatives unless asked.",
-    "",
-    "Life area/category description guidance:",
-    "- Categories are life areas and have a Markdown description field named description.",
-    "- Help Dietrich develop category descriptions iteratively through structured and open questions.",
-    "- Useful category description sections: Scope, Aktuelle Situation, Zielbild / Zielzustand, Massnahmen auf hoher Ebene.",
-    "- Use updateCategory to persist category description changes.",
-    ...responsePolicyLines(),
-    ...contextSpecificInstructions
-  ].join("\n");
-  return { agentContextBlock, promptSections: { systemInstructions, contextData } };
-}
-
-function buildGermanCategoryPromptSections(type: ConversationContext["type"], description: string, lines: string[]): {
-  agentContextBlock: string;
-  promptSections: ConversationPromptSections;
-} {
-  const contextData = ["Kontextdaten:", ...lines.filter(Boolean)].join("\n");
-  const contextSpecificInstructions = instructionsForContextType(type);
-  const sharedInstructions = [
-    "Aktueller DMAX Conversation Context:",
-    `Typ: ${type}`,
-    `Bedeutung: ${description}`,
-    "",
-    "Kontextvertrag:",
-    "- Aktiver Fokus fuer diesen Turn; kein automatischer Auftrag zu dauerhaften Aenderungen.",
-    "- Dauerhafte Aenderungen nur ueber DMAX Tools und bestehende Bestaetigungsregeln.",
-    "- Bei mehrdeutigem Aenderungsziel nachfragen, bevor du Initiativen/Aufgaben erstellst oder aenderst.",
-    "- Fehlende Details per Tools abrufen.",
-    "",
-    "Initiative-Typen:",
-    "- Typen: idea, project, habit; categoryId ist Pflicht, bei unklarer Zuordnung Inbox nutzen.",
-    "- idea = lose Gedanken, Impulse, Moeglichkeiten, Brainstorming; nicht zeitgebunden.",
-    "- project = konkrete zielorientierte Arbeit mit Ergebnis; kann startDate/endDate (YYYY-MM-DD) haben.",
-    "- habit = laufende Praktik/wiederkehrende Lebens- oder Business-Pflege; meist ohne klares Start-/Enddatum.",
-    "- Typwechsel bestehender Initiativen ist eine Lifecycle-Entscheidung: Bestaetigung erforderlich; Wiederholung reicht nicht.",
-    "- requiresConfirmation bedeutet: Aenderung wurde nicht angewendet.",
-    "",
-    "Regeln fuer Lebensbereich-/Category-Beschreibungen:",
-    "- Categories sind Lebensbereiche; ihr Markdown-Beschreibungsfeld heisst description.",
-    "- Entwickle Category-Beschreibungen iterativ mit strukturierten offenen Fragen.",
-    "- Pflichtstruktur: Scope, Aktuelle Situation, Bewertung, Zielbild, Ideen, Gewohnheiten, Projekte, Verbindung zwischen Ist-Zustand und Zielbild.",
-    "- updateCategory speichert Aenderungen an der Category-Beschreibung.",
-    ...responsePolicyLines(),
-    ...contextSpecificInstructions
-  ];
-  const systemInstructions = sharedInstructions.join("\n");
-  const agentContextBlock = [
-    "Aktueller DMAX Conversation Context:",
-    `Typ: ${type}`,
-    `Bedeutung: ${description}`,
-    "",
-    contextData,
-    "",
-    ...sharedInstructions.slice(4)
-  ].join("\n");
-  return { agentContextBlock, promptSections: { systemInstructions, contextData } };
-}
-
-function responsePolicyLines(): string[] {
-  return [
-    "",
-    "Response policy:",
-    "- Beantworte zuerst die konkrete Nutzerfrage; nutze den Kontext aktiv, aber wiederhole ihn nicht unnoetig.",
-    "- Benenne relevante Luecken, Unsicherheiten und Annahmen klar; bewerte nicht moralisch.",
-    "- Erstelle oder aendere keine Objekte automatisch, ausser Dietrich fordert das ausdruecklich.",
-    "- Markiere Vorschlaege als Vorschlaege und unterscheide sie von beobachteten Fakten aus dem Kontext.",
-    "- Wenn Klaerung noetig ist, stelle maximal eine gute Frage auf einmal.",
-    "- Stelle nicht automatisch am Ende jeder Antwort eine Frage.",
-    "- Wenn ein klarer naechster Schritt ausreicht, formuliere diesen als Vorschlag.",
-    "- Stelle nur dann eine Rueckfrage, wenn sie fuer den naechsten sinnvollen Schritt wirklich notwendig ist.",
-    "- Antworte moeglichst in der Sprache des Nutzers; bei deutscher Nutzerfrage auf Deutsch.",
-    "- Gib nicht jedes Mal eine vollstaendige Vollanalyse aus; lieber fokussiert hilfreich antworten.",
-    "- Nutze Response-Strukturen als Orientierung, nicht als starres Formular; waehle nur Abschnitte, die zur konkreten Nutzerfrage passen.",
-    "- Bei explizitem Ausfuehrungswunsch handle oder unterstuetze konkret, statt nur zu analysieren.",
-    "",
-    "External capability routing:",
-    "- Wenn der Nutzer aktuelle Webrecherche oder Quellenpruefung braucht, delegiere an den `dmax-research` Subagenten und fasse die Quellenarbeit sichtbar zusammen.",
-    "- Wenn der Nutzer eine Google-Workspace-Datei lesen, pruefen, erstellen oder bearbeiten will, insbesondere docs.google.com Links fuer Sheets, Docs, Slides oder Forms, delegiere an den `dmax-google-workspace` Subagenten.",
-    "- Nutze fuer diese Delegation `sessions_spawn` mit `agentId:\"dmax-google-workspace\"` bzw. `agentId:\"dmax-research\"`; nutze `context:\"isolated\"`, wenn der Subagent nur Link/Rechercheauftrag und knappe DMAX-Kontextzusammenfassung braucht.",
-    "- Wenn die Antwort vom Subagenten-Ergebnis abhaengt, sende keine Platzhalterantwort. Nutze nach `sessions_spawn` `sessions_yield`, bis die Completion als Folgemessage angekommen ist, und antworte erst dann inhaltlich.",
-    "- Behaupte bei Google-Workspace-Links nicht, dass du keinen direkten Zugriff hast, bevor der `dmax-google-workspace` Subagent die Datei mit `gog` versucht hat.",
-    "- Schreibe in Google-Workspace-Dateien nur nach expliziter Bestaetigung von Ziel-Datei, Bereich und konkreter Aenderung."
-  ];
-}
-
-const contextInstructionBuilders: Partial<Record<ConversationContext["type"], () => string[]>> = {
-  categories: () => [
-    "",
-    "Category-Overview-Modus:",
-    "- Leitformel: Category Overview = thematischer globaler Lebensmodell-Agent.",
-    "- Leitfrage: Sind meine Lebensbereiche gut beschrieben und durch passende Initiativen unterlegt?",
-    "- Pruefe, welche Lebensbereiche gut beschrieben sind und welche unscharf bleiben.",
-    "- Suche fehlende Bausteine: Scope, Bewertung, Schmerz/Stoerung, Zielbild, gewuenschte Qualitaet und Spannungen.",
-    "- Pruefe, ob Lebensbereiche durch passende Ideen, Projekte, Gewohnheiten und Tasks unterlegt sind.",
-    "- Erkenne Lebensbereiche mit vielen Initiativen ohne klares Zielbild sowie wichtige Bereiche mit wenig Aufmerksamkeit.",
-    "- Benenne moegliche Konflikte oder Spannungen zwischen Lebensbereichen.",
-    "",
-    "Response Guidance:",
-    "- Gehe vom Gesamtbild der Lebensbereiche aus und springe nicht sofort in Taskplanung.",
-    "- Geeignete Abschnitte bei Analysefragen: Auffaellige Lebensbereiche, gut beschriebene Bereiche, unklare oder unterdefinierte Bereiche.",
-    "- Benenne Spannungen und Konflikte zwischen Lebensbereichen, wenn sie aus dem Kontext erkennbar sind.",
-    "- Zeige Luecken zwischen Lebensbereich und Initiativen: Zielbilder oder Schmerzen ohne passende Ideen, Projekte oder Gewohnheiten.",
-    "- Schliesse mit einem sinnvollen naechsten Klaerungsschritt, nicht mit einer kompletten Umsetzungsplanung."
-  ],
-  category: () => [
-    "",
-    "Category-Detail-Facilitation-Modus:",
-    "- Leitformel: Kategorie-Agent = Lebensbereichs-Coach + Alignment-Pruefer.",
-    "- Ziel: Dietrich schrittweise zu einer vollstaendigen, hochwertigen, strukturierten Markdown-Beschreibung fuehren.",
-    "- Proaktiv fuehren: offene Fragen, Zusammenfassungen, gezielte Nachfragen; nicht nur reagieren.",
-    "- Erst den Lebensbereich klaeren, danach Ideen, Projekte, Gewohnheiten und Tasks am Zielbild messen.",
-    "- Bestehende Beschreibung, Ideen, Projekte, Gewohnheiten und offene Tasks als pruef-/erweiterbares Material nutzen.",
-    "- Pruefe, ob Projekte eigentlich Gewohnheiten sein sollten, ob Ideen reif fuer Projekt/Experiment sind und ob Tasks auf die gewuenschte Qualitaet einzahlen.",
-    "",
-    "Arbeite auf diese Markdown-Struktur hin:",
-    "1. Scope / Abgrenzung: Was gehoert dazu/nicht dazu? Grenzen zu anderen Lebensbereichen?",
-    "2. Aktuelle Situation: aktueller Zustand, Erleben, was funktioniert/unklar/vernachlaessigt/ueberladen/energievoll/wichtig ist.",
-    "3. Bewertung: Zufriedenheit, optional 1-10; warum nicht niedriger, was wuerde sie erhoehen?",
-    "4. Gewuenschter Zielzustand: Idealbild mit Anzeichen, Rhythmen, Standards, Ergebnissen, gefuehlten Qualitaeten.",
-    "5. Spannungen, Hindernisse und offene Fragen.",
-    "6. Ideen: vorhandene und moegliche Ideen zum Zielzustand; lose/explorativ/nicht terminiert erlaubt.",
-    "7. Gewohnheiten: bestehende und sinnvolle moegliche Gewohnheiten zur Unterstuetzung des Zielzustands.",
-    "8. Projekte: laufende, geplante und denkbare Projekte zur Weiterentwicklung des Lebensbereichs.",
-    "9. Verbindung zwischen Ist-Zustand und Zielbild: Welche Ideen, Gewohnheiten und Projekte verbinden Ist-Zustand und Zielbild plausibel?",
-    "",
-    "Persistenzverhalten:",
-    "- Bei genug Material kompakten, strukturierten Markdown-Entwurf vorschlagen; vor Speicherung zeigen und Bestaetigung einholen.",
-    "- Nutze updateCategory erst, nachdem Dietrich der Formulierung zugestimmt hat.",
-    "",
-    "Response Guidance:",
-    "- Klaere zuerst den Lebensbereich selbst, danach die Passung der Initiativen.",
-    "- Geeignete Abschnitte bei Analysefragen: Scope, aktueller Zustand, Schmerz/Spannung, Zielbild/gewuenschte Qualitaet.",
-    "- Wenn Dietrich den Lebensbereich klaeren, beschreiben oder strukturieren moechte, verwende nach Moeglichkeit explizite Labels: Scope, Aktueller Zustand, Schmerz / Spannung, Zielbild / gewuenschte Qualitaet, Passung der Initiativen, Luecken, naechste gute Frage oder naechster Klaerungsschritt.",
-    "- Bei Lebensbereichsklaerungen verwende Schmerz / Spannung moeglichst als eigenes Label, wenn dazu Inhalt vorhanden ist oder eine Luecke sichtbar wird.",
-    "- Diese Labels sind Orientierung, kein starres Formular; irrelevante Abschnitte weglassen und die konkrete Frage zuerst beantworten.",
-    "- Danach Initiativen-Passung pruefen: Ideen, Projekte, Gewohnheiten und Tasks am Zielbild messen.",
-    "- Benenne Luecken, aber schlage bei unscharfer Kategorie nicht vorschnell Projekte vor.",
-    "- Schliesse bei Bedarf mit genau einer naechsten guten Frage."
-  ],
-  initiatives: () => [
-    "",
-    "Initiativen-Overview-Modus:",
-    "- Leitformel: Initiativen-Overview = globaler Alignment-Agent.",
-    "- Leitfrage: Passen meine Initiativen zu meinen Lebensbereichen?",
-    "- Pruefe von den Initiativen aus, ob Ideen, Projekte und Gewohnheiten zu den Lebensbereichsbeschreibungen passen.",
-    "- Suche Diskrepanzen zwischen deklarierter Bedeutung, Kategorie-Schmerz/Zielbild und tatsaechlicher Initiative-/Task-Aufmerksamkeit.",
-    "- Erkenne Lebensbereiche mit Schmerz, aber ohne passende Initiative.",
-    "- Benenne Initiativen, die nicht auf das Zielbild einzahlen, sowie Uebergewichtungen, Ablenkungen oder alte Muster.",
-    "- Pruefe, wo Ideen, Projekte oder Gewohnheiten fehlen.",
-    "",
-    "Response Guidance:",
-    "- Gleiche Initiativen gegen Lebensbereichsbeschreibungen ab; urteile immer relativ zu beschriebenen Prioritaeten.",
-    "- Geeignete Abschnitte bei Analysefragen: stimmige Initiativen, Diskrepanzen, unterversorgte Lebensbereiche.",
-    "- Benenne Uebergewichtungen oder moegliche Ausweichbewegungen nur mit Kontextbezug, nicht pauschal.",
-    "- Schlage moegliche neue Ideen, Projekte oder Gewohnheiten vor, wenn sie erkennbare Luecken schliessen.",
-    "- Schliesse mit einem empfohlenen Fokusbereich oder einer klaren Fokusfrage."
-  ],
-  ideas: () => [
-    "",
-    "Ideenlisten-Modus:",
-    "- Leitformel: Ideenliste = kreativer Portfolio-Sparringraum.",
-    "- Erst oeffnen, dann verdichten: Ideen nicht zu frueh nach Umsetzbarkeit bewerten.",
-    "- Erkenne Muster, Cluster, Motive, Hypothesen und angrenzende Moeglichkeitsraeume zwischen Ideen.",
-    "- Verbinde Ideen mit bestehenden Projekten, Gewohnheiten und Lebensbereichs-Zielbildern.",
-    "- Markiere Ideen, die reif fuer Projekt, Gewohnheit, Experiment oder Recherche-Task sein koennten.",
-    "- Schlage komplementaere, nachfolgende oder angrenzende Ideen und Recherchefelder vor.",
-    "",
-    "Response Guidance:",
-    "- Leiste kreative Mustererkennung, bevor du operativ bewertest.",
-    "- Geeignete Abschnitte bei Analysefragen: Ideencluster, wiederkehrende Motive, Verbindungen zu Projekten und Gewohnheiten.",
-    "- Beschreibe Reifegrade: offen, reif fuer Experiment, reif fuer Projekt oder reif fuer Gewohnheit.",
-    "- Benenne angrenzende Ideen und gute naechste Explorationen.",
-    "- Nicht zu frueh operationalisieren; keine Taskliste ausgeben, wenn Dietrich nur Muster oder Exploration fragt."
-  ],
-  projects: () => [
-    "",
-    "Projektlisten-Modus:",
-    "- Leitformel: Projektliste = Projektportfolio- und Aufmerksamkeits-Agent.",
-    "- Erkenne Projekte mit Aufmerksamkeitsbedarf, unklarem Scope, fehlender Definition of Done oder schwacher Taskstruktur.",
-    "- Pruefe Blocker, Abhaengigkeiten, Reihenfolgen, Zeitraeume, Projektphase und Lock-Status.",
-    "- Bewerte Projekte im Verhaeltnis zu Lebensbereichen, Ideen, Gewohnheiten und offenen Tasks.",
-    "- Benenne Projekte, die zu gross sind, zerlegt werden sollten oder nicht klar auf ein Ergebnis einzahlen.",
-    "",
-    "Response Guidance:",
-    "- Pruefe Projektportfolio und Aufmerksamkeit; priorisiere nicht nur, sondern begruende warum.",
-    "- Geeignete Abschnitte bei Analysefragen: Projekte mit akutem Aufmerksamkeitsbedarf, Scope- oder Ziel-Unklarheiten, Task-Luecken.",
-    "- Benenne Blocker, Abhaengigkeiten und zeitliche Relevanz, wenn sie aus Kontextdaten ableitbar sind.",
-    "- Schliesse mit einer naechsten Projektentscheidung, die am meisten Klarheit schafft."
-  ],
-  habits: () => [
-    "",
-    "Gewohnheitenlisten-Modus:",
-    "- Leitformel: Gewohnheitenliste = Qualitaets- und Pflege-Portfolio-Agent.",
-    "- Erkenne gepflegte und ungepflegte Qualitaeten ueber Lebensbereiche hinweg.",
-    "- Suche Gewohnheiten ohne klare Pflegehandlungen, fehlende Frequenzen oder zu grosse/unrealistische Zuschnitte.",
-    "- Pruefe Lebensbereiche mit gewuenschter Qualitaet, aber ohne passende Gewohnheit.",
-    "- Erkenne Ideen oder Projekte, die eigentlich als Gewohnheit gepflegt werden sollten.",
-    "- Arbeite nur mit vorhandenem Markdown und Tasks; setze kein eigenes Habit-Frequency-Datenmodell voraus.",
-    "",
-    "Response Guidance:",
-    "- Betrachte Gewohnheiten als Pflege gewuenschter Qualitaeten, nicht als Projekte mit Enddatum.",
-    "- Geeignete Abschnitte bei Analysefragen: gepflegte Qualitaeten, ungepflegte Qualitaeten, unscharfe Gewohnheiten.",
-    "- Benenne zu grosse oder unrealistische Gewohnheiten und schlage kleinere Minimalversionen vor.",
-    "- Zeige fehlende Pflegehandlungen und naechste Pflegeimpulse auf."
-  ],
-  idea: () => [
-    "",
-    "Ideen-Detail-Modus:",
-    "- Leitformel: Ideen-Agent = kreativer Sparringspartner fuer Moeglichkeitsraeume.",
-    "- Eine Idee ist noch kein Projekt und keine Aufgabe; behandle sie zuerst als offenen Moeglichkeitsraum.",
-    "- Oeffne Motivation, Hypothesen, Varianten, Analogien, Vergleichsbeispiele und angrenzende Moeglichkeiten.",
-    "- Nutze Kategorie-Hintergrund, Nachbarschaft und Relations, um verwandte Projekte/Gewohnheiten/Ideen zu erkennen.",
-    "- Verdichte erst spaeter zu moeglichen Projekten, Gewohnheiten, Experimenten oder Recherche-Tasks.",
-    "- Nicht zu frueh operationalisieren; keine Projektmanager-Sprache verwenden, solange der Moeglichkeitsraum noch unklar ist.",
-    "",
-    "Response Guidance:",
-    "- Behandle die Idee als Moeglichkeitsraum und oeffne zuerst Motivation, Sehnsucht, Beobachtung oder Hypothese.",
-    "- Geeignete Abschnitte bei Explorationsfragen: was an der Idee zieht, moegliche Richtungen, Analogien und Vergleichsfelder.",
-    "- Benenne Hypothesen, Recherche- und Inputfelder sowie externe Perspektiven.",
-    "- Verdichte auf zwei bis drei starke Richtungen, wenn genug Material vorhanden ist.",
-    "- Bei normalen Explorationsfragen antworte konzentriert: insgesamt etwa 5-7 priorisierte Punkte ueber Varianten, Hypothesen, Recherchefelder und moegliche Verdichtungen hinweg.",
-    "- Nicht 3-5 Punkte pro Untergruppe ausgeben; waehle die staerksten Punkte aus, statt alle Kategorien vollstaendig zu fuellen.",
-    "- Nutze maximal 3-4 kurze Abschnitte fuer eine normale freie Exploration.",
-    "- Weitere Breite, lange Listen und vollstaendige Variantenraeume nur anbieten, wenn Dietrich ausdruecklich nach maximaler Breite, vollstaendiger Analyse oder vielen Optionen fragt.",
-    "- Wenn die Nutzerfrage nach freier Exploration klingt, liefere eine gute erste Verdichtung, nicht die vollstaendige Landkarte.",
-    "- Kleine Experimente duerfen Erkenntnis bringen; Tasks nur vorschlagen, wenn Dietrich das fordert oder die Idee bereits klar genug verdichtet ist."
-  ],
-  project: () => [
-    "",
-    "Projekt-Detail-Modus:",
-    "- Leitformel: Projekt-Agent = Scope-Klaerer + Umsetzungsarchitekt.",
-    "- Ein Projekt soll ein konkretes Ergebnis herbeifuehren; klaere zuerst Motivation, Lebensbereich, Ziel und gewuenschtes Ergebnis.",
-    "- Pruefe Definition of Done, Scope, Nicht-Scope, Zeitraum, Meilensteine, Abhaengigkeiten, Risiken, Blocker und offene Fragen.",
-    "- Beruecksichtige relevante Personen/Organisationen, Parent-/Child-Initiativen, Predecessors/Successors und Same-Category-Nachbarschaft.",
-    "- Wenn Scope ausreichend klar ist, pruefe Tasks: Zuschnitt, Zielbezug, Luecken, Dopplungen, Reihenfolge, Blocker und Entscheidungstasks.",
-    "- Erkenne, ob einzelne Tasks eigentlich Teilprojekte sind.",
-    "",
-    "Response Guidance:",
-    "- Klaere zuerst Motivation, Ziel und gewuenschtes Ergebnis.",
-    "- Geeignete Abschnitte bei Analysefragen: Motivation, Ziel/gewuenchtes Ergebnis, Scope/Nicht-Scope, Definition of Done.",
-    "- Pruefe Zeitraum, Meilensteine, Risiken, Blocker und Abhaengigkeiten, wenn entsprechende Daten vorhanden sind.",
-    "- Erst danach Taskstruktur pruefen: Vollstaendigkeit, Zuschnitt, Sequenz, Dopplungen und fehlende Entscheidungstasks.",
-    "- Wenn Ziel, Scope oder Definition of Done noch unscharf sind, klaere zuerst diese Projektdefinition.",
-    "- Schlage in diesem Fall hoechstens die 3 wichtigsten Taskstruktur-Luecken oder naechsten Klaerungsschritte vor.",
-    "- Erzeuge keine umfangreichen Tasklisten, solange Definition of Done, Scope oder zentrale Abhaengigkeiten unklar sind.",
-    "- Umfangreiche Tasklisten, Arbeitsbloecke oder detaillierte Sequenzierungen nur ausgeben, wenn Dietrich ausdruecklich danach fragt oder das Projekt bereits klar definiert ist."
-  ],
-  habit: () => [
-    "",
-    "Gewohnheiten-Detail-Modus:",
-    "- Leitformel: Gewohnheiten-Agent = Qualitaetscoach + Pflegehandlungs-Strukturierer.",
-    "- Eine Gewohnheit fuehrt kein einmaliges Ergebnis herbei, sondern pflegt langfristig eine gewuenschte Qualitaet.",
-    "- Klaere gewuenschte Qualitaet, Lebensbereich, Motivation, aktuelles Niveau und Zielniveau.",
-    "- Leite Pflegehandlungen, Minimalversionen, Hindernisse und moegliche wiederkehrende Tasks/Erinnerungen aus Markdown und Tasks ab.",
-    "- Reflektiere Frequenzen als Text-/Task-Logik, ohne ein neues Frequency-Datenmodell vorauszusetzen.",
-    "- Behandle Habits nicht wie Projekte mit Definition of Done oder echtem Enddatum.",
-    "",
-    "Response Guidance:",
-    "- Strukturiere die gewuenschte Qualitaet, nicht ein einmaliges Projektergebnis.",
-    "- Geeignete Abschnitte bei Analysefragen: gewuenschte Qualitaet, Bedeutung, aktueller Zustand, Zielniveau.",
-    "- Leite Pflegehandlungen und Frequenzen aus vorhandenem Markdown und Tasks ab, ohne ein neues Schema zu behaupten.",
-    "- Benenne Minimalversionen fuer wenig Energie/Zeit und typische Hindernisse.",
-    "- Schliesse mit einem naechsten Pflegeimpuls."
-  ],
-  task: () => [
-    "",
-    "Task-Detail-Modus:",
-    "- Leitformel: Task-Agent = operativer Umsetzer + Taskstruktur-Pruefer.",
-    "- Pruefe, ob die Aufgabe klar formuliert ist und ein eindeutiges Outcome hat.",
-    "- Erkenne, ob sie zu gross ist, mehrere Aufgaben enthaelt oder besser gesplittet werden sollte.",
-    "- Pruefe, ob sie sinnvoll zur uebergeordneten Initiative und zum Lebensbereich passt.",
-    "- Beruecksichtige sibling tasks, Parent-/Child-Initiativen, Same-Category-Nachbarschaft und Relations.",
-    "- Suche Ueberschneidungen, Dopplungen, Konflikte und bessere Reihenfolgen.",
-    "- Pruefe, ob du die Aufgabe mit vorhandenen Tools selbst unterstuetzen oder ausfuehren kannst; sonst bessere Formulierungen oder Splits vorschlagen.",
-    "",
-    "Response Guidance:",
-    "- Antworte operativ und knapp; keine grosse Lebensanalyse, ausser sie ist fuer die Aufgabe noetig.",
-    "- Geeignete Abschnitte bei Analysefragen: Task-Klarheit, gewuenschtes Outcome, Schnitt/Splitting, Kontextpassung.",
-    "- Nutze sibling tasks fuer Nachbarschaft: Ueberschneidungen, Dopplungen, Konflikte und bessere Reihenfolgen.",
-    "- Benenne den einfachsten sinnvollen Loesungsweg und ob du selbst mit Tools unterstuetzen kannst.",
-    "- Schlage Folgeaufgaben nur vor, wenn sie aus Klarheit, Splitting oder Ausfuehrung wirklich folgen."
-  ]
-};
-
-function instructionsForContextType(type: ConversationContext["type"]): string[] {
-  return contextInstructionBuilders[type]?.() ?? [];
 }
 
 function formatInitiativeHeader(initiative: Initiative): string {
@@ -2353,6 +1926,114 @@ function formatMediaAttachment(attachment: MediaAttachment): string {
   return `- #${attachment.asset.id} [${attachment.asset.kind}/${attachment.asset.mimeType}, ${formatBytes(attachment.asset.byteSize)}] ${attachment.asset.originalName}; caption: ${attachment.caption ?? "none"}; summary/excerpt: ${truncate(derivedText, 240)}`;
 }
 
+function listActiveOrganizationPeopleForAgent(
+  relationships: PartyRelationshipWithParties[],
+  organizationId: number,
+  people: PersonRepository
+): Array<{ person: Person; relationship: PartyRelationshipWithParties }> {
+  return relationships
+    .filter((relationship) => relationship.status === "active")
+    .flatMap((relationship) => {
+      const otherParty = relationship.fromPartyId === organizationId ? relationship.toParty : relationship.toPartyId === organizationId ? relationship.fromParty : null;
+      if (!otherParty || otherParty.type !== "person") return [];
+      const person = people.findById(otherParty.id);
+      return person ? [{ person, relationship }] : [];
+    })
+    .sort((left, right) => formatPersonName(left.person).localeCompare(formatPersonName(right.person), "de"));
+}
+
+function formatPartyAgentPersonHeader(person: Person): string {
+  return `Person: #${person.id} ${formatPersonName(person)}; salutation/gender signal: ${person.salutation}; first: ${person.firstName ?? "none"}; last: ${person.lastName ?? "none"}; title: ${person.academicTitle ?? "none"}; suffix: ${person.nameSuffix ?? "none"}; gender field: not modeled`;
+}
+
+function formatPartyAgentOrganizationHeader(organization: Organization): string {
+  return `Organization: #${organization.id} ${organization.displayName}; name: ${organization.name}; legal name: ${organization.legalName ?? "none"}; type: ${organization.organizationType ?? "none"}`;
+}
+
+function formatOrganizationPersonForAgent(entry: { person: Person; relationship: PartyRelationshipWithParties }): string {
+  const relationship = formatPartyRelationshipTitle(entry.relationship, entry.relationship.fromParty.type === "organization" ? entry.relationship.fromPartyId : entry.relationship.toPartyId);
+  return [
+    `- person #${entry.person.id} ${formatPersonName(entry.person)}`,
+    `  Relationship/role label: ${relationship}; roleLabel: ${entry.relationship.roleLabel ?? "none"}`,
+    `  salutation/gender signal: ${entry.person.salutation}; gender field: not modeled`,
+    `  Academic title: ${entry.person.academicTitle ?? "none"}; suffix: ${entry.person.nameSuffix ?? "none"}`,
+    `  Description: ${entry.person.description || "No person description yet."}`
+  ].join("\n");
+}
+
+function formatOrganizationPersonActivityForAgent(activity: OrganizationPersonActivity): string {
+  return `- person #${activity.partyId} ${activity.displayName}; relationship: ${activity.relationshipLabel}; role: ${activity.roleLabel ?? "none"}; started: ${activity.startedOn ?? "unknown"}; summary: ${formatPartyActivitySummaryForAgent(activity.summary)}`;
+}
+
+function formatPartyActivitySummaryForAgent(summary: PartyActivitySummary): string {
+  const stats = summary.stats;
+  const nextAction = summary.nextAction ? `next action #${summary.nextAction.taskId} ${summary.nextAction.title}; due: ${summary.nextAction.dueAt ?? "none"}; priority: ${summary.nextAction.priority}` : "next action: none";
+  const rollup = summary.rollupIncludesPeople ? `; rollup party ids: ${(summary.rollupPartyIds ?? []).join(", ") || "none"}` : "";
+  return `contact since: ${summary.contactSince ?? "unknown"}; last contact: ${summary.lastContactAt ?? "unknown"}; channels: ${summary.channelsUsed.join(", ") || "none"}; emails inbound/outbound: ${stats.emailInbound}/${stats.emailOutbound}; manual total: ${stats.manualTotal}; measures open/total: ${stats.openMeasureTotal}/${stats.measureTotal}; ${nextAction}${rollup}`;
+}
+
+function formatPartyAgentGmailMessage(message: GmailMessage, focusPartyId: number): string {
+  const content = message.plainBody ?? message.htmlBody ?? message.snippet ?? "";
+  const links = message.partyLinks.map((link) => `#${link.partyId} ${link.partyDisplayName} [${link.partyType}] via ${link.matchedEmail}`).join(", ") || "none";
+  return [
+    `- Gmail #${message.id}; gmailMessageId: ${message.gmailMessageId}; date: ${message.messageDate}; source: gmail_messages; direction: ${message.direction}; mailbox #${message.mailboxId}; thread: ${message.gmailThreadId ?? "none"}; focus party linked: ${message.partyLinks.some((link) => link.partyId === focusPartyId) ? "yes" : "no"}`,
+    `  Subject: ${message.subject || "(no subject)"}`,
+    `  From: ${formatGmailAddressList(message.from)}`,
+    `  To: ${formatGmailAddressList(message.to)}`,
+    `  Cc: ${formatGmailAddressList(message.cc)}`,
+    `  Bcc: ${formatGmailAddressList(message.bcc)}`,
+    `  Linked parties: ${links}`,
+    `  Attachments: ${message.attachments.length}`,
+    `  Full content:\n${indentMultiline(content || "(no stored message body)", "    ")}`
+  ].join("\n");
+}
+
+function formatPartyAgentTimelineEntry(entry: PartyTimelineEntry): string {
+  return [
+    `- Manual communication #${entry.id}; date: ${entry.occurredAt}; source: party_timeline_entries; kind: ${entry.kind}; channel: ${entry.channel}; direction: ${entry.direction}; related task: ${entry.relatedTaskId ?? "none"}`,
+    `  Title: ${entry.title}`,
+    `  Parties: ${entry.parties.map((party) => `#${party.partyId} ${party.partyDisplayName} [${party.partyType}/${party.role}]`).join(", ") || "none"}`,
+    `  Full content:\n${indentMultiline(entry.body || "(no body)", "    ")}`
+  ].join("\n");
+}
+
+function formatPartyAgentTask(task: Task, focusPartyId: number, initiatives: InitiativeRepository, categories: CategoryRepository): string {
+  const initiative = task.initiativeId ? initiatives.findById(task.initiativeId) : null;
+  const category = initiative ? categories.findById(initiative.categoryId) : null;
+  return [
+    `- Task #${task.id}; title: ${task.title}; status: ${task.status}; priority: ${task.priority}; primaryPartyId: ${task.primaryPartyId ?? "none"}${task.primaryPartyId === focusPartyId ? " (focus)" : ""}; initiative: ${initiative ? `#${initiative.id} ${initiative.name} [${initiative.type}]` : task.initiativeId ? `#${task.initiativeId} not found` : "none"}; category: ${category ? `#${category.id} ${category.name}` : "none"}`,
+    `  Due: ${task.dueAt ?? "none"}; completed: ${task.completedAt ?? "none"}; created: ${task.createdAt}; updated: ${task.updatedAt}`,
+    `  Notes:\n${indentMultiline(task.notes || "(no notes)", "    ")}`
+  ].join("\n");
+}
+
+function formatPartyAgentInitiativeContext(initiative: Initiative, categories: CategoryRepository): string {
+  const category = categories.findById(initiative.categoryId);
+  return [
+    `- Initiative/Project #${initiative.id}; name: ${initiative.name}; type: ${initiative.type}; status: ${initiative.status}; project phase: ${initiative.type === "project" ? initiative.projectPhase : "n/a"}; category: ${category ? `#${category.id} ${category.name}` : `#${initiative.categoryId} not found`}`,
+    `  Summary: ${initiative.summary ?? "none"}`,
+    `  Time span: ${formatInitiativeDateRangeValue(initiative)}; locked: ${formatInitiativeLockedValue(initiative)}; parent: ${initiative.parentId ?? "none"}`,
+    `  Markdown:\n${indentMultiline(initiative.markdown || "(no initiative markdown)", "    ")}`
+  ].join("\n");
+}
+
+function formatPartyAgentCalendarContext(entry: CalendarEntry, tasks: TaskRepository, initiatives: InitiativeRepository): string {
+  const task = entry.taskId ? tasks.findById(entry.taskId) : null;
+  const initiative = entry.initiativeId ? initiatives.findById(entry.initiativeId) : task?.initiativeId ? initiatives.findById(task.initiativeId) : null;
+  return [
+    `- Calendar entry #${entry.id}; title: ${entry.title}; type: ${entry.type}; status: ${entry.status}; start: ${entry.startAt}; end: ${entry.endAt}`,
+    `  Linked task: ${task ? `#${task.id} ${task.title}` : entry.taskId ? `#${entry.taskId} not found` : "none"}`,
+    `  Linked initiative/project: ${initiative ? `#${initiative.id} ${initiative.name} [${initiative.type}]` : entry.initiativeId ? `#${entry.initiativeId} not found` : "none"}`,
+    `  Notes:\n${indentMultiline(entry.notes || "(no notes)", "    ")}`
+  ].join("\n");
+}
+
+function formatGmailAddressList(addresses: GmailAddress[]): string {
+  return addresses.length
+    ? addresses.map((address) => `${address.name ? `${address.name} ` : ""}<${address.email}>`).join(", ")
+    : "none";
+}
+
 function formatContactPoint(contactPoint: PartyContactPoint): string {
   const flags = [contactPoint.isPreferred ? "preferred" : null, contactPoint.isPrimary ? "primary" : null, contactPoint.canSend ? "send" : null, contactPoint.canReceive ? "receive" : null]
     .filter(Boolean)
@@ -2387,6 +2068,17 @@ function formatPartyRelationship(relationship: PartyRelationshipWithParties, foc
   return `- #${relationship.id} ${direction} #${otherParty.id} ${otherParty.displayName} [${otherParty.type}]; status: ${relationship.status}; role: ${relationship.roleLabel ?? "none"}${dateRange}`;
 }
 
+function formatPartyRelationshipTitle(relationship: PartyRelationshipWithParties, focusPartyId: number): string {
+  const otherParty = relationship.fromPartyId === focusPartyId ? relationship.toParty : relationship.fromParty;
+  const direction =
+    relationship.relationshipType.directionality === "symmetric"
+      ? relationship.relationshipType.label
+      : relationship.fromPartyId === focusPartyId
+        ? relationship.relationshipType.label
+        : relationship.relationshipType.inverseLabel ?? relationship.relationshipType.label;
+  return `${direction} #${otherParty.id} ${otherParty.displayName}`;
+}
+
 function formatEntityParticipant(participant: EntityParticipantWithParty): string {
   return `- #${participant.id} ${participant.party.type} #${participant.partyId} ${participant.party.displayName}; entity: ${participant.entityType} #${participant.entityId}; role: ${participant.roleType?.label ?? participant.roleLabel ?? "none"}; primary: ${participant.isPrimary ? "yes" : "no"}`;
 }
@@ -2396,7 +2088,7 @@ function formatPartyTask(task: Task): string {
 }
 
 function formatPartyTimelineEntry(entry: PartyTimelineEntry): string {
-  return `- #${entry.id} ${entry.kind}; direction: ${entry.direction}; occurred: ${entry.occurredAt}; title: ${entry.title}; related task: ${entry.relatedTaskId ?? "none"}; note: ${entry.body ?? "none"}`;
+  return `- #${entry.id} ${entry.kind}; channel: ${entry.channel}; direction: ${entry.direction}; occurred: ${entry.occurredAt}; title: ${entry.title}; related task: ${entry.relatedTaskId ?? "none"}; note: ${entry.body ?? "none"}`;
 }
 
 function formatInitiativeRelation(relation: InitiativeRelationWithInitiatives): string {
@@ -2488,6 +2180,49 @@ function formatBytes(bytes: number): string {
   if (kilobytes < 1024) return `${kilobytes.toFixed(kilobytes >= 100 ? 0 : 1)} KB`;
   const megabytes = kilobytes / 1024;
   return `${megabytes.toFixed(megabytes >= 100 ? 0 : 1)} MB`;
+}
+
+function isPresent<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
+}
+
+function uniqueById<T extends { id: number }>(values: T[]): T[] {
+  const seen = new Set<number>();
+  return values.filter((value) => {
+    if (seen.has(value.id)) return false;
+    seen.add(value.id);
+    return true;
+  });
+}
+
+function uniqueNumbers(values: number[]): number[] {
+  return [...new Set(values)];
+}
+
+function compareIsoDesc(left: string | null | undefined, right: string | null | undefined): number {
+  return (Date.parse(right ?? "") || 0) - (Date.parse(left ?? "") || 0);
+}
+
+function sortPartyAgentTasks(tasks: Task[]): Task[] {
+  return [...tasks].sort((left, right) => {
+    if (left.status !== right.status) return left.status === "open" ? -1 : 1;
+    const dueCompare = (left.dueAt ?? "9999-12-31T23:59:59.999Z").localeCompare(right.dueAt ?? "9999-12-31T23:59:59.999Z");
+    if (dueCompare !== 0) return dueCompare;
+    const updatedCompare = compareIsoDesc(left.updatedAt, right.updatedAt);
+    return updatedCompare || left.id - right.id;
+  });
+}
+
+function prioritizeContactPoints(contactPoints: PartyContactPoint[]): PartyContactPoint[] {
+  return [...contactPoints].sort((left, right) => {
+    const leftScore = (left.isPreferred ? 4 : 0) + (left.isPrimary ? 2 : 0) + (left.type === "email" ? 1 : 0);
+    const rightScore = (right.isPreferred ? 4 : 0) + (right.isPrimary ? 2 : 0) + (right.type === "email" ? 1 : 0);
+    return rightScore - leftScore || left.id - right.id;
+  });
+}
+
+function prioritizeAddresses(addresses: PartyAddress[]): PartyAddress[] {
+  return [...addresses].sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary) || left.id - right.id);
 }
 
 function indentMultiline(value: string, prefix: string): string {
