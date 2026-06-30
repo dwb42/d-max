@@ -52,7 +52,13 @@ The header should answer:
 
 Do not overload the header with all attributes.
 
-Do not show a title icon or object-type eyebrow by default on normal entity detail pages. Use entity type labels in ambiguous contexts such as mixed lists, relation rows, search results and debug/inspector views.
+Do not show a title icon or object-type eyebrow by default on normal entity
+detail pages. Use entity type labels in ambiguous contexts such as mixed lists,
+relation rows, search results and debug/inspector views. Party detail pages are
+the current intentional exception for title icons: `/people/:id` and
+`/organizations/:id` show the established person/organization icon because the
+party type is the primary object identity and the two pages share one party
+communication pattern.
 
 Do not use a prominent generic `Bearbeiten` button as the default edit path for small high-frequency fields. Prefer direct/inline editing for title/name, subtype, status, priority and compact date controls when safe. Grouped edit modals may remain available as secondary actions.
 
@@ -67,6 +73,21 @@ Examples:
 - Organization: context/description, people, contact points, linked projects
 - Category: purpose/scope, linked projects/habits/tasks, satisfaction/current state if used
 - Task: action definition, status, owner, due date, linked project/context
+
+Party detail pages (`/people/:id` and `/organizations/:id`) use a specialized
+canonical party communication layout:
+
+- Header: party icon, party name, relationship/type subtitle, `Anpassen`, and a
+  context breadcrumb that points to the most relevant DMAX context when one
+  exists.
+- Main column: open party-owned measures, then `Historie` with manual entries,
+  Gmail messages, and completed party-owned measures.
+- Right profile column: compact contact, description, address, relationship,
+  DMAX-context, and metadata panels. Organization detail keeps compact
+  `Personen` and `Organisationen` relationship panels in this profile column.
+- Contact/address rows should be executable when the data supports it: email
+  compose, external URL, `tel:`, Google Maps, and copy actions belong on these
+  rows instead of separate explanatory controls.
 
 ### Section copy rules
 
@@ -358,7 +379,7 @@ Do not mix unrelated relationship types without grouping.
 
 Reading relationships and editing relationships are separate tasks. Complex add/remove/edit flows open a `RelationshipManager` in a modal or drawer with `RelationPicker`; inline relationship forms are not the default.
 
-For party-to-DMAX-object links, use the section label `Verknüpfte Initiativen und Maßnahmen` unless a later terminology decision replaces it. This section can contain initiatives, projects and habits represented as initiatives, plus tasks / Maßnahmen.
+For party-to-DMAX-object links, use the section label `DMAX-Kontexte`. This section can contain initiatives, projects and habits represented as initiatives, plus tasks / Maßnahmen.
 
 ## 6. Metadata pattern
 

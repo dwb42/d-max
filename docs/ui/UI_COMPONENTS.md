@@ -117,6 +117,7 @@ Validated by:
 
 - `/organizations/:id`
 - `/projects/:id` / `/initiatives/:id`
+- `/people/:id`
 
 ## Entity components
 
@@ -135,7 +136,10 @@ Should support:
 - secondary actions menu
 - optional breadcrumb/back navigation
 
-Should not show all fields. Normal entity detail pages should not show a mandatory icon or object-type eyebrow next to/above the title.
+Should not show all fields. Normal entity detail pages should not show a
+mandatory icon or object-type eyebrow next to/above the title. Party detail
+pages intentionally use the established person/organization icon in the header
+to distinguish the shared party communication surface.
 
 Should not rely on a prominent generic `Bearbeiten` button for small high-frequency edits. Prefer direct editing for safe title/name/subtype/status fields.
 
@@ -213,6 +217,63 @@ Contains:
 - optional action with enough affordance for section-level add/link/create actions
 
 The title should usually carry the section meaning. Use the description only for genuine disambiguation.
+
+### `RelationItem`
+
+Canonical compact relationship/action row.
+
+Use for:
+
+- linked objects;
+- contact points;
+- addresses;
+- task or initiative context rows;
+- compact profile/sidebar relationships.
+
+Current implementation supports both internal click handlers and real links.
+Use `onOpen` for in-app navigation or callbacks. Use `href` with `target` and
+`rel` when the row opens an external or protocol URL such as website, Google
+Maps, or `tel:`. When row actions are present, `RelationItem` keeps the openable
+link area separate from icon actions so copy/edit/delete buttons do not trigger
+the row navigation.
+
+Interactive relation rows must expose a clear accessible label through the
+button/link text or `openLabel`, and icon-only row actions need `aria-label` or
+`title`.
+
+## Party Components
+
+Party/contact primitives live under `web/src/components/party/`.
+
+### `ContactPointList`
+
+Displays and edits party contact points. It is shared by `/people/:id` and
+`/organizations/:id`.
+
+Current behavior:
+
+- email rows keep the existing party compose flow;
+- website and URL rows normalize display to a domain-style label, open in a new
+  tab, and use website/link icons;
+- phone, WhatsApp, and Signal rows use a phone icon, render as `tel:` links,
+  and provide a copy action;
+- German phone values beginning with `+49`, `0049`, or leading `49` are shown
+  and copied in national format;
+- redundant type-only meta lines such as `E-Mail` or `Website` are suppressed.
+
+### `AddressBlock`
+
+Displays and edits party postal addresses. It is shared by `/people/:id` and
+`/organizations/:id`.
+
+Current behavior:
+
+- address rows use a map-pin icon and open Google Maps search links in a new
+  tab;
+- address rows provide an icon-only copy action using the party display name
+  plus the displayed address lines;
+- copy actions use transient visual feedback and must not trigger the maps
+  link.
 
 ### `MetadataGrid`
 
@@ -383,6 +444,8 @@ Each item should support:
 - label
 - primary flag if available
 - preferred flag if available
+- executable link behavior where appropriate
+- compact copy action where useful
 - edit action
 - delete action
 
@@ -405,6 +468,10 @@ Should not expose internal database fields.
 Renders one contact point row inside `ContactPointList`.
 
 Should show contact type, value, optional label and primary/preferred metadata without route-specific party assumptions.
+Email rows may trigger the party Gmail compose flow at the route level.
+Website/URL rows should normalize display text and open external links in a new
+tab. Phone-like rows should use `tel:` links; German phone numbers may be
+normalized for display/copy while preserving the stored value.
 
 ### `AddressBlock`
 
@@ -422,6 +489,8 @@ The add action, usually `Anschrift hinzufügen`, remains visible even when the l
 ### `AddressList`
 
 Displays address rows and empty state inside `AddressBlock`.
+Address rows may open Google Maps search links and expose a compact copy action
+for a formatted postal block including the party name when available.
 
 ### `AddressEditor`
 

@@ -30,9 +30,13 @@ export function RelationItem(props: {
   meta?: string | null;
   detail?: string | null;
   onOpen?: () => void;
+  href?: string;
+  target?: string;
+  rel?: string;
+  openLabel?: string;
   actions?: ReactNode;
 }) {
-  const content = (
+  const copy = (
     <>
       <div className="entity-icon">{props.icon}</div>
       <div className="relation-item-copy">
@@ -40,6 +44,11 @@ export function RelationItem(props: {
         {props.meta ? <p>{props.meta}</p> : null}
         {props.detail ? <span>{props.detail}</span> : null}
       </div>
+    </>
+  );
+  const content = (
+    <>
+      {copy}
       {props.actions ? (
         <div
           className="relation-item-actions"
@@ -51,6 +60,31 @@ export function RelationItem(props: {
       ) : null}
     </>
   );
+
+  if (props.href && !props.actions) {
+    return (
+      <a className="relation-item relation-button" href={props.href} target={props.target} rel={props.rel} aria-label={props.openLabel}>
+        {content}
+      </a>
+    );
+  }
+
+  if (props.href) {
+    return (
+      <div className="relation-item relation-button relation-item-linked">
+        <a className="relation-item-open-link" href={props.href} target={props.target} rel={props.rel} aria-label={props.openLabel}>
+          {copy}
+        </a>
+        <div
+          className="relation-item-actions"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          {props.actions}
+        </div>
+      </div>
+    );
+  }
 
   if (props.onOpen && !props.actions) {
     return (

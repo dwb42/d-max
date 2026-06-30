@@ -1,8 +1,9 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { Pencil, Plus, Send, Trash2 } from "lucide-react";
+import { Check, Copy, Globe, Link2, Mail, Pencil, Phone, Plus, Send, Trash2 } from "lucide-react";
 import type { PartyContactPoint } from "../../types.js";
 import { ConfirmModal, EditModal, ErrorState, RelationItem, RelationList, SectionBlock } from "../ui/index.js";
+import { writeTextToClipboard } from "../ui/clipboard.js";
 
 export type ContactPointInput = {
   type: PartyContactPoint["type"];
@@ -156,16 +157,27 @@ export function ContactPointItem(props: {
   onDelete?: () => void;
 }) {
   const contactPoint = props.contactPoint;
+  const normalizedUrl = contactPointUrl(contactPoint);
+  const normalizedPhone = contactPointPhone(contactPoint);
   return (
     <RelationItem
-      icon={<Send size={15} />}
-      title={contactPoint.value}
-      meta={[contactPointTypeLabel(contactPoint.type), contactPoint.label, contactPoint.isPreferred ? "bevorzugt" : null, contactPoint.isPrimary ? "primär" : null]
-        .filter(Boolean)
-        .join(" · ")}
+      icon={contactPointIcon(contactPoint)}
+      title={normalizedUrl?.displayValue ?? normalizedPhone?.displayValue ?? contactPoint.value}
+      meta={contactPointMeta(contactPoint)}
       onOpen={props.onOpen}
+      href={normalizedUrl?.href ?? normalizedPhone?.href}
+      target={normalizedUrl ? "_blank" : undefined}
+      rel={normalizedUrl ? "noopener noreferrer" : undefined}
+      openLabel={normalizedUrl ? `${normalizedUrl.displayValue} öffnen` : normalizedPhone ? `${normalizedPhone.displayValue} anrufen` : undefined}
       actions={(
         <>
+          {normalizedPhone ? (
+            <ContactCopyButton
+              value={normalizedPhone.displayValue}
+              label="Telefonnummer kopieren"
+              disabled={props.disabled}
+            />
+          ) : null}
           {props.onEdit ? (
             <button
               type="button"
@@ -192,6 +204,112 @@ export function ContactPointItem(props: {
       )}
     />
   );
+}
+
+function ContactCopyButton(props: { value: string; label: string; disabled?: boolean }) {
+  const [status, setStatus] = useState<"idle" | "copied" | "error">("idle");
+
+  const copy = async () => {
+    if (props.disabled) return;
+    try {
+      const copied = await writeTextToClipboard(props.value);
+      setStatus(copied ? "copied" : "error");
+    } catch {
+      setStatus("error");
+    }
+    window.setTimeout(() => setStatus("idle"), 1400);
+  };
+
+  const title = status === "copied" ? "Kopiert" : status === "error" ? "Kopieren fehlgeschlagen" : props.label;
+  return (
+    <button
+      type="button"
+      className={`icon-button compact copy-feedback-${status}`}
+      disabled={props.disabled}
+      title={title}
+      aria-label={title}
+      onClick={() => void copy()}
+    >
+      {status === "copied" ? <Check size={14} /> : <Copy size={14} />}
+    </button>
+  );
+}
+
+function contactPointIcon(contactPoint: PartyContactPoint): ReactNode {
+  if (contactPointUrl(contactPoint)) {
+    return contactPoint.type === "website" ? <Globe size={15} /> : <Link2 size={15} />;
+  }
+  if (contactPoint.type === "email") return <Mail size={15} />;
+  if (contactPoint.type === "phone" || contactPoint.type === "whatsapp" || contactPoint.type === "signal") return <Phone size={15} />;
+  return <Send size={15} />;
+}
+
+function contactPointMeta(contactPoint: PartyContactPoint): string | null {
+  const typeLabel = contactPointTypeLabel(contactPoint.type);
+  const label = contactPoint.label?.trim();
+  const meta = [
+    label && !isRedundantContactLabel(label, typeLabel) ? label : null,
+    contactPoint.isPreferred ? "bevorzugt" : null,
+    contactPoint.isPrimary ? "primär" : null
+  ].filter(Boolean).join(" · ");
+  return meta || null;
+}
+
+function isRedundantContactLabel(label: string, typeLabel: string): boolean {
+  const normalizedLabel = normalizeContactLabel(label);
+  const normalizedType = normalizeContactLabel(typeLabel);
+  return normalizedLabel === normalizedType || (normalizedLabel === "website" && normalizedType === "webseite");
+}
+
+function normalizeContactLabel(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s._-]+/g, "");
+}
+
+function contactPointUrl(contactPoint: PartyContactPoint): { href: string; displayValue: string } | null {
+  const value = contactPoint.value.trim();
+  if (!isUrlContactPoint(contactPoint, value)) return null;
+  const href = value.match(/^https?:\/\//i) ? value : `https://${value}`;
+  try {
+    const url = new URL(href);
+    if (!url.hostname.includes(".")) return null;
+    const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+    const displayHost = `www.${hostname}`;
+    const displayPath = contactPoint.type === "website" ? "" : url.pathname.replace(/\/+$/, "");
+    return {
+      href: url.toString(),
+      displayValue: `${displayHost}${displayPath && displayPath !== "/" ? displayPath : ""}`
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isUrlContactPoint(contactPoint: PartyContactPoint, value: string): boolean {
+  if (contactPoint.type === "website" || contactPoint.type === "linkedin") return true;
+  if (!value || value.includes("@") || /\s/.test(value)) return false;
+  return /^https?:\/\//i.test(value) || /^www\./i.test(value) || /^[a-z0-9-]+(\.[a-z0-9-]+)+(?:[/?#].*)?$/i.test(value);
+}
+
+function contactPointPhone(contactPoint: PartyContactPoint): { href: string; displayValue: string } | null {
+  if (contactPoint.type !== "phone" && contactPoint.type !== "whatsapp" && contactPoint.type !== "signal") return null;
+  const displayValue = normalizeGermanPhoneNumber(contactPoint.value);
+  const hrefValue = displayValue.replace(/[^\d+]/g, "");
+  if (!hrefValue) return null;
+  return { href: `tel:${hrefValue}`, displayValue };
+}
+
+function normalizeGermanPhoneNumber(value: string): string {
+  const trimmed = value.trim();
+  const compact = trimmed.replace(/[^\d+]/g, "");
+  let national: string | null = null;
+  if (compact.startsWith("+49")) {
+    national = `0${trimmed.replace(/^\+49[\s-]*/, "")}`;
+  } else if (compact.startsWith("0049")) {
+    national = `0${trimmed.replace(/^0049[\s-]*/, "")}`;
+  } else if (compact.startsWith("49") && compact.length > 5) {
+    national = `0${trimmed.replace(/^49[\s-]*/, "")}`;
+  }
+  return national?.replace(/\s+/g, " ").trim() ?? trimmed;
 }
 
 export function ContactPointEditor(props: {

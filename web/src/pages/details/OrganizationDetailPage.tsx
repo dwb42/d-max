@@ -5,7 +5,8 @@ import { AddressBlock, ContactPointList } from "../../components/party/index.js"
 import type { AddressInput, ContactPointInput } from "../../components/party/index.js";
 import type { EntityParticipant, Initiative, Organization, OrganizationDetail, PartyRelationshipWithParties, Person, RelationshipType, Task } from "../../types.js";
 import { entityTypeLabel, formatDateTimeForUi, participantRoleSummary, personName } from "./detailUtils.js";
-import { PartyHistorySection } from "./PersonDetailPage.js";
+import { PartyHistorySection, PartyTasksSection } from "./PartyDetailSections.js";
+import type { EmailComposeDraft } from "./PartyDetailSections.js";
 
 export function OrganizationDetailView(props: {
   detail: OrganizationDetail | null;
@@ -44,6 +45,8 @@ export function OrganizationDetailView(props: {
   onOpenOrganization: (partyId: number) => void;
 }) {
   const organization = props.detail?.organization;
+  const [composeDraft, setComposeDraft] = useState<EmailComposeDraft | null>(null);
+  const [partyTaskVersion, setPartyTaskVersion] = useState(0);
 
   if (props.loadError) {
     return (
@@ -56,22 +59,17 @@ export function OrganizationDetailView(props: {
 
   if (!props.detail || !organization) return <EmptyState title="Organisation wird geladen" description="Die Detaildaten werden aus DMAX geladen." />;
 
+  const metadataItems = [
+    { label: "Name", value: organization.name },
+    { label: "Anzeigename", value: organization.displayName !== organization.name ? organization.displayName : null },
+    { label: "Rechtlicher Name", value: organization.legalName },
+    { label: "Organisationstyp", value: organization.organizationType },
+    { label: "Erstellt", value: formatDateTimeForUi(organization.createdAt) },
+    { label: "Aktualisiert", value: formatDateTimeForUi(organization.updatedAt) }
+  ];
+
   return (
-    <EntityDetailPage
-      className="organization-reference-detail"
-      aside={(
-        <MetadataGrid
-          items={[
-            { label: "Name", value: organization.name },
-            { label: "Anzeigename", value: organization.displayName !== organization.name ? organization.displayName : null },
-            { label: "Rechtlicher Name", value: organization.legalName },
-            { label: "Organisationstyp", value: organization.organizationType },
-            { label: "Erstellt", value: formatDateTimeForUi(organization.createdAt) },
-            { label: "Aktualisiert", value: formatDateTimeForUi(organization.updatedAt) }
-          ]}
-        />
-      )}
-    >
+    <EntityDetailPage className="organization-reference-detail">
       {props.coreModalOpen ? (
         <OrganizationCoreModal
           organization={organization}
@@ -82,48 +80,74 @@ export function OrganizationDetailView(props: {
           }}
         />
       ) : null}
-      <OrganizationDescriptionSection
-        organization={organization}
-        onUpdateOrganization={(input) => props.onUpdateOrganization(organization.id, input)}
-      />
-      <div className="entity-detail-two-column">
-        <ContactPointList
-          partyId={organization.id}
-          contactPoints={props.detail.contactPoints}
-          description={null}
-          onCreate={props.onCreateContactPoint}
-          onUpdate={props.onUpdateContactPoint}
-          onDelete={props.onDeleteContactPoint}
-        />
-        <AddressBlock
-          partyId={organization.id}
-          addresses={props.detail.addresses}
-          description={null}
-          onCreate={props.onCreateAddress}
-          onUpdate={props.onUpdateAddress}
-          onDelete={props.onDeleteAddress}
-        />
+      <div className="party-detail-communication-layout">
+        <main className="party-detail-email-main">
+          <PartyTasksSection
+            partyId={organization.id}
+            onOpenTask={props.onOpenTask}
+            onTasksChanged={() => setPartyTaskVersion((version) => version + 1)}
+          />
+          <PartyHistorySection
+            partyId={organization.id}
+            contactEmails={props.detail.contactPoints.filter((contactPoint) => contactPoint.type === "email").map((contactPoint) => contactPoint.value)}
+            composeDraft={composeDraft}
+            onComposeDraftChange={setComposeDraft}
+            taskRefreshKey={partyTaskVersion}
+            onOpenTask={props.onOpenTask}
+          />
+        </main>
+        <aside className="party-detail-sidebar">
+          <ContactPointList
+            partyId={organization.id}
+            contactPoints={props.detail.contactPoints}
+            title="Kontakt"
+            description={null}
+            addIconOnly
+            emptyDescription="E-Mail, Telefon oder Messenger können ergänzt werden."
+            deleteDescription={(contactPoint) => <p>„{contactPoint.value}“ wird aus dieser Organisation entfernt.</p>}
+            onActivateContactPoint={(contactPoint) => setComposeDraft({ to: contactPoint.value })}
+            onCreate={props.onCreateContactPoint}
+            onUpdate={props.onUpdateContactPoint}
+            onDelete={props.onDeleteContactPoint}
+          />
+          <OrganizationDescriptionSection
+            organization={organization}
+            onUpdateOrganization={(input) => props.onUpdateOrganization(organization.id, input)}
+          />
+          <AddressBlock
+            partyId={organization.id}
+            copyName={organization.displayName}
+            addresses={props.detail.addresses}
+            description={null}
+            emptyMode="none"
+            addIconOnly
+            deleteDescription={(address) => <p>„{address.line1}“ wird aus dieser Organisation entfernt.</p>}
+            onCreate={props.onCreateAddress}
+            onUpdate={props.onUpdateAddress}
+            onDelete={props.onDeleteAddress}
+          />
+          <OrganizationRelationsSection
+            organization={organization}
+            people={props.people}
+            organizations={props.organizations}
+            relationshipTypes={props.relationshipTypes}
+            relationships={props.detail.relationships}
+            onCreateRelationship={props.onCreateRelationship}
+            onOpenPerson={props.onOpenPerson}
+            onOpenOrganization={props.onOpenOrganization}
+          />
+          <OrganizationParticipationsSection
+            organization={organization}
+            participants={props.detail.participants}
+            initiatives={props.initiatives}
+            tasks={props.tasks}
+            onCreateParticipant={props.onCreateParticipant}
+            onOpenInitiative={props.onOpenInitiative}
+            onOpenTask={props.onOpenTask}
+          />
+          <MetadataGrid items={metadataItems} />
+        </aside>
       </div>
-      <PartyHistorySection partyId={organization.id} contactEmails={props.detail.contactPoints.filter((contactPoint) => contactPoint.type === "email").map((contactPoint) => contactPoint.value)} />
-      <OrganizationRelationsSection
-        organization={organization}
-        people={props.people}
-        organizations={props.organizations}
-        relationshipTypes={props.relationshipTypes}
-        relationships={props.detail.relationships}
-        onCreateRelationship={props.onCreateRelationship}
-        onOpenPerson={props.onOpenPerson}
-        onOpenOrganization={props.onOpenOrganization}
-      />
-      <OrganizationParticipationsSection
-        organization={organization}
-        participants={props.detail.participants}
-        initiatives={props.initiatives}
-        tasks={props.tasks}
-        onCreateParticipant={props.onCreateParticipant}
-        onOpenInitiative={props.onOpenInitiative}
-        onOpenTask={props.onOpenTask}
-      />
     </EntityDetailPage>
   );
 }
@@ -205,6 +229,7 @@ function OrganizationDescriptionSection(props: {
   return (
     <>
       <DescriptionBlock
+        title="Beschreibung"
         text={props.organization.markdown}
         emptyTitle="Noch keine Beschreibung vorhanden."
         onEdit={() => setEditing(true)}
@@ -307,18 +332,23 @@ function OrganizationRelationsSection(props: {
 
   return (
     <>
-      <div className="relation-section-stack">
-        <RelationGroup
-          title="Personen"
-          emptyMode="none"
-          actions={(
-            <button type="button" className="section-primary-action" onClick={() => setPersonManagerOpen(true)} disabled={saving || availablePeople.length === 0 || props.relationshipTypes.length === 0}>
-              <Plus size={15} />
-              Person verknüpfen
-            </button>
-          )}
-        >
-          {memberRelationships.map((relationship) => {
+      <RelationGroup
+        title="Personen"
+        emptyMode="none"
+        actions={(
+          <button
+            type="button"
+            className="icon-button compact"
+            onClick={() => setPersonManagerOpen(true)}
+            disabled={saving || availablePeople.length === 0 || props.relationshipTypes.length === 0}
+            title="Person verknüpfen"
+            aria-label="Person verknüpfen"
+          >
+            <Plus size={15} />
+          </button>
+        )}
+      >
+        {memberRelationships.map((relationship) => {
           const person = relationship.fromPartyId === props.organization.id ? relationship.toParty : relationship.fromParty;
           const direction =
             relationship.relationshipType.directionality === "symmetric"
@@ -335,38 +365,43 @@ function OrganizationRelationsSection(props: {
               onOpen={() => props.onOpenPerson(person.id)}
             />
           );
-          })}
-        </RelationGroup>
-        <RelationGroup
-          title="Organisationen"
-          emptyMode="none"
-          actions={(
-            <button type="button" className="section-primary-action" onClick={() => setOrganizationManagerOpen(true)} disabled={saving || availableOrganizations.length === 0 || props.relationshipTypes.length === 0}>
-              <Plus size={15} />
-              Organisation verknüpfen
-            </button>
-          )}
-        >
-          {otherRelationships.map((relationship) => {
-            const otherParty = relationship.fromPartyId === props.organization.id ? relationship.toParty : relationship.fromParty;
-            const label =
-              relationship.relationshipType.directionality === "symmetric"
+        })}
+      </RelationGroup>
+      <RelationGroup
+        title="Organisationen"
+        emptyMode="none"
+        actions={(
+          <button
+            type="button"
+            className="icon-button compact"
+            onClick={() => setOrganizationManagerOpen(true)}
+            disabled={saving || availableOrganizations.length === 0 || props.relationshipTypes.length === 0}
+            title="Organisation verknüpfen"
+            aria-label="Organisation verknüpfen"
+          >
+            <Plus size={15} />
+          </button>
+        )}
+      >
+        {otherRelationships.map((relationship) => {
+          const otherParty = relationship.fromPartyId === props.organization.id ? relationship.toParty : relationship.fromParty;
+          const label =
+            relationship.relationshipType.directionality === "symmetric"
+              ? relationship.relationshipType.label
+              : relationship.fromPartyId === props.organization.id
                 ? relationship.relationshipType.label
-                : relationship.fromPartyId === props.organization.id
-                  ? relationship.relationshipType.label
-                  : relationship.relationshipType.inverseLabel ?? relationship.relationshipType.label;
-            return (
-              <RelationItem
-                key={relationship.id}
-                icon={<Building2 size={16} />}
-                title={otherParty.displayName}
-                meta={[label, relationship.roleLabel].filter(Boolean).join(" · ")}
-                onOpen={() => props.onOpenOrganization(otherParty.id)}
-              />
-            );
-          })}
-        </RelationGroup>
-      </div>
+                : relationship.relationshipType.inverseLabel ?? relationship.relationshipType.label;
+          return (
+            <RelationItem
+              key={relationship.id}
+              icon={<Building2 size={16} />}
+              title={otherParty.displayName}
+              meta={[label, relationship.roleLabel].filter(Boolean).join(" · ")}
+              onOpen={() => props.onOpenOrganization(otherParty.id)}
+            />
+          );
+        })}
+      </RelationGroup>
       {error ? <ErrorState title="Beziehung konnte nicht gespeichert werden" description={error} /> : null}
       {personManagerOpen ? (
         <EditModal
@@ -532,13 +567,15 @@ function OrganizationParticipationsSection(props: {
 
   return (
     <SectionBlock
-      title="Verknüpfte Initiativen und Maßnahmen"
+      title="DMAX-Kontexte"
       actions={(
         <>
           <button
             type="button"
-            className="section-primary-action"
+            className="icon-button compact"
             disabled={saving || availableInitiatives.length === 0}
+            title="Initiative verknüpfen"
+            aria-label="Initiative verknüpfen"
             onClick={() => {
               setLinkType("initiative");
               setEntityId("");
@@ -546,12 +583,13 @@ function OrganizationParticipationsSection(props: {
             }}
           >
             <Plus size={15} />
-            Initiative verknüpfen
           </button>
           <button
             type="button"
-            className="section-primary-action"
+            className="icon-button compact"
             disabled={saving || availableTasks.length === 0}
+            title="Maßnahme verknüpfen"
+            aria-label="Maßnahme verknüpfen"
             onClick={() => {
               setLinkType("task");
               setEntityId("");
@@ -559,12 +597,11 @@ function OrganizationParticipationsSection(props: {
             }}
           >
             <Plus size={15} />
-            Maßnahme verknüpfen
           </button>
         </>
       )}
     >
-      <RelationList emptyMode="none">
+      <RelationList emptyTitle="Keine DMAX-Kontexte" emptyDescription="Diese Organisation ist noch keiner Initiative oder Maßnahme zugeordnet.">
         {props.participants.map((participant) => {
           const title =
             participant.entityType === "initiative"

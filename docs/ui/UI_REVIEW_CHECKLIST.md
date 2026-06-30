@@ -81,7 +81,7 @@ Use this checklist together with `UI_CURRENT_STATE.md`, `UI_PRINCIPLES.md`, `UI_
 - Can the user open related objects easily?
 - Are relation actions such as link/unlink/edit clear?
 - Are read-only relationship display and relationship editing separated?
-- Does `Verknüpfte Initiativen und Maßnahmen` label party-to-initiative/task links where applicable?
+- Does `DMAX-Kontexte` label party-to-initiative/task links where applicable?
 
 ## 9. Empty states
 

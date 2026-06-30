@@ -97,6 +97,11 @@ concise summary before confirmation.
 - Use `initiativeId` for initiative-owned measures, `primaryPartyId` for
   person/organization-owned measures, or both when a project measure is centered
   on a party. Use Inbox only when neither context is clear.
+- For actor research or outreach initiatives, create a small number of
+  initiative-owned grouping tasks, attach the relevant parties to those grouping
+  tasks with `createEntityParticipant`, and keep concrete first-contact actions
+  as party-owned tasks. Do not attach long ungrouped actor lists directly to the
+  initiative.
 - Ask before creating vague/speculative tasks.
 - Treat "make tasks from this" as candidate proposal, not automatic batch
   creation.

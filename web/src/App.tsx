@@ -536,6 +536,40 @@ function taskBackLinkForTarget(
   return { path: `/initiatives/${taskBackTarget.initiativeId}`, label: `Zurück zu „${label}“`, title: label };
 }
 
+function partyContextBackLink(
+  participants: EntityParticipant[] | undefined,
+  initiatives: Initiative[],
+  tasks: Task[]
+): { path: string; label: string; title?: string } | null {
+  if (!participants || participants.length === 0) return null;
+  const sortedParticipants = [...participants].sort((left, right) => {
+    if (left.isPrimary !== right.isPrimary) return left.isPrimary ? -1 : 1;
+    if (left.entityType !== right.entityType) return left.entityType === "task" ? -1 : 1;
+    return left.id - right.id;
+  });
+  const participant = sortedParticipants[0];
+  if (!participant) return null;
+
+  if (participant.entityType === "task") {
+    const task = tasks.find((candidate) => candidate.id === participant.entityId);
+    const label = task?.title ?? `Maßnahme ${participant.entityId}`;
+    return { path: `/tasks/${participant.entityId}`, label, title: label };
+  }
+
+  if (participant.entityType === "initiative") {
+    const initiative = initiatives.find((candidate) => candidate.id === participant.entityId);
+    const label = initiative ? displayInitiativeName(initiative) : `Initiative ${participant.entityId}`;
+    return { path: `/initiatives/${participant.entityId}`, label, title: label };
+  }
+
+  if (participant.entityType === "calendar_entry") {
+    const label = `Kalendereintrag ${participant.entityId}`;
+    return { path: "/calendar", label, title: label };
+  }
+
+  return null;
+}
+
 function pathForRoute(view: View, initiativeId?: number | null): string {
   if (view === "initiative") return `/initiatives/${initiativeId}`;
   if (view === "task") return "/tasks";
@@ -1922,6 +1956,7 @@ export default function App() {
 
     if (view === "person") {
       const person = personDetail?.person ?? null;
+      const personContextBackLink = partyContextBackLink(personDetail?.participants, overview?.initiatives ?? [], overview?.tasks ?? []);
       const personHeader = personLoadError ? (
         <EntityHeader
           title="Person nicht gefunden"
@@ -1929,6 +1964,7 @@ export default function App() {
         />
       ) : (
         <EntityHeader
+          icon={<Users size={20} />}
           title={person ? personDisplayTitle(person) : "Person"}
           subtitleContent={person && personDetail ? (
             <PersonHeaderRelations
@@ -1955,8 +1991,12 @@ export default function App() {
         <div className="content-header-title">
           <div className="back-actions">
             <div className="back-action-group">
-              <button className="small-button back-button" onClick={() => navigate("/people")}>
-                Zurück zu Personen
+              <button
+                className="small-button back-button truncate"
+                onClick={() => navigate(personContextBackLink?.path ?? "/people")}
+                title={personContextBackLink?.title}
+              >
+                {personContextBackLink?.label ?? "Zurück zu Personen"}
               </button>
             </div>
           </div>
@@ -1968,16 +2008,22 @@ export default function App() {
     if (view === "organization") {
       const organization = organizationDetail?.organization ?? null;
       const organizationTypeLabel = organization?.organizationType?.trim() || "Organisation";
+      const organizationContextBackLink = partyContextBackLink(organizationDetail?.participants, overview?.initiatives ?? [], overview?.tasks ?? []);
       return (
         <div className="content-header-title">
           <div className="back-actions">
             <div className="back-action-group">
-              <button className="small-button back-button" onClick={() => navigate("/organizations")}>
-                Zurück zu Organisationen
+              <button
+                className="small-button back-button truncate"
+                onClick={() => navigate(organizationContextBackLink?.path ?? "/organizations")}
+                title={organizationContextBackLink?.title}
+              >
+                {organizationContextBackLink?.label ?? "Zurück zu Organisationen"}
               </button>
             </div>
           </div>
           <EntityHeader
+            icon={<Building2 size={20} />}
             titleContent={(
               <InlineEditableText
                 value={organization?.displayName ?? "Organisation"}
@@ -2012,10 +2058,10 @@ export default function App() {
                 type="button"
                 className="small-button header-secondary-action"
                 onClick={() => setOrganizationCoreModalOpen(true)}
-                title="Stammdaten bearbeiten"
+                title="Organisation anpassen"
               >
                 <Pencil size={15} />
-                Stammdaten
+                Anpassen
               </button>
             ) : null}
           />

@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { Building2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, Copy, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
 import type { PartyAddress } from "../../types.js";
 import { ConfirmModal, EditModal, ErrorState, RelationItem, RelationList, SectionBlock } from "../ui/index.js";
 import type { RelationEmptyMode } from "../ui/index.js";
+import { writeTextToClipboard } from "../ui/clipboard.js";
 
 export type AddressInput = {
   label?: string | null;
@@ -18,6 +19,7 @@ export type AddressInput = {
 
 export function AddressBlock(props: {
   partyId: number;
+  copyName?: string;
   addresses: PartyAddress[];
   description?: string | null;
   emptyTitle?: string;
@@ -54,6 +56,7 @@ export function AddressBlock(props: {
       )}
     >
       <AddressList
+        copyName={props.copyName}
         addresses={props.addresses}
         emptyTitle={props.emptyTitle ?? "Keine Anschriften"}
         emptyDescription={props.emptyDescription ?? "Post- oder Rechnungsadressen können ergänzt werden."}
@@ -117,6 +120,7 @@ export function AddressBlock(props: {
 }
 
 export function AddressList(props: {
+  copyName?: string;
   addresses: PartyAddress[];
   emptyTitle: string;
   emptyDescription?: string;
@@ -131,6 +135,7 @@ export function AddressList(props: {
         <AddressItem
           key={address.id}
           address={address}
+          copyName={props.copyName}
           disabled={props.disabled}
           onEdit={props.onEdit}
           onDelete={props.onDelete}
@@ -142,18 +147,28 @@ export function AddressList(props: {
 
 function AddressItem(props: {
   address: PartyAddress;
+  copyName?: string;
   disabled?: boolean;
   onEdit?: (address: PartyAddress) => void;
   onDelete?: (address: PartyAddress) => void;
 }) {
   const address = props.address;
+  const mapsHref = googleMapsHref(address);
   return (
     <RelationItem
-      icon={<Building2 size={15} />}
+      icon={<MapPin size={15} />}
       title={address.line1}
       meta={[formatAddressLine(address), address.label, address.isPrimary ? "primär" : null].filter(Boolean).join(" · ")}
+      href={mapsHref}
+      target="_blank"
+      rel="noopener noreferrer"
+      openLabel={`Adresse in Google Maps öffnen: ${address.line1}`}
       actions={(
         <>
+          <AddressCopyButton
+            value={formatAddressCopyText(address, props.copyName)}
+            disabled={props.disabled}
+          />
           {props.onEdit ? (
             <button
               type="button"
@@ -179,6 +194,35 @@ function AddressItem(props: {
         </>
       )}
     />
+  );
+}
+
+function AddressCopyButton(props: { value: string; disabled?: boolean }) {
+  const [status, setStatus] = useState<"idle" | "copied" | "error">("idle");
+
+  const copy = async () => {
+    if (props.disabled) return;
+    try {
+      const copied = await writeTextToClipboard(props.value);
+      setStatus(copied ? "copied" : "error");
+    } catch {
+      setStatus("error");
+    }
+    window.setTimeout(() => setStatus("idle"), 1400);
+  };
+
+  const title = status === "copied" ? "Kopiert" : status === "error" ? "Kopieren fehlgeschlagen" : "Anschrift kopieren";
+  return (
+    <button
+      type="button"
+      className={`icon-button compact copy-feedback-${status}`}
+      disabled={props.disabled}
+      title={title}
+      aria-label={title}
+      onClick={() => void copy()}
+    >
+      {status === "copied" ? <Check size={14} /> : <Copy size={14} />}
+    </button>
   );
 }
 
@@ -278,4 +322,28 @@ export function formatAddressLine(address: PartyAddress): string {
   return [address.line2, [address.postalCode, address.city].filter(Boolean).join(" "), address.region, address.country]
     .filter(Boolean)
     .join(" · ");
+}
+
+function googleMapsHref(address: PartyAddress): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatAddressSearchQuery(address))}`;
+}
+
+function formatAddressSearchQuery(address: PartyAddress): string {
+  return [
+    address.line1,
+    address.line2,
+    [address.postalCode, address.city].filter(Boolean).join(" "),
+    address.region,
+    address.country
+  ].filter(Boolean).join(", ");
+}
+
+function formatAddressCopyText(address: PartyAddress, name?: string): string {
+  return [
+    name?.trim(),
+    address.line1,
+    address.line2,
+    [address.postalCode, address.city].filter(Boolean).join(" "),
+    address.country
+  ].filter(Boolean).join("\n");
 }

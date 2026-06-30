@@ -8,7 +8,7 @@ import { archivePartyGmailMessage, createGmailDraft, createPartyTimelineEntry, c
 import type { EntityParticipant, GmailAuthStatus, GmailMailboxWithStatus, GmailMessage, Initiative, Organization, Party, PartyRelationshipWithParties, PartyTimelineEntry, PartyTimelineEntryKind, Person, PersonDetail, RelationshipType, Task } from "../../types.js";
 import { entityTypeLabel, formatDateTimeForUi, formatTaskDueDate, participantRoleSummary, partyRelationshipLabel, personName, salutationLabel, taskPriorityLabel, taskStatusLabel } from "./detailUtils.js";
 
-type EmailComposeDraft = {
+export type EmailComposeDraft = {
   to: string;
   subject?: string;
   body?: string;
@@ -57,6 +57,7 @@ export function PersonDetailView(props: {
 }) {
   const person = props.detail?.person;
   const [composeDraft, setComposeDraft] = useState<EmailComposeDraft | null>(null);
+  const [partyTaskVersion, setPartyTaskVersion] = useState(0);
 
   if (props.loadError) {
     return (
@@ -92,20 +93,23 @@ export function PersonDetailView(props: {
           onDeleteRelationship={props.onDeleteRelationship}
         />
       ) : null}
-      <div className="person-detail-communication-layout">
-        <main className="person-detail-email-main">
+      <div className="party-detail-communication-layout">
+        <main className="party-detail-email-main">
           <PartyTasksSection
             partyId={person.id}
             onOpenTask={props.onOpenTask}
+            onTasksChanged={() => setPartyTaskVersion((version) => version + 1)}
           />
           <PartyHistorySection
             partyId={person.id}
             contactEmails={props.detail.contactPoints.filter((contactPoint) => contactPoint.type === "email").map((contactPoint) => contactPoint.value)}
             composeDraft={composeDraft}
             onComposeDraftChange={setComposeDraft}
+            taskRefreshKey={partyTaskVersion}
+            onOpenTask={props.onOpenTask}
           />
         </main>
-        <aside className="person-detail-sidebar">
+        <aside className="party-detail-sidebar">
           <ContactPointList
             partyId={person.id}
             contactPoints={props.detail.contactPoints}
@@ -125,6 +129,7 @@ export function PersonDetailView(props: {
           />
           <AddressBlock
             partyId={person.id}
+            copyName={personName(person)}
             addresses={props.detail.addresses}
             description={null}
             emptyMode="none"
@@ -150,22 +155,28 @@ export function PersonDetailView(props: {
 
 type PartyHistoryItem =
   | { type: "email"; key: string; occurredAt: string; message: GmailMessage }
-  | { type: "manual"; key: string; occurredAt: string; entry: PartyTimelineEntry };
+  | { type: "manual"; key: string; occurredAt: string; entry: PartyTimelineEntry }
+  | { type: "task"; key: string; occurredAt: string; task: Task };
 
 export function PartyHistorySection(props: {
   partyId: number;
   contactEmails: string[];
   composeDraft?: EmailComposeDraft | null;
   onComposeDraftChange?: (draft: EmailComposeDraft | null) => void;
+  taskRefreshKey?: number;
+  onOpenTask?: (taskId: number) => void;
 }) {
   const [messages, setMessages] = useState<GmailMessage[]>([]);
   const [entries, setEntries] = useState<PartyTimelineEntry[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [mailboxes, setMailboxes] = useState<GmailMailboxWithStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [timelineLoading, setTimelineLoading] = useState(true);
+  const [tasksLoading, setTasksLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [timelineError, setTimelineError] = useState<string | null>(null);
+  const [tasksError, setTasksError] = useState<string | null>(null);
   const [internalComposeDraft, setInternalComposeDraft] = useState<EmailComposeDraft | null>(null);
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<number>>(new Set());
   const [expandedEntryIds, setExpandedEntryIds] = useState<Set<number>>(new Set());
@@ -206,6 +217,18 @@ export function PartyHistorySection(props: {
     }
   };
 
+  const loadTasks = async () => {
+    setTasksLoading(true);
+    setTasksError(null);
+    try {
+      setTasks(await fetchPartyTasks(props.partyId));
+    } catch (err) {
+      setTasksError(err instanceof Error ? err.message : "Erledigte Maßnahmen konnten nicht geladen werden.");
+    } finally {
+      setTasksLoading(false);
+    }
+  };
+
   useEffect(() => {
     void loadEntries();
     void load(false).then(() => {
@@ -213,15 +236,23 @@ export function PartyHistorySection(props: {
     });
   }, [props.partyId]);
 
+  useEffect(() => {
+    void loadTasks();
+  }, [props.partyId, props.taskRefreshKey]);
+
   const sendableMailboxes = mailboxes.filter((mailbox) => mailbox.enabled && mailbox.sendEnabled && hasGmailScopes(mailbox.authStatus, [gmailReadonlyScope, gmailComposeScope]));
   const primaryRecipient = props.contactEmails[0] ?? "";
   const composeDraft = props.composeDraft !== undefined ? props.composeDraft : internalComposeDraft;
   const setComposeDraft = props.onComposeDraftChange ?? setInternalComposeDraft;
   const mailboxEmails = new Set(mailboxes.flatMap((mailbox) => [mailbox.emailAddress, mailbox.accountLabel]).filter((email): email is string => Boolean(email)).map((email) => email.toLowerCase()));
   const sortedMessages = dedupeGmailMessages(messages).sort((left, right) => Date.parse(right.messageDate) - Date.parse(left.messageDate));
+  const completedTasks = tasks
+    .filter((task) => task.status === "done")
+    .sort((left, right) => Date.parse(partyTaskHistoryDate(right)) - Date.parse(partyTaskHistoryDate(left)));
   const historyItems: PartyHistoryItem[] = [
     ...sortedMessages.map((message) => ({ type: "email" as const, key: `email:${gmailMessageStableKey(message)}`, occurredAt: message.messageDate, message })),
-    ...entries.map((entry) => ({ type: "manual" as const, key: `manual:${entry.id}`, occurredAt: entry.occurredAt, entry }))
+    ...entries.map((entry) => ({ type: "manual" as const, key: `manual:${entry.id}`, occurredAt: entry.occurredAt, entry })),
+    ...completedTasks.map((task) => ({ type: "task" as const, key: `task:${task.id}`, occurredAt: partyTaskHistoryDate(task), task }))
   ].sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt));
   const mailboxById = new Map(mailboxes.map((mailbox) => [mailbox.id, mailbox]));
   const toggleExpanded = (messageId: number) => {
@@ -305,13 +336,35 @@ export function PartyHistorySection(props: {
         </>
       )}
     >
-      {loading || timelineLoading ? <EmptyState title="Historie wird geladen" /> : null}
+      {loading || timelineLoading || tasksLoading ? <EmptyState title="Historie wird geladen" /> : null}
       {error ? <ErrorState title="E-Mails konnten nicht geladen werden" description={error} /> : null}
       {timelineError ? <ErrorState title="Kommunikationsnotizen konnten nicht geladen werden" description={timelineError} /> : null}
-      {!loading && !timelineLoading && !error && !timelineError && historyItems.length === 0 ? <EmptyState title="Noch keine Historie" /> : null}
-      {!loading && !timelineLoading && historyItems.length > 0 ? (
+      {tasksError ? <ErrorState title="Erledigte Maßnahmen konnten nicht geladen werden" description={tasksError} /> : null}
+      {!loading && !timelineLoading && !tasksLoading && !error && !timelineError && !tasksError && historyItems.length === 0 ? <EmptyState title="Noch keine Historie" /> : null}
+      {!loading && !timelineLoading && !tasksLoading && historyItems.length > 0 ? (
         <div className="party-email-timeline">
           {historyItems.map((item) => {
+            if (item.type === "task") {
+              const task = item.task;
+              return (
+                <article className="party-email-item" key={item.key}>
+                  <button
+                    type="button"
+                    className="party-email-summary"
+                    onClick={() => props.onOpenTask?.(task.id)}
+                    aria-label={`Maßnahme öffnen: ${task.title}`}
+                  >
+                    <span className="party-email-date-cluster task-done">
+                      <span className="party-email-direction-icon" aria-hidden="true"><CheckCircle2 size={17} strokeWidth={2.2} /></span>
+                      <span className="party-email-date-time">{formatDateTimeForUi(item.occurredAt)}</span>
+                      <span className="party-email-direction-label">Maßnahme</span>
+                    </span>
+                    <span className="party-email-subject">{task.title}</span>
+                    <span className="party-email-preview">{partyTaskHistoryPreview(task)}</span>
+                  </button>
+                </article>
+              );
+            }
             if (item.type === "manual") {
               const entry = item.entry;
               const expanded = expandedEntryIds.has(entry.id);
@@ -467,9 +520,10 @@ export function PartyHistorySection(props: {
   );
 }
 
-function PartyTasksSection(props: {
+export function PartyTasksSection(props: {
   partyId: number;
   onOpenTask: (taskId: number) => void;
+  onTasksChanged?: () => void;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -494,7 +548,7 @@ function PartyTasksSection(props: {
     void load();
   }, [props.partyId]);
 
-  const sortedTasks = [...tasks].sort((left, right) => {
+  const sortedTasks = tasks.filter((task) => task.status !== "done").sort((left, right) => {
     if (left.status !== right.status) return left.status === "open" ? -1 : 1;
     const dueCompare = (left.dueAt ?? "9999-12-31").localeCompare(right.dueAt ?? "9999-12-31");
     return dueCompare || left.sortOrder - right.sortOrder || left.id - right.id;
@@ -506,6 +560,7 @@ function PartyTasksSection(props: {
     try {
       await updateTaskStatus(task.id, task.status === "done" ? "open" : "done");
       await load();
+      props.onTasksChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Maßnahme konnte nicht aktualisiert werden.");
     } finally {
@@ -526,7 +581,7 @@ function PartyTasksSection(props: {
     >
       {loading ? <EmptyState title="Maßnahmen werden geladen" /> : null}
       {error ? <ErrorState title="Maßnahmen konnten nicht geladen werden" description={error} /> : null}
-      {!loading && !error && sortedTasks.length === 0 ? <EmptyState title="Keine personenbezogenen Maßnahmen" /> : null}
+      {!loading && !error && sortedTasks.length === 0 ? <EmptyState title="Keine offenen Maßnahmen" /> : null}
       {!loading && !error && sortedTasks.length > 0 ? (
         <div className="relation-list">
           {sortedTasks.map((task) => (
@@ -568,6 +623,7 @@ function PartyTasksSection(props: {
             await createTask({ primaryPartyId: props.partyId, ...input });
             setCreateOpen(false);
             await load();
+            props.onTasksChanged?.();
           }}
         />
       ) : null}
@@ -579,6 +635,7 @@ function PartyTasksSection(props: {
             await updateTask(editingTask.id, input);
             setEditingTask(null);
             await load();
+            props.onTasksChanged?.();
           }}
         />
       ) : null}
@@ -623,7 +680,8 @@ function PartyTaskEditModal(props: {
   return (
     <EditModal
       title="Maßnahme anpassen"
-      label="Personenbezogene Maßnahme anpassen"
+      label="Maßnahme anpassen"
+      className="markdown-modal party-task-edit-modal"
       onCancel={props.onCancel}
       onSubmit={async (event) => {
         event.preventDefault();
@@ -659,7 +717,7 @@ function PartyTaskEditModal(props: {
       </label>
       <label>
         Beschreibung
-        <textarea rows={6} value={notes} disabled={saving} onChange={(event) => setNotes(event.target.value)} />
+        <textarea className="initiative-markdown-editor" rows={12} value={notes} disabled={saving} onChange={(event) => setNotes(event.target.value)} />
       </label>
       {error ? <p className="inline-error">{error}</p> : null}
     </EditModal>
@@ -679,7 +737,7 @@ function PartyTaskCreateModal(props: {
   return (
     <EditModal
       title="Maßnahme"
-      label="Personenbezogene Maßnahme anlegen"
+      label="Maßnahme anlegen"
       onCancel={props.onCancel}
       onSubmit={async (event) => {
         event.preventDefault();
@@ -804,6 +862,19 @@ function taskDueAtToLocalDateTimeInput(value: string | null): string {
 
 function formatPartyTaskDueAt(value: string): string {
   return value.includes("T") ? formatDateTimeForUi(value) : formatTaskDueDate(value);
+}
+
+function partyTaskHistoryDate(task: Task): string {
+  return task.completedAt ?? task.updatedAt ?? task.dueAt ?? task.createdAt ?? new Date(0).toISOString();
+}
+
+function partyTaskHistoryPreview(task: Task): string {
+  return [
+    "Erledigt",
+    taskPriorityLabel(task.priority),
+    task.dueAt ? `fällig ${formatPartyTaskDueAt(task.dueAt)}` : null,
+    task.notes
+  ].filter(Boolean).join(" · ");
 }
 
 function formatLocalDateTimeInput(date: Date): string {

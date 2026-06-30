@@ -1,6 +1,6 @@
 # DMAX Current State
 
-Date: 2026-06-29
+Date: 2026-06-30
 
 Short handoff for fresh Codex/OpenClaw sessions. This file describes the
 implemented repository state; older plans are historical unless this file or
@@ -116,15 +116,22 @@ the repository validates target existence instead of relying on one database FK.
 `party_contact_points` stores email, phone, WhatsApp, Signal, Telegram,
 LinkedIn, website, and other contact routes with primary/preferred and future
 send/receive flags. These flags are already modeled because contact points are
-intended to become executable communication channels later, but provider-based
-sending is not wired yet. `party_addresses` stores multiple physical addresses
-per party. The browser surfaces `/people` and `/organizations` list/create
-screens plus `/people/:id` and `/organizations/:id` detail pages. Detail pages
-can edit core person/organization fields, add/delete/prefer contact points,
+intended to become executable communication channels later. Gmail-based sending
+is wired only for email contact points on party detail pages; provider-based
+sending for phone, messenger, websites, and other contact routes is not wired.
+`party_addresses` stores multiple physical addresses per party. The browser
+surfaces `/people` and `/organizations` list/create screens plus `/people/:id`
+and `/organizations/:id` detail pages. Detail pages can edit core
+person/organization fields, add/delete/prefer contact points, manage addresses,
 show party relationships, and show DMAX contexts where that party participates.
-The person detail header displays relationship context directly below the name,
-and the person `Anpassen` modal manages core person fields plus person and
-organization party relationships in one place.
+Person and organization detail headers show the established party-type icon,
+then the party name, and use a DMAX-context breadcrumb when the party
+participates in a task, initiative, or calendar entry. The breadcrumb prefers
+primary context links, then tasks before initiatives, and falls back to the
+people/organizations list when no context exists. The person detail header
+still displays relationship context directly below the name, and the person
+`Anpassen` modal manages core person fields plus person and organization party
+relationships in one place.
 Tasks can now be initiative-owned, party-owned, or both: `tasks.initiative_id`
 is nullable and `tasks.primary_party_id` can point at a person or organization
 when the contact/relationship is the primary context of the measure. Additional
@@ -132,20 +139,31 @@ participants still use `entity_participants`. `party_timeline_entries` plus
 `party_timeline_entry_parties` store manually documented communication history
 such as conversations, received/sent letters, visits, and notes; these entries
 are journal/history facts, not a second planning model. Future/planned actions
-remain tasks. The person detail page surfaces party-owned measures above manual
-communication notes and the existing Gmail section. Manual party timeline
-entries are exposed through API routes and OpenClaw tools; organization support
-uses the same party-level data model.
-The organization detail page edits core fields in a header-triggered modal,
-shows a full-width Markdown description panel, manages contact points and
-postal addresses through modals with delete confirmation, and shows/adds
-organization members via party relationships.
+remain tasks. Person and organization detail pages use the same party
+communication layout: the main column shows open party-owned measures above a
+unified `Historie`, and completed party-owned measures appear in that history
+beside manual communication entries and Gmail messages. The right profile
+column shows contact points, description, addresses, DMAX contexts, metadata,
+and for organizations compact person/organization relationship panels. Party
+measure editing uses a wide markdown-sized modal for longer notes. Manual party
+timeline entries are exposed through API routes and OpenClaw tools; person and
+organization support uses the same party-level data model.
+The organization detail page edits core fields in a header-triggered modal and
+keeps inline editing for name and organization type.
+Contact point rows are executable where possible: email rows open the Gmail
+compose flow when a send-capable mailbox is available, website/URL rows open
+external links in a new tab with normalized domain display, and phone rows use
+`tel:` links. German phone numbers with `+49`, `0049`, or leading `49` are
+displayed/copied in national format. Phone and address rows include copy
+actions with transient feedback; address rows open Google Maps search links and
+copy the party name plus the displayed address.
 Gmail integration is implemented for central Workspace mailboxes. `/config`
 can create Gmail mailbox records, start OAuth with `gmail.readonly`,
 `gmail.compose`, and `gmail.modify`, toggle sync/send capability, and run
 manual sync. Tokens use the existing Google OAuth runtime token storage, not
-SQLite. Person and organization detail pages show an `E-Mails` section that
-syncs messages whose sender or recipients exactly match normalized
+SQLite. Person and organization detail pages show Gmail messages inside the
+party `Historie` section. Message sync matches senders or recipients exactly
+against normalized
 `party_contact_points` email values. Matching is intentionally direct: one side
 of the message must be a connected Gmail mailbox and the other side must match a
 known party contact email. Message full text is stored locally in
@@ -625,14 +643,19 @@ Implemented behavior:
   search, compact rows, and create actions hidden behind `EditModal`.
 - `/people/:id` and `/organizations/:id`: canonical party detail pages for core
   identity, contact points, addresses, relationships, DMAX participation
-  context, and party email communication. On people, the main content column is
-  reserved for the E-Mail timeline, while the right sidebar contains Kontakt,
-  Beschreibung, Anschriften, DMAX-Kontexte, and Metadaten. Contact points and
-  postal addresses use modal create/edit flows with explicit delete
-  confirmation. Clicking an email contact opens compose to that address.
-  E-Mail rows are newest-first and show a prominent direction/date cluster,
-  subject, and quote-stripped preview. Expanding a row reveals full headers/body
-  and actions for reply, reply all, forward, archive, and trash.
+  context, and party communication. People and organizations share the same
+  party communication layout: the main column starts with open party-owned
+  measures and then a unified `Historie`; the sidebar contains Kontakt,
+  Beschreibung, Anschriften, DMAX-Kontexte, metadata, and relationship panels
+  where relevant. The history timeline is newest-first and can mix completed
+  party measures, manual communication entries, and Gmail messages. E-Mail rows
+  show a prominent direction/date cluster, subject, and quote-stripped preview;
+  expanding a row reveals full headers/body and actions for reply, reply all,
+  forward, archive, and trash. Contact points and postal addresses use modal
+  create/edit flows with explicit delete confirmation. Clicking an email contact
+  opens compose to that address when Gmail send capability is available;
+  websites open in a new tab, phone rows use `tel:`, and phone/address copy
+  buttons provide transient feedback.
 - `/ideas`, `/projects`, and `/habits`: canonical action/planning list pages.
   Each page uses compact scan rows, simple search, page-level create actions
   behind `EditModal`, and secondary facts appropriate to the type. Ideas remain
@@ -1052,7 +1075,7 @@ repo writes on the VPS unless Dietrich explicitly approves that operation.
 
 ## Verification
 
-Last checked locally on 2026-06-29:
+Last checked locally on 2026-06-30:
 
 - `npm run typecheck` passed.
 - `npm test` passed: 44 test files, 224 tests.

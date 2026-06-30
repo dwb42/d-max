@@ -54,6 +54,11 @@ questions when useful, and persist durable changes only through DMAX tools.
   vague/speculative tasks. Use `primaryPartyId` when the measure is primarily
   about a person/organization relationship or follow-up. Batch creation requires
   confirmation of exact titles.
+- Actor/outreach structuring: for large actor research inside an initiative,
+  group actors under a few initiative-owned tasks and attach the relevant people
+  or organizations as task participants. Create concrete first-contact or
+  follow-up actions as party-owned tasks. Avoid long flat actor lists directly
+  on the initiative.
 - Tasks only have `open` and `done` status.
 - Task checklists: tasks may have simple checklist items with a name and
   `todo`/`done` status. Checklist progress does not automatically complete the

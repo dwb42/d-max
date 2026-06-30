@@ -81,6 +81,10 @@ volume operations.
 - Who dimension: people and organizations are first-class parties. People and
   organizations may participate in initiatives/tasks/calendar entries via
   `entity_participants`, and categories are not participant targets.
+- For large actor research or outreach work, avoid attaching a long flat party
+  list directly to an initiative. Prefer a few initiative-owned grouping tasks
+  with parties attached as task participants, plus concrete party-owned tasks
+  for first-contact or follow-up actions.
 - Do not add exploratory memory tables or session-summary tables unless product
   direction changes.
 - Context resolver synchronization is mandatory: whenever data structure,
