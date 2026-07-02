@@ -5,9 +5,10 @@ import { listPromptTemplates, resolveConversationContext } from "../../src/chat/
 import { CategoryRepository } from "../../src/repositories/categories.js";
 import { InitiativeRelationRepository } from "../../src/repositories/initiative-relations.js";
 import { InitiativeRepository } from "../../src/repositories/initiatives.js";
+import { LeadRepository } from "../../src/repositories/leads.js";
 import { MediaAssetRepository } from "../../src/repositories/media-assets.js";
 import { MediaLinkRepository } from "../../src/repositories/media-links.js";
-import { EntityParticipantRepository, OrganizationRepository, PartyAddressRepository, PartyContactPointRepository, PartyRelationshipRepository, PersonRepository, RelationshipTypeRepository } from "../../src/repositories/parties.js";
+import { OrganizationRepository, PartyAddressRepository, PartyContactPointRepository, PartyRelationshipRepository, PersonRepository, RelationshipTypeRepository } from "../../src/repositories/parties.js";
 import { PartyTimelineRepository } from "../../src/repositories/party-timeline.js";
 import { TaskChecklistItemRepository } from "../../src/repositories/task-checklist-items.js";
 import { TaskRepository } from "../../src/repositories/tasks.js";
@@ -566,7 +567,7 @@ describe("resolveConversationContext", () => {
     );
   });
 
-  it("includes people and organization participants in focused contexts", () => {
+  it("includes people and organization leads in focused contexts", () => {
     const category = new CategoryRepository(db).create({ name: "Business" });
     const initiative = new InitiativeRepository(db).create({ categoryId: category.id, name: "Relationship System" });
     const task = new TaskRepository(db).create({ initiativeId: initiative.id, title: "Call Clara" });
@@ -574,9 +575,9 @@ describe("resolveConversationContext", () => {
     const organization = new OrganizationRepository(db).create({ name: "Acme GmbH", markdown: "Strategic partner notes." });
     new PartyContactPointRepository(db).create({ partyId: person.id, type: "email", value: "clara@example.com", isPreferred: true });
     new PartyAddressRepository(db).create({ partyId: organization.id, line1: "Main Street 1", city: "Hamburg" });
-    const participants = new EntityParticipantRepository(db);
-    participants.create({ partyId: person.id, entityType: "initiative", entityId: initiative.id, roleLabel: "Stakeholder", isPrimary: true });
-    participants.create({ partyId: person.id, entityType: "task", entityId: task.id, roleLabel: "Ansprechpartner" });
+    const leads = new LeadRepository(db);
+    leads.create({ partyId: person.id, initiativeId: initiative.id, roleLabel: "Stakeholder" });
+    leads.create({ partyId: person.id, taskId: task.id, roleLabel: "Ansprechpartner" });
 
     const projectContext = resolveConversationContext(db, { type: "project", initiativeId: initiative.id });
     const taskContext = resolveConversationContext(db, { type: "task", taskId: task.id });
@@ -584,14 +585,14 @@ describe("resolveConversationContext", () => {
     const organizationContext = resolveConversationContext(db, { type: "organization", partyId: organization.id });
     const peopleContext = resolveConversationContext(db, { type: "people" });
 
-    expect(projectContext.agentContextBlock).toContain("People and organizations (1):");
+    expect(projectContext.agentContextBlock).toContain("Leads (1):");
     expect(projectContext.agentContextBlock).toContain("Clara Kontakt");
     expect(taskContext.agentContextBlock).toContain("Ansprechpartner");
     expect(personContext.agentContextBlock).toContain("Person: #");
     expect(personContext.agentContextBlock).toContain("Clara koordiniert den Beziehungsaufbau.");
     expect(personContext.agentContextBlock).toContain("Contact points (1):");
     expect(personContext.agentContextBlock).toContain("clara@example.com");
-    expect(personContext.agentContextBlock).toContain("DMAX participations (2):");
+    expect(personContext.agentContextBlock).toContain("DMAX leads (2):");
     expect(organizationContext.agentContextBlock).toContain("Strategic partner notes.");
     expect(organizationContext.agentContextBlock).toContain("Postal addresses (1):");
     expect(organizationContext.agentContextBlock).toContain("Main Street 1");
@@ -718,10 +719,9 @@ describe("resolveConversationContext", () => {
       roleLabel: "Infoabend-Koordination",
       status: "active"
     });
-    new EntityParticipantRepository(db).create({
+    new LeadRepository(db).create({
       partyId: employee.id,
-      entityType: "initiative",
-      entityId: initiative.id,
+      initiativeId: initiative.id,
       roleLabel: "Ansprechpartnerin"
     });
     tasks.create({

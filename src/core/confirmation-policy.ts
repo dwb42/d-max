@@ -5,7 +5,8 @@ const CONFIRMATION_REQUIRED_TOOLS = new Set<ToolName>([
   "deleteTask",
   "deleteMediaAttachment",
   "deletePartyRelationship",
-  "deleteEntityParticipant"
+  "deleteEntityParticipant",
+  "deleteLead"
 ]);
 
 type ConfirmationInput = {

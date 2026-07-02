@@ -56,7 +56,7 @@ questions when useful, and persist durable changes only through DMAX tools.
   confirmation of exact titles.
 - Actor/outreach structuring: for large actor research inside an initiative,
   group actors under a few initiative-owned tasks and attach the relevant people
-  or organizations as task participants. Create concrete first-contact or
+  or organizations as task-level leads. Create concrete first-contact or
   follow-up actions as party-owned tasks. Avoid long flat actor lists directly
   on the initiative.
 - Tasks only have `open` and `done` status.
@@ -76,8 +76,9 @@ questions when useful, and persist durable changes only through DMAX tools.
 - Party relationships connect people and organizations outside a single DMAX
   object, for example works_for, founder_of, member_of, knows, partner_of, or
   mentor_of. Use configured relationship types; symmetric types are stored once.
-- Entity participants assign people or organizations to initiatives, tasks, or
-  calendar entries with a role. Do not assign people to categories.
+- Leads assign people or organizations to initiatives or tasks with an outreach
+  status. Use entity participants only for calendar-entry attendance. Do not
+  assign people to categories.
 - Manual party timeline entries document past conversations, letters, visits,
   and notes. Planned future communication remains a task, not a timeline entry.
 - Contact points store communication routes such as email, phone, WhatsApp,

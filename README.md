@@ -384,7 +384,7 @@ openclaw agent --local \
 
 ## Verification
 
-Last local verification: 2026-06-30. See `docs/current-state.md` for the
+Last local verification: 2026-07-02. See `docs/current-state.md` for the
 current test count and notes. Standard local checks:
 
 ```bash

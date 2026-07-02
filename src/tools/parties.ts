@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { defineTool } from "../core/tool-definitions.js";
 import type { ToolDefinition } from "../core/tool-definitions.js";
+import { LeadRepository } from "../repositories/leads.js";
 import {
   EntityParticipantRepository,
   OrganizationRepository,
@@ -70,6 +71,27 @@ const createEntityParticipantInput = z.object({
   roleTypeId: z.number().int().positive().nullable().optional(),
   roleLabel: z.string().trim().min(1).nullable().optional(),
   isPrimary: z.boolean().optional()
+});
+const listLeadsInput = z
+  .object({
+    initiativeId: z.number().int().positive().optional(),
+    taskId: z.number().int().positive().optional(),
+    partyId: z.number().int().positive().optional()
+  })
+  .passthrough();
+const createLeadInput = z
+  .object({
+    partyId: z.number().int().positive(),
+    initiativeId: z.number().int().positive().nullable().optional(),
+    taskId: z.number().int().positive().nullable().optional(),
+    statusId: z.number().int().positive().nullable().optional()
+  })
+  .refine((input) => Boolean(input.initiativeId) !== Boolean(input.taskId), {
+    message: "Exactly one of initiativeId or taskId is required"
+  });
+const updateLeadStatusInput = z.object({
+  id: z.number().int().positive(),
+  statusId: z.number().int().positive()
 });
 
 const listContactPointsInput = z
@@ -237,7 +259,7 @@ export const partyTools: ToolDefinition<any>[] = [
   }),
   defineTool({
     name: "listEntityParticipants",
-    description: "List people or organizations assigned to initiatives, tasks, or calendar entries.",
+    description: "List calendar-entry attendance participants. Initiative and task party links are managed as leads.",
     inputSchema: listEntityParticipantsInput,
     run: (input, context) => {
       if (!context.db) return { ok: false, error: "Database context is required" };
@@ -247,10 +269,13 @@ export const partyTools: ToolDefinition<any>[] = [
   defineTool({
     name: "createEntityParticipant",
     description:
-      "Assign a person or organization to an initiative, task, or calendar entry with an optional role. Categories are not valid participant targets.",
+      "Assign a person or organization to a calendar entry with an optional role. Initiative and task party links are managed as leads.",
     inputSchema: createEntityParticipantInput,
     run: (input, context) => {
       if (!context.db) return { ok: false, error: "Database context is required" };
+      if (input.entityType !== "calendar_entry") {
+        return { ok: false, error: "Initiative and task party links are managed as leads. Use createLead." };
+      }
       try {
         return { ok: true, data: new EntityParticipantRepository(context.db).create(input) };
       } catch (error) {
@@ -266,6 +291,51 @@ export const partyTools: ToolDefinition<any>[] = [
       if (!context.db) return { ok: false, error: "Database context is required" };
       const deleted = new EntityParticipantRepository(context.db).delete(input.id);
       return deleted ? { ok: true, data: { deleted: true, ...deleted } } : { ok: false, error: `Entity participant not found: ${input.id}` };
+    }
+  }),
+  defineTool({
+    name: "listLeads",
+    description: "List leads connecting people or organizations to initiatives or tasks. Filter by initiativeId, taskId, or partyId.",
+    inputSchema: listLeadsInput,
+    run: (input, context) => {
+      if (!context.db) return { ok: false, error: "Database context is required" };
+      return { ok: true, data: new LeadRepository(context.db).list(input) };
+    }
+  }),
+  defineTool({
+    name: "createLead",
+    description: "Create a lead connection from a person or organization to exactly one initiative or task. Defaults to the fresh status.",
+    inputSchema: createLeadInput,
+    run: (input, context) => {
+      if (!context.db) return { ok: false, error: "Database context is required" };
+      try {
+        return { ok: true, data: new LeadRepository(context.db).create(input) };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "Failed to create lead" };
+      }
+    }
+  }),
+  defineTool({
+    name: "updateLeadStatus",
+    description: "Update the pipeline status for an existing lead.",
+    inputSchema: updateLeadStatusInput,
+    run: (input, context) => {
+      if (!context.db) return { ok: false, error: "Database context is required" };
+      try {
+        return { ok: true, data: new LeadRepository(context.db).updateStatus(input.id, input.statusId) };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "Failed to update lead status" };
+      }
+    }
+  }),
+  defineTool({
+    name: "deleteLead",
+    description: "Delete one lead connection. This removes only the lead, not the party, initiative, or task. Requires confirmation.",
+    inputSchema: deleteByIdInput,
+    run: (input, context) => {
+      if (!context.db) return { ok: false, error: "Database context is required" };
+      const deleted = new LeadRepository(context.db).delete(input.id);
+      return deleted ? { ok: true, data: { deleted: true, ...deleted } } : { ok: false, error: `Lead not found: ${input.id}` };
     }
   }),
   defineTool({

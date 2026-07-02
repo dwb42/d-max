@@ -39,7 +39,7 @@ import {
   createOrganization,
   createPerson,
   createPartyRelationship,
-  createEntityParticipant,
+  createLead,
   createGoogleEventFromDmax,
   createChatConversation,
   createInitiative,
@@ -50,8 +50,8 @@ import {
   createPartyAddress,
   createVoiceSession,
   deletePartyRelationship,
+  deleteLead,
   deleteInitiativeRelation,
-  deleteEntityParticipant,
   deletePartyContactPoint,
   deletePartyAddress,
   deleteTask,
@@ -69,7 +69,7 @@ import {
   fetchInitiativeDetail,
   fetchOrganizations,
   fetchOrganizationDetail,
-  fetchParticipantRoleTypes,
+  fetchLeadStatuses,
   fetchPeople,
   fetchPersonDetail,
   fetchRelationshipTypes,
@@ -87,6 +87,7 @@ import {
   transcribeVoiceMessage,
   updateCategory,
   updateOrganization,
+  updateLeadStatus,
   updatePartyContactPoint,
   updatePartyAddress,
   updatePerson,
@@ -164,12 +165,13 @@ import type {
   OpenClawStatus,
   Organization,
   OrganizationDetail,
-  ParticipantRoleType,
+  LeadStatus,
   PartyRelationshipWithParties,
   Person,
   PersonDetail,
   RelationshipType,
   EntityParticipant,
+  Lead,
   MediaAttachment,
   MediaAsset,
   MediaEntityType,
@@ -250,6 +252,7 @@ type NavItem = { id: Exclude<View, "initiative" | "task">; label: string; icon: 
 
 const primaryNavItems: NavItem[] = [
   { id: "lifeAreas", label: "Lebensbereiche", icon: LayoutGrid, path: "/categories" },
+  { id: "planningCanvas", label: "Planning Canvas", icon: GitPullRequestArrow, path: "/planning-canvas" },
   { id: "ideas", label: "Ideen", icon: Lightbulb, path: "/ideas" },
   { id: "projects", label: "Projekte", icon: Blocks, path: "/projects" },
   { id: "habits", label: "Gewohnheiten", icon: Repeat2, path: "/habits" },
@@ -257,8 +260,7 @@ const primaryNavItems: NavItem[] = [
   { id: "people", label: "Personen", icon: Users, path: "/people" },
   { id: "organizations", label: "Organisationen", icon: Building2, path: "/organizations" },
   { id: "calendar", label: "Kalender", icon: CalendarDays, path: "/calendar" },
-  { id: "timeline", label: "Timeline", icon: ListTree, path: "/calendar/timeline" },
-  { id: "planningCanvas", label: "Planning Canvas", icon: GitPullRequestArrow, path: "/planning-canvas" }
+  { id: "timeline", label: "Timeline", icon: ListTree, path: "/calendar/timeline" }
 ];
 
 const secondaryNavItems: NavItem[] = [
@@ -362,10 +364,27 @@ function taskBackLinkForTarget(
 }
 
 function partyContextBackLink(
+  leads: Lead[] | undefined,
   participants: EntityParticipant[] | undefined,
   initiatives: Initiative[],
   tasks: Task[]
 ): { path: string; label: string; title?: string } | null {
+  const sortedLeads = [...(leads ?? [])].sort((left, right) => {
+    if (Boolean(left.taskId) !== Boolean(right.taskId)) return left.taskId ? -1 : 1;
+    return left.id - right.id;
+  });
+  const lead = sortedLeads[0];
+  if (lead?.taskId) {
+    const task = tasks.find((candidate) => candidate.id === lead.taskId);
+    const label = task?.title ?? `Maßnahme ${lead.taskId}`;
+    return { path: `/tasks/${lead.taskId}`, label, title: label };
+  }
+  if (lead?.initiativeId) {
+    const initiative = initiatives.find((candidate) => candidate.id === lead.initiativeId);
+    const label = initiative ? displayInitiativeName(initiative) : `Initiative ${lead.initiativeId}`;
+    return { path: `/initiatives/${lead.initiativeId}`, label, title: label };
+  }
+
   if (!participants || participants.length === 0) return null;
   const sortedParticipants = [...participants].sort((left, right) => {
     if (left.isPrimary !== right.isPrimary) return left.isPrimary ? -1 : 1;
@@ -461,6 +480,12 @@ function collectionViewForInitiativeType(type: InitiativeType): CollectionView {
   if (type === "idea") return "ideas";
   if (type === "habit") return "habits";
   return "projects";
+}
+
+function initiativeContextIcon(type: InitiativeType): ReactNode {
+  if (type === "idea") return <Lightbulb size={14} />;
+  if (type === "habit") return <Repeat2 size={14} />;
+  return <Blocks size={14} />;
 }
 
 function getRouteConversationContext(
@@ -632,7 +657,7 @@ export default function App() {
   const [personLoadError, setPersonLoadError] = useState<string | null>(null);
   const [organizationDetail, setOrganizationDetail] = useState<OrganizationDetail | null>(null);
   const [organizationLoadError, setOrganizationLoadError] = useState<string | null>(null);
-  const [participantRoleTypes, setParticipantRoleTypes] = useState<ParticipantRoleType[]>([]);
+  const [leadStatuses, setLeadStatuses] = useState<LeadStatus[]>([]);
   const [relationshipTypes, setRelationshipTypes] = useState<RelationshipType[]>([]);
   const [personCoreModalOpen, setPersonCoreModalOpen] = useState(false);
   const [organizationCoreModalOpen, setOrganizationCoreModalOpen] = useState(false);
@@ -1451,8 +1476,8 @@ export default function App() {
   }, [route]);
 
   useEffect(() => {
-    fetchParticipantRoleTypes()
-      .then(setParticipantRoleTypes)
+    fetchLeadStatuses()
+      .then(setLeadStatuses)
       .catch(() => undefined);
     fetchRelationshipTypes()
       .then(setRelationshipTypes)
@@ -1721,14 +1746,35 @@ export default function App() {
     if (view === "task") {
       const task = taskDetail?.task ?? null;
       const initiative = taskDetail?.initiative ?? null;
-      const taskBackLink = taskBackLinkForTarget(taskBackTarget, initiative, overview?.initiatives ?? [], peopleList ?? []);
-      const taskContextLink = initiative
-        ? {
-            path: `/initiatives/${initiative.id}`,
-            label: displayInitiativeName(initiative),
-            title: displayInitiativeName(initiative)
-          }
-        : taskBackLink;
+      const primaryPerson = task?.primaryPartyId
+        ? peopleList?.find((candidate) => candidate.id === task.primaryPartyId) ?? null
+        : null;
+      const primaryOrganization = task?.primaryPartyId && !primaryPerson
+        ? organizationList?.find((candidate) => candidate.id === task.primaryPartyId) ?? null
+        : null;
+      const taskContextLinks = [
+        primaryPerson ? {
+          key: "primary-party",
+          path: `/people/${primaryPerson.id}`,
+          label: personDisplayTitle(primaryPerson),
+          title: personDisplayTitle(primaryPerson),
+          icon: <Users size={14} />
+        } : null,
+        primaryOrganization ? {
+          key: "primary-party",
+          path: `/organizations/${primaryOrganization.id}`,
+          label: primaryOrganization.displayName,
+          title: primaryOrganization.displayName,
+          icon: <Building2 size={14} />
+        } : null,
+        initiative ? {
+          key: "initiative",
+          path: `/initiatives/${initiative.id}`,
+          label: displayInitiativeName(initiative),
+          title: displayInitiativeName(initiative),
+          icon: initiativeContextIcon(initiative.type)
+        } : null
+      ].filter((link): link is { key: string; path: string; label: string; title: string; icon: ReactNode } => Boolean(link));
       const taskHeader = taskLoadError ? (
         <EntityHeader
           title="Maßnahme nicht gefunden"
@@ -1757,12 +1803,20 @@ export default function App() {
       );
       return (
         <div className="content-header-title">
-          {taskContextLink ? (
-            <div className="back-actions">
+          {taskContextLinks.length > 0 ? (
+            <div className="back-actions task-context-actions" aria-label="Maßnahmenkontext">
               <div className="back-action-group">
-                <button className="small-button back-button truncate" onClick={() => navigate(taskContextLink.path)} title={taskContextLink.title}>
-                  {taskContextLink.label}
-                </button>
+                {taskContextLinks.map((link) => (
+                  <button
+                    key={link.key}
+                    className="small-button back-button context-link-button truncate"
+                    onClick={() => navigate(link.path)}
+                    title={link.title}
+                  >
+                    {link.icon}
+                    <span>{link.label}</span>
+                  </button>
+                ))}
               </div>
             </div>
           ) : null}
@@ -1773,7 +1827,7 @@ export default function App() {
 
     if (view === "person") {
       const person = personDetail?.person ?? null;
-      const personContextBackLink = partyContextBackLink(personDetail?.participants, overview?.initiatives ?? [], overview?.tasks ?? []);
+      const personContextBackLink = partyContextBackLink(personDetail?.leads, personDetail?.participants, overview?.initiatives ?? [], overview?.tasks ?? []);
       const personHeader = personLoadError ? (
         <EntityHeader
           title="Person nicht gefunden"
@@ -1825,7 +1879,7 @@ export default function App() {
     if (view === "organization") {
       const organization = organizationDetail?.organization ?? null;
       const organizationTypeLabel = organization?.organizationType?.trim() || "Organisation";
-      const organizationContextBackLink = partyContextBackLink(organizationDetail?.participants, overview?.initiatives ?? [], overview?.tasks ?? []);
+      const organizationContextBackLink = partyContextBackLink(organizationDetail?.leads, organizationDetail?.participants, overview?.initiatives ?? [], overview?.tasks ?? []);
       return (
         <div className="content-header-title">
           <div className="back-actions">
@@ -2177,17 +2231,21 @@ export default function App() {
             categories={overview?.categories ?? []}
             people={peopleList ?? []}
             organizations={organizationList ?? []}
-            participantRoleTypes={participantRoleTypes}
+            leadStatuses={leadStatuses}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
             onOpenTask={(taskId) => navigate(`/tasks/${taskId}`)}
             onOpenPerson={(partyId) => navigate(`/people/${partyId}`)}
             onOpenOrganization={(partyId) => navigate(`/organizations/${partyId}`)}
-            onCreateParticipant={async (input) => {
-              await createEntityParticipant(input);
+            onCreateLead={async (input) => {
+              await createLead(input);
               if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
             }}
-            onDeleteParticipant={async (participantId) => {
-              await deleteEntityParticipant(participantId);
+            onUpdateLeadStatus={async (leadId, statusId) => {
+              await updateLeadStatus(leadId, statusId);
+              if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
+            }}
+            onDeleteLead={async (leadId) => {
+              await deleteLead(leadId);
               if (route.initiativeId) setInitiativeDetail(await fetchInitiativeDetail(route.initiativeId));
             }}
             onToggleTaskStatus={async (task) => {
@@ -2272,13 +2330,17 @@ export default function App() {
             categories={overview?.categories ?? []}
             people={peopleList ?? []}
             organizations={organizationList ?? []}
-            participantRoleTypes={participantRoleTypes}
-            onCreateParticipant={async (input) => {
-              await createEntityParticipant(input);
+            leadStatuses={leadStatuses}
+            onCreateLead={async (input) => {
+              await createLead(input);
               if (route.taskId) setTaskDetail(await fetchTaskDetail(route.taskId));
             }}
-            onDeleteParticipant={async (participantId) => {
-              await deleteEntityParticipant(participantId);
+            onUpdateLeadStatus={async (leadId, statusId) => {
+              await updateLeadStatus(leadId, statusId);
+              if (route.taskId) setTaskDetail(await fetchTaskDetail(route.taskId));
+            }}
+            onDeleteLead={async (leadId) => {
+              await deleteLead(leadId);
               if (route.taskId) setTaskDetail(await fetchTaskDetail(route.taskId));
             }}
             onOpenPerson={(partyId) => navigate(`/people/${partyId}`)}
@@ -2463,10 +2525,6 @@ export default function App() {
             }}
             onCreateRelationship={async (input) => {
               await createPartyRelationship(input);
-              if (route.partyId) setOrganizationDetail(await fetchOrganizationDetail(route.partyId));
-            }}
-            onCreateParticipant={async (input) => {
-              await createEntityParticipant(input);
               if (route.partyId) setOrganizationDetail(await fetchOrganizationDetail(route.partyId));
             }}
             onOpenInitiative={(initiativeId) => navigate(`/initiatives/${initiativeId}`)}
@@ -2771,65 +2829,6 @@ function PartyRelationshipsPanel(props: { partyId: number; relationships: Person
       </div>
     </Panel>
   );
-}
-
-function PartyParticipationsPanel(props: {
-  participants: EntityParticipant[];
-  initiatives: Initiative[];
-  tasks: Task[];
-  onOpenInitiative: (initiativeId: number) => void;
-  onOpenTask: (taskId: number) => void;
-}) {
-  const initiativeById = new Map(props.initiatives.map((initiative) => [initiative.id, initiative]));
-  const taskById = new Map(props.tasks.map((task) => [task.id, task]));
-
-  return (
-    <Panel title="DMAX-Kontexte">
-      <div className="relationship-list">
-        {props.participants.length === 0 ? <p className="muted-text">Noch keine Beteiligungen.</p> : null}
-        {props.participants.map((participant) => {
-          const title =
-            participant.entityType === "initiative"
-              ? initiativeById.get(participant.entityId)?.name
-              : participant.entityType === "task"
-                ? taskById.get(participant.entityId)?.title
-                : null;
-          return (
-            <button
-              type="button"
-              className="relationship-row relationship-button"
-              key={participant.id}
-              onClick={() => {
-                if (participant.entityType === "initiative") props.onOpenInitiative(participant.entityId);
-                if (participant.entityType === "task") props.onOpenTask(participant.entityId);
-              }}
-            >
-              <div className="entity-icon">{participant.entityType === "task" ? <ClipboardList size={16} /> : <Blocks size={16} />}</div>
-              <div>
-                <strong>{title ?? `${entityTypeLabel(participant.entityType)} #${participant.entityId}`}</strong>
-                <p>{entityTypeLabel(participant.entityType)} · {participantRoleSummary(participant)}</p>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </Panel>
-  );
-}
-
-function entityTypeLabel(entityType: EntityParticipant["entityType"]): string {
-  if (entityType === "task") return "Massnahme";
-  if (entityType === "calendar_entry") return "Kalendereintrag";
-  return "Initiative";
-}
-
-function participantRoleSummary(participant: EntityParticipant): string {
-  const parts = [participant.roleType?.label, participant.roleLabel].filter((part): part is string => Boolean(part));
-  const uniqueParts = [...new Set(parts)];
-  if (participant.isPrimary) {
-    uniqueParts.push("primär");
-  }
-  return uniqueParts.length > 0 ? uniqueParts.join(" · ") : "Rolle offen";
 }
 
 function salutationLabel(salutation: Person["salutation"]): string {

@@ -98,8 +98,8 @@ concise summary before confirmation.
   person/organization-owned measures, or both when a project measure is centered
   on a party. Use Inbox only when neither context is clear.
 - For actor research or outreach initiatives, create a small number of
-  initiative-owned grouping tasks, attach the relevant parties to those grouping
-  tasks with `createEntityParticipant`, and keep concrete first-contact actions
+  initiative-owned grouping tasks, attach the relevant parties to initiatives
+  or grouping tasks with `createLead`, and keep concrete first-contact actions
   as party-owned tasks. Do not attach long ungrouped actor lists directly to the
   initiative.
 - Ask before creating vague/speculative tasks.
@@ -140,9 +140,10 @@ Use `createPartyRelationship` for general relationships between people and
 organizations, such as works_for, founder_of, member_of, knows, partner_of, or
 mentor_of. Inspect available types with `listRelationshipTypes`.
 
-Use `createEntityParticipant` to assign a person or organization to an
-initiative, task, or calendar entry. Inspect available roles with
-`listParticipantRoleTypes`. Categories are not valid participant targets.
+Use `createLead` to connect a person or organization to an initiative or task.
+Use `listLeads`, `updateLeadStatus`, and `deleteLead` for lead follow-up state.
+Use `createEntityParticipant` only for calendar-entry attendance. Categories
+are not valid participant targets.
 
 Use `createPartyContactPoint` and `updatePartyContactPoint` for contact routes.
 Gmail email history, plain-text draft creation, confirmed sending, archive, and

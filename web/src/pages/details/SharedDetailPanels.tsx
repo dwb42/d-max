@@ -4,10 +4,10 @@ import { Building2, CalendarDays, CheckCircle2, Circle, ClipboardPaste, External
 import { ConfirmModal, EditModal, RelationItem, RelationList, SectionBlock } from "../../components/ui/index.js";
 import { reanalyzeMediaAsset, updateMediaAssetAnalysis } from "../../api.js";
 import { OrganizationPeopleActivityList, PartyActivitySummaryCard } from "../../components/party/index.js";
-import type { EntityParticipant, Initiative, MediaAttachment, MediaAsset, MediaEntityType, Organization, OrganizationPersonActivity, ParticipantRoleType, PartyActivitySummary, PartyRelationshipWithParties, Person, Task } from "../../types.js";
+import type { EntityParticipant, Lead, LeadStatus, Initiative, MediaAttachment, MediaAsset, MediaEntityType, Organization, OrganizationPersonActivity, ParticipantRoleType, PartyActivitySummary, PartyRelationshipWithParties, Person, Task } from "../../types.js";
 import { displayInitiativeName, documentExtension, dropAfter, entityTypeLabel, formatBytes, formatMediaTimestamp, formatTaskDueDate, moveIdToDropPosition, nullableText, participantRoleSummary, partyRelationshipLabel, personName, sortTasksByCompletionAndRank } from "./detailUtils.js";
 
-export { MediaAttachmentsPanel, ParticipantsPanel, TaskCreateInlineForm, TasksView };
+export { LeadsPanel, MediaAttachmentsPanel, ParticipantsPanel, TaskCreateInlineForm, TasksView };
 
 type PrimaryParticipantContext = {
   partyId: number;
@@ -116,6 +116,651 @@ function organizationDescription(organization: Organization | undefined, partici
   );
 }
 
+function leadContactDetail(lead: Lead): string | null {
+  const primaryEmail = lead.contactPoints?.find((contactPoint) => contactPoint.type === "email") ?? null;
+  const worksFor = lead.party.type === "person"
+    ? lead.relationships?.find(
+        (relationship) =>
+          relationship.relationshipType.key === "works_for"
+          && relationship.status === "active"
+          && relationship.fromPartyId === lead.partyId
+          && relationship.toParty.type === "organization"
+      ) ?? null
+    : null;
+  return [primaryEmail?.value, worksFor ? `bei ${worksFor.toParty.displayName}` : null].filter(Boolean).join(" · ") || null;
+}
+
+function leadRoleSummary(lead: Lead): string | null {
+  return lead.roleLabel?.trim() || null;
+}
+
+function leadOrganizationPeople(lead: Lead, organizationPeopleActivity: Record<number, OrganizationPersonActivity[]>): OrganizationPersonActivity[] {
+  if (lead.party.type !== "organization") return [];
+  return organizationPeopleActivity[lead.partyId] ?? [];
+}
+
+type LeadPersonEntry = {
+  key: string;
+  lead: Lead;
+  organizationRelationship: PartyRelationshipWithParties | null;
+};
+
+type LeadOrganizationEntry = {
+  key: string;
+  partyId: number;
+  displayName: string;
+  lead: Lead | null;
+};
+
+function activeOrganizationRelationshipForLead(lead: Lead): { id: number; displayName: string; relationship: PartyRelationshipWithParties } | null {
+  if (lead.party.type !== "person") return null;
+  for (const relationship of lead.relationships ?? []) {
+    const organization = organizationPartyFromRelationship(relationship, lead.partyId);
+    if (organization) return { ...organization, relationship };
+  }
+  return null;
+}
+
+function activePeopleForOrganizationLead(lead: Lead): Array<{ partyId: number; displayName: string; relationship: PartyRelationshipWithParties }> {
+  if (lead.party.type !== "organization") return [];
+  return (lead.relationships ?? [])
+    .filter((relationship) => relationship.status === "active")
+    .filter((relationship) => ["works_for", "member_of", "founder_of"].includes(relationship.relationshipType.key))
+    .flatMap((relationship) => {
+      if (relationship.fromPartyId === lead.partyId && relationship.toParty.type === "person") {
+        return [{ partyId: relationship.toPartyId, displayName: relationship.toParty.displayName, relationship }];
+      }
+      if (relationship.toPartyId === lead.partyId && relationship.fromParty.type === "person") {
+        return [{ partyId: relationship.fromPartyId, displayName: relationship.fromParty.displayName, relationship }];
+      }
+      return [];
+    })
+    .sort((left, right) => left.displayName.localeCompare(right.displayName) || left.partyId - right.partyId);
+}
+
+function LeadsPanel(props: {
+  entityType: "initiative" | "task";
+  entityId: number;
+  leads: Lead[];
+  leadStatuses: LeadStatus[];
+  people: Person[];
+  organizations: Organization[];
+  activitySummaries?: Record<number, PartyActivitySummary>;
+  organizationPeopleActivity?: Record<number, OrganizationPersonActivity[]>;
+  onCreateLead: (input: { partyId: number; initiativeId?: number | null; taskId?: number | null; statusId?: number | null }) => Promise<void>;
+  onUpdateLeadStatus: (leadId: number, statusId: number) => Promise<void>;
+  onDeleteLead: (leadId: number) => Promise<void>;
+  onOpenPerson?: (partyId: number) => void;
+  onOpenOrganization?: (partyId: number) => void;
+  onOpenTask?: (taskId: number) => void;
+}) {
+  const sortedStatuses = [...props.leadStatuses].sort((left, right) => left.sortOrder - right.sortOrder || left.label.localeCompare(right.label));
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editLead, setEditLead] = useState<Lead | null>(null);
+  const [partyId, setPartyId] = useState("");
+  const [statusId, setStatusId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [dragLeadId, setDragLeadId] = useState<number | null>(null);
+  const [dragOverStatusId, setDragOverStatusId] = useState<number | null>(null);
+  const parties = [
+    ...props.people.map((person) => ({ id: person.id, type: "person" as const, displayName: personName(person) })),
+    ...props.organizations.map((organization) => ({ id: organization.id, type: "organization" as const, displayName: organization.displayName }))
+  ]
+    .filter((party) => !props.leads.some((lead) => lead.partyId === party.id))
+    .sort((left, right) => left.displayName.localeCompare(right.displayName));
+  const fallbackStatusId = sortedStatuses[0]?.id ?? null;
+  const selectedStatusId = Number(statusId) || fallbackStatusId;
+  const groupedLeads = sortedStatuses.map((status) => ({
+    status,
+    leads: props.leads.filter((lead) => lead.statusId === status.id)
+  }));
+  const visibleGroups = props.leads.length > 0 ? groupedLeads.filter((group) => group.leads.length > 0) : groupedLeads;
+
+  useEffect(() => {
+    if (!createOpen) return;
+    setStatusId(String(fallbackStatusId ?? ""));
+  }, [createOpen, fallbackStatusId]);
+
+  async function createLead(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextPartyId = Number(partyId);
+    if (!nextPartyId || !selectedStatusId || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await props.onCreateLead({
+        partyId: nextPartyId,
+        initiativeId: props.entityType === "initiative" ? props.entityId : null,
+        taskId: props.entityType === "task" ? props.entityId : null,
+        statusId: selectedStatusId
+      });
+      setPartyId("");
+      setStatusId("");
+      setCreateOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Lead konnte nicht gespeichert werden.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function setLeadStatus(lead: Lead, nextStatusId: number) {
+    if (lead.statusId === nextStatusId || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await props.onUpdateLeadStatus(lead.id, nextStatusId);
+      setEditLead(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Lead-Status konnte nicht aktualisiert werden.");
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function dropLead(statusIdForDrop: number) {
+    const lead = props.leads.find((candidate) => candidate.id === dragLeadId);
+    setDragLeadId(null);
+    setDragOverStatusId(null);
+    if (!lead || lead.statusId === statusIdForDrop) return;
+    try {
+      await setLeadStatus(lead, statusIdForDrop);
+    } catch {
+      // Props remain unchanged, so the card stays/restores in its prior group.
+    }
+  }
+
+  return (
+    <SectionBlock
+      title="Leads"
+      actions={(
+        <button type="button" className="section-primary-action" onClick={() => setCreateOpen(true)} disabled={busy || parties.length === 0 || sortedStatuses.length === 0}>
+          <Plus size={15} />
+          Lead hinzufügen
+        </button>
+      )}
+    >
+      <div className="lead-status-board">
+        {visibleGroups.map((group) => (
+          <section
+            key={group.status.id}
+            className={`lead-status-column${dragOverStatusId === group.status.id ? " drag-over" : ""}`}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragOverStatusId(group.status.id);
+            }}
+            onDragLeave={() => setDragOverStatusId(null)}
+            onDrop={(event) => {
+              event.preventDefault();
+              void dropLead(group.status.id);
+            }}
+          >
+            <header className="lead-status-header">
+              <strong>{group.status.label}</strong>
+              <span>{group.leads.length}</span>
+            </header>
+            <RelationList emptyMode={props.leads.length === 0 ? "inline" : "none"} emptyTitle="Noch keine Leads.">
+              <LeadStatusGroupContent
+                leads={group.leads}
+                organizations={props.organizations}
+                statuses={sortedStatuses}
+                busy={busy}
+                draggedLeadId={dragLeadId}
+                activitySummaries={props.activitySummaries ?? {}}
+                organizationPeopleActivity={props.organizationPeopleActivity ?? {}}
+                onDragStart={setDragLeadId}
+                onDragEnd={() => {
+                  setDragLeadId(null);
+                  setDragOverStatusId(null);
+                }}
+                onEditStatus={setEditLead}
+                onSetLeadStatus={setLeadStatus}
+                onDeleteLead={async (leadId) => {
+                  if (busy) return;
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    await props.onDeleteLead(leadId);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Lead konnte nicht entfernt werden.");
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+                onOpenPerson={props.onOpenPerson}
+                onOpenOrganization={props.onOpenOrganization}
+                onOpenTask={props.onOpenTask}
+              />
+            </RelationList>
+          </section>
+        ))}
+      </div>
+      {error ? <p className="inline-error">{error}</p> : null}
+      {createOpen ? (
+        <EditModal
+          title="Lead hinzufügen"
+          label="Lead hinzufügen"
+          onCancel={() => {
+            setCreateOpen(false);
+            setPartyId("");
+            setStatusId("");
+            setError(null);
+          }}
+          onSubmit={createLead}
+          footer={(
+            <>
+              <button className="primary-action compact" type="submit" disabled={!partyId || !selectedStatusId || busy}>Verknüpfen</button>
+              <button type="button" className="small-button" disabled={busy} onClick={() => setCreateOpen(false)}>Abbrechen</button>
+            </>
+          )}
+        >
+          <div className="lead-modal-fields">
+            <label>
+              Person oder Organisation
+              <select value={partyId} onChange={(event) => setPartyId(event.target.value)} disabled={busy}>
+                <option value="">Person oder Organisation auswählen</option>
+                {parties.map((party) => (
+                  <option key={party.id} value={party.id}>{party.displayName}</option>
+                ))}
+              </select>
+            </label>
+            <StatusOptionSet statuses={sortedStatuses} value={selectedStatusId} disabled={busy} onChange={(id) => setStatusId(String(id))} />
+          </div>
+          {error ? <p className="inline-error">{error}</p> : null}
+        </EditModal>
+      ) : null}
+      {editLead ? (
+        <EditModal
+          title="Lead-Status ändern"
+          label="Lead-Status ändern"
+          onCancel={() => {
+            setEditLead(null);
+            setError(null);
+          }}
+          onSubmit={(event) => event.preventDefault()}
+          footer={<button type="button" className="small-button" disabled={busy} onClick={() => setEditLead(null)}>Schließen</button>}
+        >
+          <StatusOptionSet statuses={sortedStatuses} value={editLead.statusId} disabled={busy} onChange={(id) => void setLeadStatus(editLead, id)} />
+          {error ? <p className="inline-error">{error}</p> : null}
+        </EditModal>
+      ) : null}
+    </SectionBlock>
+  );
+}
+
+function LeadStatusGroupContent(props: {
+  leads: Lead[];
+  organizations: Organization[];
+  statuses: LeadStatus[];
+  busy: boolean;
+  draggedLeadId: number | null;
+  activitySummaries: Record<number, PartyActivitySummary>;
+  organizationPeopleActivity: Record<number, OrganizationPersonActivity[]>;
+  onDragStart: (leadId: number) => void;
+  onDragEnd: () => void;
+  onEditStatus: (lead: Lead) => void;
+  onSetLeadStatus: (lead: Lead, statusId: number) => Promise<void>;
+  onDeleteLead: (leadId: number) => Promise<void>;
+  onOpenPerson?: (partyId: number) => void;
+  onOpenOrganization?: (partyId: number) => void;
+  onOpenTask?: (taskId: number) => void;
+}) {
+  const organizationsById = new Map(props.organizations.map((organization) => [organization.id, organization]));
+  const personLeads = props.leads.filter((lead) => lead.party.type === "person");
+  const organizationLeads = props.leads.filter((lead) => lead.party.type === "organization");
+  const organizationEntries = new Map<number, LeadOrganizationEntry>();
+  const peopleByOrganization = new Map<number, LeadPersonEntry[]>();
+  const standalonePeople: LeadPersonEntry[] = [];
+
+  for (const lead of organizationLeads) {
+    organizationEntries.set(lead.partyId, {
+      key: `lead-organization:${lead.id}`,
+      partyId: lead.partyId,
+      displayName: lead.party.displayName,
+      lead
+    });
+  }
+
+  for (const lead of personLeads) {
+    const organization = activeOrganizationRelationshipForLead(lead);
+    const entry: LeadPersonEntry = {
+      key: `lead-person:${lead.id}`,
+      lead,
+      organizationRelationship: organization?.relationship ?? null
+    };
+    if (organization) {
+      if (!organizationEntries.has(organization.id)) {
+        organizationEntries.set(organization.id, {
+          key: `related-organization:${organization.id}`,
+          partyId: organization.id,
+          displayName: organization.displayName,
+          lead: null
+        });
+      }
+      const currentPeople = peopleByOrganization.get(organization.id) ?? [];
+      currentPeople.push(entry);
+      peopleByOrganization.set(organization.id, currentPeople);
+    } else {
+      standalonePeople.push(entry);
+    }
+  }
+
+  const sortedOrganizations = [...organizationEntries.values()].sort((left, right) => {
+    if (Boolean(left.lead) !== Boolean(right.lead)) return left.lead ? -1 : 1;
+    return left.displayName.localeCompare(right.displayName) || left.partyId - right.partyId;
+  });
+
+  return (
+    <>
+      {sortedOrganizations.map((organizationEntry) => {
+        const nestedLeadPeople = peopleByOrganization.get(organizationEntry.partyId) ?? [];
+        const nestedLeadPersonIds = new Set(nestedLeadPeople.map((entry) => entry.lead.partyId));
+        const relatedPeopleFromActivity = props.organizationPeopleActivity[organizationEntry.partyId] ?? [];
+        const relatedPeopleFromRelationships = organizationEntry.lead ? activePeopleForOrganizationLead(organizationEntry.lead) : [];
+        const relatedPeople = relatedPeopleFromRelationships
+          .filter((person) => !nestedLeadPersonIds.has(person.partyId))
+          .filter((person) => !relatedPeopleFromActivity.some((activity) => activity.partyId === person.partyId));
+        const childContent = nestedLeadPeople.length || relatedPeopleFromActivity.length || relatedPeople.length ? (
+          <>
+            {nestedLeadPeople.map((entry) => (
+              <LeadNestedPerson
+                key={entry.key}
+                entry={entry}
+                statuses={props.statuses}
+                busy={props.busy}
+                draggedLeadId={props.draggedLeadId}
+                summary={props.activitySummaries[entry.lead.partyId] ?? null}
+                onDragStart={props.onDragStart}
+                onDragEnd={props.onDragEnd}
+                onEditStatus={props.onEditStatus}
+                onSetLeadStatus={props.onSetLeadStatus}
+                onDeleteLead={props.onDeleteLead}
+                onOpenPerson={props.onOpenPerson}
+                onOpenTask={props.onOpenTask}
+              />
+            ))}
+            {relatedPeopleFromActivity.length ? (
+              <OrganizationPeopleActivityList
+                people={relatedPeopleFromActivity.filter((person) => !nestedLeadPersonIds.has(person.partyId))}
+                variant="taskParticipant"
+                onOpenPerson={props.onOpenPerson}
+                onOpenTask={props.onOpenTask}
+              />
+            ) : null}
+            {relatedPeople.map((person) => (
+              <LeadRelatedPerson
+                key={`related-person:${organizationEntry.partyId}:${person.partyId}`}
+                partyId={person.partyId}
+                displayName={person.displayName}
+                label={partyRelationshipLabel(person.relationship, person.partyId)}
+                onOpenPerson={props.onOpenPerson}
+              />
+            ))}
+          </>
+        ) : null;
+
+        if (organizationEntry.lead) {
+          return (
+            <LeadCard
+              key={organizationEntry.key}
+              lead={organizationEntry.lead}
+              icon={<Building2 size={16} />}
+              title={organizationEntry.displayName}
+              meta={leadRoleSummary(organizationEntry.lead) ?? organizationEntry.lead.status.label}
+              detail={leadContactDetail(organizationEntry.lead)}
+              statuses={props.statuses}
+              busy={props.busy}
+              dragging={props.draggedLeadId === organizationEntry.lead.id}
+              onDragStart={props.onDragStart}
+              onDragEnd={props.onDragEnd}
+              onOpen={props.onOpenOrganization ? () => props.onOpenOrganization?.(organizationEntry.partyId) : undefined}
+              onEditStatus={props.onEditStatus}
+              onSetLeadStatus={props.onSetLeadStatus}
+              onDeleteLead={props.onDeleteLead}
+            >
+              {childContent}
+            </LeadCard>
+          );
+        }
+
+        return (
+          <article key={organizationEntry.key} className="lead-card lead-card-context">
+            <RelationItem
+              icon={<Building2 size={16} />}
+              title={organizationEntry.displayName}
+              meta="Organisation"
+              onOpen={props.onOpenOrganization ? () => props.onOpenOrganization?.(organizationEntry.partyId) : undefined}
+            />
+            {childContent ? <div className="lead-card-related-people">{childContent}</div> : null}
+          </article>
+        );
+      })}
+      {standalonePeople.map((entry) => (
+        <LeadCard
+          key={entry.key}
+          lead={entry.lead}
+          icon={<Users size={16} />}
+          title={entry.lead.party.displayName}
+          meta={leadRoleSummary(entry.lead) ?? entry.lead.status.label}
+          detail={leadContactDetail(entry.lead)}
+          summary={props.activitySummaries[entry.lead.partyId] ?? null}
+          statuses={props.statuses}
+          busy={props.busy}
+          dragging={props.draggedLeadId === entry.lead.id}
+          onDragStart={props.onDragStart}
+          onDragEnd={props.onDragEnd}
+          onOpen={props.onOpenPerson ? () => props.onOpenPerson?.(entry.lead.partyId) : undefined}
+          onEditStatus={props.onEditStatus}
+          onSetLeadStatus={props.onSetLeadStatus}
+          onDeleteLead={props.onDeleteLead}
+          onOpenTask={props.onOpenTask}
+        />
+      ))}
+    </>
+  );
+}
+
+function LeadCard(props: {
+  lead: Lead;
+  icon: ReactNode;
+  title: string;
+  meta?: string | null;
+  detail?: string | null;
+  summary?: PartyActivitySummary | null;
+  statuses: LeadStatus[];
+  busy: boolean;
+  dragging: boolean;
+  children?: ReactNode;
+  onDragStart: (leadId: number) => void;
+  onDragEnd: () => void;
+  onOpen?: () => void;
+  onEditStatus: (lead: Lead) => void;
+  onSetLeadStatus: (lead: Lead, statusId: number) => Promise<void>;
+  onDeleteLead: (leadId: number) => Promise<void>;
+  onOpenTask?: (taskId: number) => void;
+}) {
+  return (
+    <article
+      className={`lead-card${props.dragging ? " dragging" : ""}`}
+      draggable
+      onDragStart={(event) => {
+        props.onDragStart(props.lead.id);
+        event.dataTransfer.effectAllowed = "move";
+      }}
+      onDragEnd={props.onDragEnd}
+    >
+      <RelationItem
+        icon={props.icon}
+        title={props.title}
+        meta={props.meta}
+        detail={props.detail}
+        onOpen={props.onOpen}
+        actions={(
+          <>
+            <button type="button" className="small-button compact" disabled={props.busy} onClick={() => props.onEditStatus(props.lead)}>
+              Status
+            </button>
+            <button
+              type="button"
+              className="icon-button compact"
+              disabled={props.busy}
+              title="Lead entfernen"
+              aria-label="Lead entfernen"
+              onClick={() => void props.onDeleteLead(props.lead.id)}
+            >
+              <Trash2 size={14} />
+            </button>
+          </>
+        )}
+      />
+      <LeadInlineStatusOptions lead={props.lead} statuses={props.statuses} busy={props.busy} onSetLeadStatus={props.onSetLeadStatus} />
+      {props.summary ? (
+        <div className="lead-card-activity">
+          <PartyActivitySummaryCard summary={props.summary} compact variant="taskParticipant" onOpenTask={props.onOpenTask} />
+        </div>
+      ) : null}
+      {props.children ? <div className="lead-card-related-people">{props.children}</div> : null}
+    </article>
+  );
+}
+
+function LeadInlineStatusOptions(props: {
+  lead: Lead;
+  statuses: LeadStatus[];
+  busy: boolean;
+  onSetLeadStatus: (lead: Lead, statusId: number) => Promise<void>;
+}) {
+  return (
+    <div className="lead-inline-status-options" aria-label={`Status für ${props.lead.party.displayName}`}>
+      {props.statuses.map((status) => (
+        <button
+          key={status.id}
+          type="button"
+          className={status.id === props.lead.statusId ? "active" : ""}
+          disabled={props.busy || status.id === props.lead.statusId}
+          onClick={() => void props.onSetLeadStatus(props.lead, status.id)}
+        >
+          {status.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function LeadNestedPerson(props: {
+  entry: LeadPersonEntry;
+  statuses: LeadStatus[];
+  busy: boolean;
+  draggedLeadId: number | null;
+  summary: PartyActivitySummary | null;
+  onDragStart: (leadId: number) => void;
+  onDragEnd: () => void;
+  onEditStatus: (lead: Lead) => void;
+  onSetLeadStatus: (lead: Lead, statusId: number) => Promise<void>;
+  onDeleteLead: (leadId: number) => Promise<void>;
+  onOpenPerson?: (partyId: number) => void;
+  onOpenTask?: (taskId: number) => void;
+}) {
+  const label = [leadRoleSummary(props.entry.lead), props.entry.organizationRelationship ? partyRelationshipLabel(props.entry.organizationRelationship, props.entry.lead.partyId) : null]
+    .filter(Boolean)
+    .join(" · ") || props.entry.lead.status.label;
+  return (
+    <div
+      className={`lead-nested-person${props.draggedLeadId === props.entry.lead.id ? " dragging" : ""}`}
+      draggable
+      onDragStart={(event) => {
+        props.onDragStart(props.entry.lead.id);
+        event.dataTransfer.effectAllowed = "move";
+      }}
+      onDragEnd={props.onDragEnd}
+    >
+      {props.onOpenPerson ? (
+        <button type="button" className="task-participant-nested-open" onClick={() => props.onOpenPerson?.(props.entry.lead.partyId)}>
+          <span>{props.entry.lead.party.displayName}</span>
+          {label ? <small>{label}</small> : null}
+        </button>
+      ) : (
+        <div className="task-participant-nested-copy">
+          <span>{props.entry.lead.party.displayName}</span>
+          {label ? <small>{label}</small> : null}
+        </div>
+      )}
+      <div className="lead-nested-actions">
+        <button type="button" className="small-button compact" disabled={props.busy} onClick={() => props.onEditStatus(props.entry.lead)}>
+          Status
+        </button>
+        <button
+          type="button"
+          className="icon-button compact"
+          disabled={props.busy}
+          title="Lead entfernen"
+          aria-label="Lead entfernen"
+          onClick={() => void props.onDeleteLead(props.entry.lead.id)}
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+      <LeadInlineStatusOptions lead={props.entry.lead} statuses={props.statuses} busy={props.busy} onSetLeadStatus={props.onSetLeadStatus} />
+      {props.summary ? (
+        <div className="lead-card-activity">
+          <PartyActivitySummaryCard summary={props.summary} compact variant="taskParticipant" onOpenTask={props.onOpenTask} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LeadRelatedPerson(props: {
+  partyId: number;
+  displayName: string;
+  label: string | null;
+  onOpenPerson?: (partyId: number) => void;
+}) {
+  return (
+    <div className="lead-related-person">
+      {props.onOpenPerson ? (
+        <button type="button" className="task-participant-nested-open" onClick={() => props.onOpenPerson?.(props.partyId)}>
+          <span>{props.displayName}</span>
+          {props.label ? <small>{props.label}</small> : null}
+        </button>
+      ) : (
+        <div className="task-participant-nested-copy">
+          <span>{props.displayName}</span>
+          {props.label ? <small>{props.label}</small> : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatusOptionSet(props: {
+  statuses: LeadStatus[];
+  value: number | null;
+  disabled?: boolean;
+  onChange: (statusId: number) => void;
+}) {
+  return (
+    <fieldset className="lead-status-options">
+      <legend>Status</legend>
+      <div>
+        {props.statuses.map((status) => (
+          <button
+            key={status.id}
+            type="button"
+            className={status.id === props.value ? "active" : ""}
+            disabled={props.disabled}
+            onClick={() => props.onChange(status.id)}
+          >
+            {status.label}
+          </button>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 function relationshipConnectsPersonAndOrganization(relationship: PartyRelationshipWithParties, personId: number, organizationId: number): boolean {
   const connectsPersonToOrganization =
     relationship.fromPartyId === personId
@@ -123,6 +768,18 @@ function relationshipConnectsPersonAndOrganization(relationship: PartyRelationsh
       : relationship.toPartyId === personId && relationship.fromParty.id === organizationId && relationship.fromParty.type === "organization";
   if (!connectsPersonToOrganization) return false;
   return ["works_for", "member_of", "founder_of"].includes(relationship.relationshipType.key);
+}
+
+function organizationPartyFromRelationship(relationship: PartyRelationshipWithParties, personId: number): { id: number; displayName: string } | null {
+  if (relationship.status !== "active") return null;
+  if (!["works_for", "member_of", "founder_of"].includes(relationship.relationshipType.key)) return null;
+  if (relationship.fromPartyId === personId && relationship.toParty.type === "organization") {
+    return { id: relationship.toParty.id, displayName: relationship.toParty.displayName };
+  }
+  if (relationship.toPartyId === personId && relationship.fromParty.type === "organization") {
+    return { id: relationship.fromParty.id, displayName: relationship.fromParty.displayName };
+  }
+  return null;
 }
 
 function relationshipToOrganization(personEntry: TaskParticipantEntry, organizationEntry: TaskParticipantEntry): PartyRelationshipWithParties | null {
@@ -136,6 +793,29 @@ function relationshipToOrganization(personEntry: TaskParticipantEntry, organizat
     if (relationship.status !== "active") return false;
     return relationshipConnectsPersonAndOrganization(relationship, personEntry.partyId, organizationEntry.partyId);
   }) ?? null;
+}
+
+function syntheticOrganizationEntriesForPeople(
+  people: Array<TaskParticipantEntry & { partyType: "person" }>,
+  existingOrganizationIds: Set<number>
+): Array<TaskParticipantEntry & { partyType: "organization" }> {
+  const entries: Array<TaskParticipantEntry & { partyType: "organization" }> = [];
+  for (const personEntry of people) {
+    for (const relationship of personEntry.participant?.relationships ?? []) {
+      const organization = organizationPartyFromRelationship(relationship, personEntry.partyId);
+      if (!organization || existingOrganizationIds.has(organization.id)) continue;
+      existingOrganizationIds.add(organization.id);
+      entries.push({
+        key: `related-organization:${organization.id}`,
+        partyId: organization.id,
+        partyType: "organization",
+        displayName: organization.displayName,
+        participant: null,
+        primaryContext: null
+      });
+    }
+  }
+  return entries;
 }
 
 function ParticipantsPanel(props: {
@@ -468,8 +1148,13 @@ function TaskParticipantsRelationList(props: {
       primaryContext: null
     }))
   ];
-  const organizations = entries.filter((entry): entry is TaskParticipantEntry & { partyType: "organization" } => entry.partyType === "organization");
   const people = entries.filter((entry): entry is TaskParticipantEntry & { partyType: "person" } => entry.partyType === "person");
+  const directOrganizations = entries.filter((entry): entry is TaskParticipantEntry & { partyType: "organization" } => entry.partyType === "organization");
+  const organizationIds = new Set(directOrganizations.map((entry) => entry.partyId));
+  const organizations = [
+    ...directOrganizations,
+    ...syntheticOrganizationEntriesForPeople(people, organizationIds)
+  ];
   const peopleByOrganization = new Map<number, TaskParticipantPersonEntry[]>();
   const standalonePeople: TaskParticipantPersonEntry[] = [];
 
@@ -499,13 +1184,40 @@ function TaskParticipantsRelationList(props: {
     <RelationList emptyMode="none" emptyTitle="Noch keine Beteiligten.">
       {organizations.map((organizationEntry) => {
         const organization = organizationsById.get(organizationEntry.partyId);
+        const nestedPeople = peopleByOrganization.get(organizationEntry.partyId) ?? [];
+        const nestedPersonIds = new Set(nestedPeople.map((personEntry) => personEntry.partyId));
+        const organizationPeople = (props.organizationPeopleActivity[organizationEntry.partyId] ?? [])
+          .filter((personActivity) => !nestedPersonIds.has(personActivity.partyId));
+        const childContent = nestedPeople.length || organizationPeople.length ? (
+          <>
+            {nestedPeople.map((personEntry) => (
+              <TaskParticipantNestedPerson
+                key={personEntry.key}
+                entry={personEntry}
+                person={peopleById.get(personEntry.partyId)}
+                summary={props.activitySummaries[personEntry.partyId] ?? null}
+                busy={props.busy}
+                onOpenPerson={props.onOpenPerson}
+                onOpenTask={props.onOpenTask}
+                onDeleteParticipant={props.onDeleteParticipant}
+              />
+            ))}
+            {organizationPeople.length ? (
+              <OrganizationPeopleActivityList
+                people={organizationPeople}
+                variant="taskParticipant"
+                onOpenPerson={props.onOpenPerson}
+                onOpenTask={props.onOpenTask}
+              />
+            ) : null}
+          </>
+        ) : null;
         return (
           <TaskParticipantCard
             key={organizationEntry.key}
             icon={<Building2 size={16} />}
             title={organizationEntry.displayName}
             meta={organizationDescription(organization, organizationEntry.participant)}
-            summary={props.activitySummaries[organizationEntry.partyId] ?? null}
             onOpenTask={props.onOpenTask}
             onOpen={props.onOpenOrganization ? () => props.onOpenOrganization?.(organizationEntry.partyId) : undefined}
             actions={organizationEntry.participant ? (
@@ -516,26 +1228,7 @@ function TaskParticipantsRelationList(props: {
               />
             ) : null}
           >
-            {props.organizationPeopleActivity[organizationEntry.partyId]?.length ? (
-              <OrganizationPeopleActivityList
-                people={props.organizationPeopleActivity[organizationEntry.partyId]}
-                onOpenPerson={props.onOpenPerson}
-                onOpenTask={props.onOpenTask}
-              />
-            ) : (
-              (peopleByOrganization.get(organizationEntry.partyId) ?? []).map((personEntry) => (
-                <TaskParticipantNestedPerson
-                  key={personEntry.key}
-                  entry={personEntry}
-                  person={peopleById.get(personEntry.partyId)}
-                  summary={props.activitySummaries[personEntry.partyId] ?? null}
-                  busy={props.busy}
-                  onOpenPerson={props.onOpenPerson}
-                  onOpenTask={props.onOpenTask}
-                  onDeleteParticipant={props.onDeleteParticipant}
-                />
-              ))
-            )}
+            {childContent}
           </TaskParticipantCard>
         );
       })}
@@ -594,7 +1287,7 @@ function TaskParticipantCard(props: {
       </div>
       {props.summary ? (
         <div className="task-participant-activity">
-          <PartyActivitySummaryCard summary={props.summary} compact onOpenTask={props.onOpenTask} />
+          <PartyActivitySummaryCard summary={props.summary} compact variant="taskParticipant" onOpenTask={props.onOpenTask} />
         </div>
       ) : null}
       {props.children ? <div className="task-participant-nested-list">{props.children}</div> : null}
@@ -634,7 +1327,7 @@ function TaskParticipantNestedPerson(props: {
       ) : null}
       {props.summary ? (
         <div className="task-participant-nested-activity">
-          <PartyActivitySummaryCard summary={props.summary} compact onOpenTask={props.onOpenTask} />
+          <PartyActivitySummaryCard summary={props.summary} compact variant="taskParticipant" onOpenTask={props.onOpenTask} />
         </div>
       ) : null}
     </div>
@@ -1486,7 +2179,6 @@ function TasksView(props: {
               </p>
             ) : null}
           </div>
-          <span className={`priority ${task.priority}`}>{task.priority}</span>
           {props.onDeleteTask ? (
             <button
               type="button"

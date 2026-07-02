@@ -46,6 +46,8 @@ import {
   createPartyRelationshipBody,
   createEntityParticipantBody,
   updateEntityParticipantBody,
+  createLeadBody,
+  updateLeadStatusBody,
   createPartyContactPointBody,
   updatePartyContactPointBody,
   createPartyAddressBody,
@@ -112,6 +114,8 @@ import { MediaAssetRepository } from "../repositories/media-assets.js";
 import type { MediaAsset } from "../repositories/media-assets.js";
 import { MediaLinkRepository } from "../repositories/media-links.js";
 import type { MediaAttachment, MediaEntityType, MediaLink } from "../repositories/media-links.js";
+import { LeadRepository, LeadStatusRepository } from "../repositories/leads.js";
+import type { Lead, LeadWithParty } from "../repositories/leads.js";
 import {
   EntityParticipantRepository,
   OrganizationRepository,
@@ -205,6 +209,8 @@ const relationshipTypes = new RelationshipTypeRepository(db);
 const partyRelationships = new PartyRelationshipRepository(db);
 const participantRoleTypes = new ParticipantRoleTypeRepository(db);
 const entityParticipants = new EntityParticipantRepository(db);
+const leadStatuses = new LeadStatusRepository(db);
+const leads = new LeadRepository(db);
 const partyContactPoints = new PartyContactPointRepository(db);
 const partyAddresses = new PartyAddressRepository(db);
 const tasks = new TaskRepository(db);
@@ -884,6 +890,7 @@ const server = http.createServer(async (req, res) => {
         person,
         relationships: partyRelationships.list({ partyId: person.id }),
         participants: entityParticipants.list({ partyId: person.id }),
+        leads: leads.list({ partyId: person.id }),
         contactPoints: partyContactPoints.list({ partyId: person.id }),
         addresses: partyAddresses.list({ partyId: person.id })
       });
@@ -933,6 +940,7 @@ const server = http.createServer(async (req, res) => {
         organization,
         relationships: partyRelationships.list({ partyId: organization.id }),
         participants: entityParticipants.list({ partyId: organization.id }),
+        leads: leads.list({ partyId: organization.id }),
         contactPoints: partyContactPoints.list({ partyId: organization.id }),
         addresses: partyAddresses.list({ partyId: organization.id })
       });
@@ -965,6 +973,16 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/api/config/participant-role-types") {
       sendJson(res, 200, { participantRoleTypes: participantRoleTypes.list({ appliesToEntityType: parseOptionalParticipantEntityType(url.searchParams.get("appliesToEntityType")) }) });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/config/lead-status-groups") {
+      sendJson(res, 200, { leadStatusGroups: leadStatuses.listGroups() });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/config/lead-statuses") {
+      sendJson(res, 200, { leadStatuses: leadStatuses.listStatuses({ groupId: parseOptionalPositiveInt(url.searchParams.get("groupId")) ?? undefined }) });
       return;
     }
 
@@ -1012,6 +1030,10 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && url.pathname === "/api/entity-participants") {
       const body = createEntityParticipantBody.parse(await readJson(req));
+      if (body.entityType === "initiative" || body.entityType === "task") {
+        sendJson(res, 400, { error: "Initiative and task party links are managed as leads. Use /api/leads." });
+        return;
+      }
       const participant = entityParticipants.create(body);
       emitApiStateEvent(stateEventForEntityParticipant("createEntityParticipant", participant));
       sendJson(res, 200, { participant });
@@ -1035,6 +1057,46 @@ const server = http.createServer(async (req, res) => {
       }
       emitApiStateEvent(stateEventForEntityParticipant("deleteEntityParticipant", participant));
       sendJson(res, 200, { deleted: true, id: participant.id });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/leads") {
+      sendJson(res, 200, {
+        leads: leads.list({
+          initiativeId: parseOptionalPositiveInt(url.searchParams.get("initiativeId")) ?? undefined,
+          taskId: parseOptionalPositiveInt(url.searchParams.get("taskId")) ?? undefined,
+          partyId: parseOptionalPositiveInt(url.searchParams.get("partyId")) ?? undefined
+        })
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/leads") {
+      const body = createLeadBody.parse(await readJson(req));
+      const lead = leads.create(body);
+      emitApiStateEvent(stateEventForLead("createLead", lead));
+      sendJson(res, 200, { lead });
+      return;
+    }
+
+    const leadStatusMatch = url.pathname.match(/^\/api\/leads\/(\d+)\/status$/);
+    if (req.method === "PATCH" && leadStatusMatch) {
+      const body = updateLeadStatusBody.parse(await readJson(req));
+      const lead = leads.updateStatus(Number(leadStatusMatch[1]), body.statusId);
+      emitApiStateEvent(stateEventForLead("updateLeadStatus", lead));
+      sendJson(res, 200, { lead });
+      return;
+    }
+
+    const leadMatch = url.pathname.match(/^\/api\/leads\/(\d+)$/);
+    if (req.method === "DELETE" && leadMatch) {
+      const lead = leads.delete(Number(leadMatch[1]));
+      if (!lead) {
+        sendJson(res, 404, { error: "Lead not found" });
+        return;
+      }
+      emitApiStateEvent(stateEventForLead("deleteLead", lead));
+      sendJson(res, 200, { deleted: true, id: lead.id });
       return;
     }
 
@@ -1319,6 +1381,7 @@ const server = http.createServer(async (req, res) => {
         successors: initiativeRelations.getInitiativeSuccessors(initiative.id),
         tasks: tasks.list({ initiativeId: initiative.id }),
         participants: entityParticipants.list({ entityType: "initiative", entityId: initiative.id }),
+        leads: leads.list({ initiativeId: initiative.id }),
         mediaAttachments: mediaLinks.listForEntity("initiative", initiative.id).map(mediaAttachmentForApi),
         projectCalendarBinding: initiative.type === "project" ? projectCalendarBindingForApi(initiative.id) : null
       });
@@ -1390,6 +1453,7 @@ const server = http.createServer(async (req, res) => {
         initiative,
         category,
         participants: entityParticipants.list({ entityType: "task", entityId: task.id }),
+        leads: leads.list({ taskId: task.id }),
         mediaAttachments: mediaLinks.listForEntity("task", task.id).map(mediaAttachmentForApi)
       });
       return;
@@ -2355,6 +2419,24 @@ function stateEventForEntityParticipant(
     operation,
     entityType: "entity_participant",
     entityId: participant.id,
+    ...scope
+  };
+}
+
+function stateEventForLead(operation: string, lead: Pick<Lead | LeadWithParty, "id" | "initiativeId" | "taskId">): Omit<CreateStateEventInput, "source"> {
+  const scope: Pick<CreateStateEventInput, "initiativeId" | "taskId"> = {};
+  if (lead.initiativeId) {
+    scope.initiativeId = lead.initiativeId;
+  }
+  if (lead.taskId) {
+    const task = tasks.findById(lead.taskId);
+    scope.taskId = lead.taskId;
+    scope.initiativeId = task?.initiativeId ?? null;
+  }
+  return {
+    operation,
+    entityType: "lead",
+    entityId: lead.id,
     ...scope
   };
 }

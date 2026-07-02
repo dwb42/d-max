@@ -7,7 +7,7 @@ export function EntityHeader(props: {
   titleContent?: ReactNode;
   subtitle?: string | null;
   subtitleContent?: ReactNode;
-  facts?: Array<{ label: string; value: ReactNode }>;
+  facts?: Array<{ label: string; value: ReactNode; hideLabel?: boolean }>;
   primaryAction?: ReactNode;
   secondaryActions?: ReactNode;
 }) {
@@ -23,7 +23,7 @@ export function EntityHeader(props: {
             <div className="entity-header-facts">
               {props.facts.map((fact) => (
                 <span key={fact.label}>
-                  {fact.label}: {fact.value}
+                  {fact.hideLabel ? fact.value : <>{fact.label}: {fact.value}</>}
                 </span>
               ))}
             </div>

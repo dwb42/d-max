@@ -36,6 +36,7 @@ export function migrate(databasePath?: string): void {
     migrateAppChatResearchSummary(db);
     migrateMindmapReviewDomain(db);
     db.exec(schema);
+    migrateLeadDomain(db);
     migrateGmailPartyVisibility(db);
     cleanupStaleGmailPartyLinks(db);
     cleanupNonDirectGmailPartyLinks(db);
@@ -48,6 +49,118 @@ export function migrate(databasePath?: string): void {
   } finally {
     db.close();
   }
+}
+
+function migrateLeadDomain(db: ReturnType<typeof openDatabase>): void {
+  const now = nowIso();
+  db.exec(`
+    create table if not exists lead_status_groups (
+      id integer primary key,
+      key text not null unique,
+      label text not null,
+      is_system integer not null default 0 check (is_system in (0, 1)),
+      sort_order integer not null default 0,
+      created_at text not null,
+      updated_at text not null
+    );
+
+    create table if not exists lead_statuses (
+      id integer primary key,
+      group_id integer not null references lead_status_groups(id) on delete cascade,
+      key text not null,
+      label text not null,
+      sort_order integer not null default 0,
+      is_terminal integer not null default 0 check (is_terminal in (0, 1)),
+      is_success integer not null default 0 check (is_success in (0, 1)),
+      created_at text not null,
+      updated_at text not null,
+      unique(group_id, key)
+    );
+
+    create table if not exists leads (
+      id integer primary key,
+      party_id integer not null references parties(id) on delete cascade,
+      initiative_id integer references initiatives(id) on delete cascade,
+      task_id integer references tasks(id) on delete cascade,
+      status_id integer not null references lead_statuses(id),
+      role_label text,
+      created_at text not null,
+      updated_at text not null,
+      check (
+        (initiative_id is not null and task_id is null)
+        or (initiative_id is null and task_id is not null)
+      )
+    );
+
+    create index if not exists idx_lead_status_groups_sort on lead_status_groups(sort_order, lower(label), id);
+    create index if not exists idx_lead_statuses_group_sort on lead_statuses(group_id, sort_order, lower(label), id);
+    create unique index if not exists idx_leads_unique_initiative_party on leads(party_id, initiative_id) where initiative_id is not null;
+    create unique index if not exists idx_leads_unique_task_party on leads(party_id, task_id) where task_id is not null;
+    create index if not exists idx_leads_initiative_status on leads(initiative_id, status_id, id);
+    create index if not exists idx_leads_task_status on leads(task_id, status_id, id);
+    create index if not exists idx_leads_party on leads(party_id, id);
+  `);
+
+  db
+    .prepare(
+      `insert into lead_status_groups (key, label, is_system, sort_order, created_at, updated_at)
+       values ('default_outreach', 'Standard Lead-Pipeline', 1, 1000, ?, ?)
+       on conflict(key) do update set
+        label = excluded.label,
+        is_system = 1,
+        sort_order = excluded.sort_order,
+        updated_at = excluded.updated_at`
+    )
+    .run(now, now);
+  const groupId = (db.prepare("select id from lead_status_groups where key = 'default_outreach'").get() as { id: number }).id;
+  const statuses = [
+    ["fresh", "Frische Leads", 1000, 0, 0],
+    ["contacted", "Kontaktiert / in Arbeit", 2000, 0, 0],
+    ["qualified", "Qualifiziert", 3000, 0, 0],
+    ["hot", "Heiß", 4000, 0, 0],
+    ["won", "Erfolgreich abgeschlossen", 5000, 1, 1],
+    ["not_fit", "Nicht passend / verworfen", 6000, 1, 0]
+  ] as const;
+  const upsertStatus = db.prepare(
+    `insert into lead_statuses (group_id, key, label, sort_order, is_terminal, is_success, created_at, updated_at)
+     values (?, ?, ?, ?, ?, ?, ?, ?)
+     on conflict(group_id, key) do update set
+      label = excluded.label,
+      sort_order = excluded.sort_order,
+      is_terminal = excluded.is_terminal,
+      is_success = excluded.is_success,
+      updated_at = excluded.updated_at`
+  );
+  const freshStatus = db.prepare("select id from lead_statuses where group_id = ? and key = 'fresh'").get(groupId) as { id: number } | undefined;
+  const transaction = db.transaction(() => {
+    statuses.forEach(([key, label, sortOrder, isTerminal, isSuccess]) => {
+      upsertStatus.run(groupId, key, label, sortOrder, isTerminal, isSuccess, now, now);
+    });
+  });
+  transaction();
+  const freshStatusId = freshStatus?.id ?? (db.prepare("select id from lead_statuses where group_id = ? and key = 'fresh'").get(groupId) as { id: number }).id;
+
+  if (!tableExists(db, "entity_participants")) {
+    return;
+  }
+  db
+    .prepare(
+      `insert into leads (party_id, initiative_id, task_id, status_id, role_label, created_at, updated_at)
+       select
+        ep.party_id,
+        case when ep.entity_type = 'initiative' then ep.entity_id else null end,
+        case when ep.entity_type = 'task' then ep.entity_id else null end,
+        ?,
+        coalesce(nullif(trim(ep.role_label), ''), prt.label),
+        min(ep.created_at),
+        ?
+       from entity_participants ep
+       left join participant_role_types prt on prt.id = ep.role_type_id
+       where ep.entity_type in ('initiative', 'task')
+       group by ep.party_id, ep.entity_type, ep.entity_id
+       on conflict do nothing`
+    )
+    .run(freshStatusId, now);
 }
 
 function migrateAppChatAutoincrementAndIntegrity(db: ReturnType<typeof openDatabase>): void {
@@ -1862,7 +1975,7 @@ function rebuildStateEventsForWhoDomain(db: ReturnType<typeof openDatabase>): vo
   const sql = db.prepare("select sql from sqlite_master where type = 'table' and name = 'app_state_events'").get() as
     | { sql: string }
     | undefined;
-  if (sql?.sql.includes("'party_address'") && sql.sql.includes("'entity_participant'") && sql.sql.includes("'communication_event'")) {
+  if (sql?.sql.includes("'party_address'") && sql.sql.includes("'entity_participant'") && sql.sql.includes("'communication_event'") && sql.sql.includes("'lead'")) {
     return;
   }
 
@@ -1871,7 +1984,7 @@ function rebuildStateEventsForWhoDomain(db: ReturnType<typeof openDatabase>): vo
       id integer primary key,
       source text not null check (source in ('api', 'tool')),
       operation text not null,
-      entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'communication_event', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'party_contact_point', 'party_address')),
+      entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'communication_event', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'lead', 'party_contact_point', 'party_address')),
       entity_id integer,
       category_id integer,
       initiative_id integer,
@@ -1881,7 +1994,7 @@ function rebuildStateEventsForWhoDomain(db: ReturnType<typeof openDatabase>): vo
     insert into app_state_events_next (id, source, operation, entity_type, entity_id, category_id, initiative_id, task_id, created_at)
       select id, source, operation, entity_type, entity_id, category_id, initiative_id, task_id, created_at
       from app_state_events
-      where entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'communication_event', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'party_contact_point', 'party_address');
+      where entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'communication_event', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'lead', 'party_contact_point', 'party_address');
     drop table app_state_events;
     alter table app_state_events_next rename to app_state_events;
     create index if not exists idx_app_state_events_id on app_state_events(id);

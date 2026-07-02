@@ -488,7 +488,7 @@ Required product decisions:
 
 Likely data/API implications:
 
-- Existing party relationships, initiative relations and entity participants have different APIs.
+- Existing party relationships, initiative relations, leads, and calendar-entry participants have different APIs.
 - A generic UI may need adapter layers rather than a generic backend endpoint.
 
 Likely UI implications:
@@ -811,7 +811,7 @@ Read AGENTS.md, docs/architecture/DMAX_NEXT_WORK_PLAN.md, active docs/ui guidanc
 
 This is discovery and design only. Do not implement a generic RelationshipManager yet.
 
-Inventory current relationship surfaces: party relationships, initiative relations, entity participants, task participants and project dependencies. Propose the first scoped RelationshipManager target and explain why it should or should not be generic.
+Inventory current relationship surfaces: party relationships, initiative relations, leads, calendar-entry participants and project dependencies. Propose the first scoped RelationshipManager target and explain why it should or should not be generic.
 
 Run validation only if code/docs change.
 ```

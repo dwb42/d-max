@@ -258,4 +258,52 @@ describe("migrate", () => {
       db.close();
     }
   });
+
+  it("migrates initiative and task participants into fresh leads without removing participants", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "d-max-lead-migrate-test-"));
+    const databasePath = path.join(dir, "lead-migration.sqlite");
+    migrate(databasePath);
+    let db = openDatabase(databasePath);
+    try {
+      const now = "2026-07-01T00:00:00.000Z";
+      db.prepare("insert into categories (name, color, emoji, sort_order, created_at, updated_at) values ('Leads', '#27806f', 'L', 1000, ?, ?)").run(now, now);
+      const categoryId = (db.prepare("select id from categories where name = 'Leads'").get() as { id: number }).id;
+      db.prepare("insert into initiatives (category_id, name, markdown, sort_order, created_at, updated_at) values (?, 'Lead initiative', '', 1000, ?, ?)").run(categoryId, now, now);
+      const initiativeId = (db.prepare("select id from initiatives where name = 'Lead initiative'").get() as { id: number }).id;
+      db.prepare("insert into tasks (initiative_id, title, sort_order, created_at, updated_at) values (?, 'Lead task', 1000, ?, ?)").run(initiativeId, now, now);
+      const taskId = (db.prepare("select id from tasks where title = 'Lead task'").get() as { id: number }).id;
+      db.prepare("insert into parties (type, display_name, created_at, updated_at) values ('person', 'Clara Kontakt', ?, ?)").run(now, now);
+      const partyId = (db.prepare("select id from parties where display_name = 'Clara Kontakt'").get() as { id: number }).id;
+      const stakeholderId = (db.prepare("select id from participant_role_types where key = 'stakeholder'").get() as { id: number }).id;
+      db.prepare("insert into entity_participants (party_id, entity_type, entity_id, role_type_id, role_label, is_primary, created_at, updated_at) values (?, 'initiative', ?, ?, null, 1, ?, ?)").run(partyId, initiativeId, stakeholderId, now, now);
+      db.prepare("insert into entity_participants (party_id, entity_type, entity_id, role_type_id, role_label, is_primary, created_at, updated_at) values (?, 'initiative', ?, null, 'Kontaktperson', 0, ?, ?)").run(partyId, initiativeId, now, now);
+      db.prepare("insert into entity_participants (party_id, entity_type, entity_id, role_type_id, role_label, is_primary, created_at, updated_at) values (?, 'task', ?, null, 'Ansprechpartner', 0, ?, ?)").run(partyId, taskId, now, now);
+    } finally {
+      db.close();
+    }
+
+    migrate(databasePath);
+    db = openDatabase(databasePath);
+    try {
+      const leadRows = db.prepare("select l.*, ls.key as status_key from leads l join lead_statuses ls on ls.id = l.status_id order by l.id").all() as Array<{
+        party_id: number;
+        initiative_id: number | null;
+        task_id: number | null;
+        role_label: string | null;
+        status_key: string;
+      }>;
+      const participantCount = (db.prepare("select count(*) as count from entity_participants").get() as { count: number }).count;
+
+      expect(leadRows).toHaveLength(2);
+      expect(leadRows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ initiative_id: expect.any(Number), task_id: null, role_label: "Stakeholder", status_key: "fresh" }),
+          expect.objectContaining({ initiative_id: null, task_id: expect.any(Number), role_label: "Ansprechpartner", status_key: "fresh" })
+        ])
+      );
+      expect(participantCount).toBe(3);
+    } finally {
+      db.close();
+    }
+  });
 });

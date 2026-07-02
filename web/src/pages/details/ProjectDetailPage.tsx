@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 import { CalendarDays, Lock, LockOpen, Plus, Trash2, X } from "lucide-react";
 import { ConfirmModal, DescriptionBlock, EditModal, EmptyState, EntityDetailPage, MetadataGrid, RelationList, SectionBlock, handleModalEscape, useModalEscape } from "../../components/ui/index.js";
 import { createGoogleEventFromDmax, fetchCalendarSources, unlinkCalendarBinding } from "../../api.js";
-import type { AppOverview, CalendarSource, Initiative, InitiativeDetail, InitiativeRelationWithInitiatives, InitiativeType, Organization, ParticipantRoleType, Person, ProjectPhase, Task } from "../../types.js";
+import type { AppOverview, CalendarSource, LeadStatus, Initiative, InitiativeDetail, InitiativeRelationWithInitiatives, InitiativeType, Organization, Person, ProjectPhase, Task } from "../../types.js";
 import { InitiativeMindmapSection } from "../../components/graph/InitiativeMindmap.js";
-import { MediaAttachmentsPanel, ParticipantsPanel, TaskCreateInlineForm, TasksView } from "./SharedDetailPanels.js";
+import { LeadsPanel, MediaAttachmentsPanel, TaskCreateInlineForm, TasksView } from "./SharedDetailPanels.js";
 import { type CreateInitiativeInput, type RelationshipCreateDraft, type RelationshipCreateSlot, type UpdateInitiativeInput, InitiativeTypeBadge, InitiativeTypeInitial, defaultInitiativeMarkdown, displayInitiativeName, formatDateTimeForUi, formatInitiativeDateRangeForUi, initiativeAncestorIds, initiativeCandidateOptionGroups, initiativeDescendantIds, initiativeDateRangeInvalid, initiativeStatusLabel, initiativeStatusOptions, initiativeTypeLabel, initiativeTypeOptions, primeEmptyDatePickerMonth, projectPhaseLabel, projectPhaseOptions, restorePrimedEmptyDateInput } from "./detailUtils.js";
 
 export function InitiativeDetailView(props: {
@@ -14,20 +14,19 @@ export function InitiativeDetailView(props: {
   categories: AppOverview["categories"];
   people: Person[];
   organizations: Organization[];
-  participantRoleTypes: ParticipantRoleType[];
+  leadStatuses: LeadStatus[];
   onOpenInitiative: (initiativeId: number) => void;
   onOpenTask: (taskId: number) => void;
   onOpenPerson: (partyId: number) => void;
   onOpenOrganization: (partyId: number) => void;
-  onCreateParticipant: (input: {
+  onCreateLead: (input: {
     partyId: number;
-    entityType: "initiative" | "task";
-    entityId: number;
-    roleTypeId?: number | null;
-    roleLabel?: string | null;
-    isPrimary?: boolean;
+    initiativeId?: number | null;
+    taskId?: number | null;
+    statusId?: number | null;
   }) => Promise<void>;
-  onDeleteParticipant: (participantId: number) => Promise<void>;
+  onUpdateLeadStatus: (leadId: number, statusId: number) => Promise<void>;
+  onDeleteLead: (leadId: number) => Promise<void>;
   onToggleTaskStatus: (task: Task) => Promise<void>;
   onDeleteTask: (task: Task) => Promise<void>;
   onReorderTasks?: (initiativeId: number, taskIds: number[]) => Promise<void>;
@@ -49,13 +48,13 @@ export function InitiativeDetailView(props: {
   const initiative = props.detail.initiative;
   const predecessors = props.detail.predecessors ?? [];
   const successors = props.detail.successors ?? [];
-  const participants = props.detail.participants ?? [];
+  const leads = props.detail.leads ?? [];
   const mediaAttachments = props.detail.mediaAttachments ?? [];
   const category = props.categories.find((candidate) => candidate.id === initiative.categoryId) ?? null;
   const openTasks = props.detail.tasks.filter((task) => task.status !== "done").length;
   const doneTasks = props.detail.tasks.length - openTasks;
   const relationCount =
-    participants.length
+    leads.length
     + predecessors.length
     + successors.length
     + props.allInitiatives.filter((candidate) => candidate.parentId === initiative.id).length
@@ -73,7 +72,7 @@ export function InitiativeDetailView(props: {
             { label: "Zeitraum", value: initiative.type === "project" ? formatInitiativeDateRangeForUi(initiative) : null },
             { label: "Zeitraum fixiert", value: initiative.type === "project" ? (initiative.isLocked ? "Ja" : "Nein") : null },
             { label: "Maßnahmen", value: `${openTasks} offen · ${doneTasks} erledigt` },
-            { label: "Beteiligte", value: String(participants.length) },
+            { label: "Leads", value: String(leads.length) },
             { label: "Beziehungen", value: String(relationCount) },
             { label: "Medien", value: String(mediaAttachments.length) },
             { label: "Aktualisiert", value: formatDateTimeForUi(initiative.updatedAt) }
@@ -104,16 +103,16 @@ export function InitiativeDetailView(props: {
           />
         ) : null}
       </SectionBlock>
-      <ParticipantsPanel
+      <LeadsPanel
         entityType="initiative"
         entityId={initiative.id}
-        participants={participants}
+        leads={leads}
+        leadStatuses={props.leadStatuses}
         people={props.people}
         organizations={props.organizations}
-        roleTypes={props.participantRoleTypes}
-        surface="section"
-        onCreateParticipant={props.onCreateParticipant}
-        onDeleteParticipant={props.onDeleteParticipant}
+        onCreateLead={props.onCreateLead}
+        onUpdateLeadStatus={props.onUpdateLeadStatus}
+        onDeleteLead={props.onDeleteLead}
         onOpenPerson={props.onOpenPerson}
         onOpenOrganization={props.onOpenOrganization}
       />

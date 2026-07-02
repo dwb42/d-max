@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { Blocks, Building2, ClipboardList, Plus, Users } from "lucide-react";
 import { DescriptionBlock, EditModal, EmptyState, EntityDetailPage, ErrorState, MetadataGrid, RelationGroup, RelationItem, RelationList, SectionBlock } from "../../components/ui/index.js";
-import { AddressBlock, ContactPointList, OrganizationPeopleActivityList, PartyActivitySummaryCard } from "../../components/party/index.js";
+import { AddressBlock, ContactPointList, OrganizationPeopleActivityList } from "../../components/party/index.js";
 import type { AddressInput, ContactPointInput } from "../../components/party/index.js";
 import { fetchPartyActivitySummaries } from "../../api.js";
-import type { EntityParticipant, Initiative, Organization, OrganizationDetail, OrganizationPersonActivity, PartyActivitySummary, PartyRelationshipWithParties, Person, RelationshipType, Task } from "../../types.js";
-import { entityTypeLabel, formatDateTimeForUi, participantRoleSummary, personName } from "./detailUtils.js";
+import type { Lead, Initiative, Organization, OrganizationDetail, OrganizationPersonActivity, PartyRelationshipWithParties, Person, RelationshipType, Task } from "../../types.js";
+import { formatDateTimeForUi, personName } from "./detailUtils.js";
 import { PartyHistorySection, PartyTasksSection } from "./PartyDetailSections.js";
 import type { EmailComposeDraft } from "./PartyDetailSections.js";
 
@@ -33,13 +33,6 @@ export function OrganizationDetailView(props: {
     roleLabel?: string | null;
     status?: "active" | "inactive";
   }) => Promise<void>;
-  onCreateParticipant: (input: {
-    partyId: number;
-    entityType: "initiative" | "task";
-    entityId: number;
-    roleLabel?: string | null;
-    isPrimary?: boolean;
-  }) => Promise<void>;
   onOpenInitiative: (initiativeId: number) => void;
   onOpenTask: (taskId: number) => void;
   onOpenPerson: (partyId: number) => void;
@@ -48,12 +41,10 @@ export function OrganizationDetailView(props: {
   const organization = props.detail?.organization;
   const [composeDraft, setComposeDraft] = useState<EmailComposeDraft | null>(null);
   const [partyTaskVersion, setPartyTaskVersion] = useState(0);
-  const [activitySummary, setActivitySummary] = useState<PartyActivitySummary | null>(null);
   const [organizationPeopleActivity, setOrganizationPeopleActivity] = useState<OrganizationPersonActivity[]>([]);
 
   useEffect(() => {
     if (!organization?.id) {
-      setActivitySummary(null);
       setOrganizationPeopleActivity([]);
       return;
     }
@@ -61,12 +52,10 @@ export function OrganizationDetailView(props: {
     fetchPartyActivitySummaries([organization.id], { includeOrganizationPeople: true })
       .then((response) => {
         if (cancelled) return;
-        setActivitySummary(response.summaries[0] ?? null);
         setOrganizationPeopleActivity(response.organizationPeople?.[organization.id] ?? []);
       })
       .catch(() => {
         if (cancelled) return;
-        setActivitySummary(null);
         setOrganizationPeopleActivity([]);
       });
     return () => {
@@ -124,7 +113,6 @@ export function OrganizationDetailView(props: {
           />
         </main>
         <aside className="party-detail-sidebar">
-          <PartyActivitySummaryCard summary={activitySummary} title="Aktivität" onOpenTask={props.onOpenTask} />
           <ContactPointList
             partyId={organization.id}
             contactPoints={props.detail.contactPoints}
@@ -168,10 +156,9 @@ export function OrganizationDetailView(props: {
           />
           <OrganizationParticipationsSection
             organization={organization}
-            participants={props.detail.participants}
+            leads={props.detail.leads ?? []}
             initiatives={props.initiatives}
             tasks={props.tasks}
-            onCreateParticipant={props.onCreateParticipant}
             onOpenInitiative={props.onOpenInitiative}
             onOpenTask={props.onOpenTask}
           />
@@ -580,142 +567,39 @@ export function partyRelationshipLabel(relationship: PartyRelationshipWithPartie
 
 function OrganizationParticipationsSection(props: {
   organization: Organization;
-  participants: EntityParticipant[];
+  leads: Lead[];
   initiatives: Initiative[];
   tasks: Task[];
-  onCreateParticipant: (input: {
-    partyId: number;
-    entityType: "initiative" | "task";
-    entityId: number;
-    roleLabel?: string | null;
-    isPrimary?: boolean;
-  }) => Promise<void>;
   onOpenInitiative: (initiativeId: number) => void;
   onOpenTask: (taskId: number) => void;
 }) {
   const initiativeById = new Map(props.initiatives.map((initiative) => [initiative.id, initiative]));
   const taskById = new Map(props.tasks.map((task) => [task.id, task]));
-  const linkedInitiativeIds = new Set(props.participants.filter((participant) => participant.entityType === "initiative").map((participant) => participant.entityId));
-  const linkedTaskIds = new Set(props.participants.filter((participant) => participant.entityType === "task").map((participant) => participant.entityId));
-  const availableInitiatives = props.initiatives.filter((initiative) => !linkedInitiativeIds.has(initiative.id));
-  const availableTasks = props.tasks.filter((task) => !linkedTaskIds.has(task.id));
-  const [linkType, setLinkType] = useState<"initiative" | "task" | null>(null);
-  const [entityId, setEntityId] = useState("");
-  const [roleLabel, setRoleLabel] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const availableEntities = linkType === "task" ? availableTasks : availableInitiatives;
 
   return (
-    <SectionBlock
-      title="DMAX-Kontexte"
-      actions={(
-        <>
-          <button
-            type="button"
-            className="icon-button compact"
-            disabled={saving || availableInitiatives.length === 0}
-            title="Initiative verknüpfen"
-            aria-label="Initiative verknüpfen"
-            onClick={() => {
-              setLinkType("initiative");
-              setEntityId("");
-              setRoleLabel("");
-            }}
-          >
-            <Plus size={15} />
-          </button>
-          <button
-            type="button"
-            className="icon-button compact"
-            disabled={saving || availableTasks.length === 0}
-            title="Maßnahme verknüpfen"
-            aria-label="Maßnahme verknüpfen"
-            onClick={() => {
-              setLinkType("task");
-              setEntityId("");
-              setRoleLabel("");
-            }}
-          >
-            <Plus size={15} />
-          </button>
-        </>
-      )}
-    >
-      <RelationList emptyTitle="Keine DMAX-Kontexte" emptyDescription="Diese Organisation ist noch keiner Initiative oder Maßnahme zugeordnet.">
-        {props.participants.map((participant) => {
+    <SectionBlock title="DMAX-Kontexte">
+      <RelationList emptyTitle="Keine DMAX-Kontexte" emptyDescription="Diese Organisation ist noch keinem Lead-Kontext zugeordnet.">
+        {props.leads.map((lead) => {
           const title =
-            participant.entityType === "initiative"
-              ? initiativeById.get(participant.entityId)?.name
-              : participant.entityType === "task"
-                ? taskById.get(participant.entityId)?.title
+            lead.initiativeId
+              ? initiativeById.get(lead.initiativeId)?.name
+              : lead.taskId
+                ? taskById.get(lead.taskId)?.title
                 : null;
           return (
             <RelationItem
-              key={participant.id}
-              icon={participant.entityType === "task" ? <ClipboardList size={16} /> : <Blocks size={16} />}
-              title={title ?? `${entityTypeLabel(participant.entityType)} #${participant.entityId}`}
-              meta={`${entityTypeLabel(participant.entityType)} · ${participantRoleSummary(participant)}`}
+              key={lead.id}
+              icon={lead.taskId ? <ClipboardList size={16} /> : <Blocks size={16} />}
+              title={title ?? (lead.taskId ? `Maßnahme #${lead.taskId}` : `Initiative #${lead.initiativeId}`)}
+              meta={`${lead.taskId ? "Maßnahme" : "Initiative"} · ${lead.status.label}${lead.roleLabel ? ` · ${lead.roleLabel}` : ""}`}
               onOpen={() => {
-                if (participant.entityType === "initiative") props.onOpenInitiative(participant.entityId);
-                if (participant.entityType === "task") props.onOpenTask(participant.entityId);
+                if (lead.initiativeId) props.onOpenInitiative(lead.initiativeId);
+                if (lead.taskId) props.onOpenTask(lead.taskId);
               }}
             />
           );
         })}
       </RelationList>
-      {error ? <ErrorState title="Verknüpfung konnte nicht gespeichert werden" description={error} /> : null}
-      {linkType ? (
-        <EditModal
-          title={linkType === "task" ? "Maßnahme verknüpfen" : "Initiative verknüpfen"}
-          label={linkType === "task" ? "Organisation mit Maßnahme verknüpfen" : "Organisation mit Initiative verknüpfen"}
-          className="party-edit-modal"
-          onCancel={() => setLinkType(null)}
-          onSubmit={async (event) => {
-            event.preventDefault();
-            const nextEntityId = Number(entityId);
-            if (!nextEntityId || saving) return;
-            setSaving(true);
-            setError(null);
-            try {
-              await props.onCreateParticipant({
-                partyId: props.organization.id,
-                entityType: linkType,
-                entityId: nextEntityId,
-                roleLabel: roleLabel.trim() || null,
-                isPrimary: false
-              });
-              setEntityId("");
-              setRoleLabel("");
-              setLinkType(null);
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "Verknüpfung konnte nicht gespeichert werden.");
-            } finally {
-              setSaving(false);
-            }
-          }}
-          footer={(
-            <>
-              <button type="submit" className="primary-button" disabled={!entityId || saving}>Speichern</button>
-              <button type="button" className="small-button" onClick={() => setLinkType(null)} disabled={saving}>Abbrechen</button>
-            </>
-          )}
-        >
-          <label>
-            {linkType === "task" ? "Maßnahme" : "Initiative"}
-            <select value={entityId} onChange={(event) => setEntityId(event.target.value)} disabled={saving}>
-              <option value="">{linkType === "task" ? "Maßnahme auswählen" : "Initiative auswählen"}</option>
-              {availableEntities.map((entity) => (
-                <option key={entity.id} value={entity.id}>{linkType === "task" ? (entity as Task).title : (entity as Initiative).name}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Rolle / Kontext
-            <input value={roleLabel} onChange={(event) => setRoleLabel(event.target.value)} disabled={saving} />
-          </label>
-        </EditModal>
-      ) : null}
     </SectionBlock>
   );
 }

@@ -22,6 +22,7 @@ export type StateEventEntityType =
   | "party_relationship"
   | "participant_role_type"
   | "entity_participant"
+  | "lead"
   | "party_contact_point"
   | "party_address";
 

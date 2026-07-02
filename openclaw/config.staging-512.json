@@ -82,6 +82,10 @@
             "d-max__listEntityParticipants",
             "d-max__createEntityParticipant",
             "d-max__deleteEntityParticipant",
+            "d-max__listLeads",
+            "d-max__createLead",
+            "d-max__updateLeadStatus",
+            "d-max__deleteLead",
             "d-max__listPartyContactPoints",
             "d-max__createPartyContactPoint",
             "d-max__updatePartyContactPoint",
@@ -95,7 +99,10 @@
           ]
         },
         "subagents": {
-          "allowAgents": ["dmax-research", "dmax-google-workspace"],
+          "allowAgents": [
+            "dmax-research",
+            "dmax-google-workspace"
+          ],
           "requireAgentId": true
         }
       },
@@ -171,7 +178,9 @@
       }
     },
     "order": {
-      "openai-codex": ["openai-codex:default"]
+      "openai-codex": [
+        "openai-codex:default"
+      ]
     }
   },
   "channels": {
@@ -181,7 +190,11 @@
   },
   "plugins": {
     "bundledDiscovery": "allowlist",
-    "allow": ["openai", "codex", "dmax-dynamic-tools"],
+    "allow": [
+      "openai",
+      "codex",
+      "dmax-dynamic-tools"
+    ],
     "load": {
       "paths": [
         "/app/data/openclaw-state/npm/node_modules/@openclaw/codex",

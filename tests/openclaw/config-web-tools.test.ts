@@ -69,6 +69,10 @@ describe("OpenClaw web config tools", () => {
         "d-max__listEntityParticipants",
         "d-max__createEntityParticipant",
         "d-max__deleteEntityParticipant",
+        "d-max__listLeads",
+        "d-max__createLead",
+        "d-max__updateLeadStatus",
+        "d-max__deleteLead",
         "d-max__listPartyContactPoints",
         "d-max__createPartyContactPoint",
         "d-max__updatePartyContactPoint"

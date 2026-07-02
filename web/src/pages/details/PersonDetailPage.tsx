@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { Archive, Blocks, Building2, CheckCircle2, Circle, ClipboardList, Forward, Inbox, Mail, MessageSquareText, Plus, Reply, ReplyAll, Send, Trash2, Users } from "lucide-react";
 import { ConfirmModal, DescriptionBlock, EditModal, EmptyState, EntityDetailPage, ErrorState, MetadataGrid, RelationItem, RelationList, SectionBlock } from "../../components/ui/index.js";
-import { AddressBlock, ContactPointList, PartyActivitySummaryCard } from "../../components/party/index.js";
+import { AddressBlock, ContactPointList } from "../../components/party/index.js";
 import type { AddressInput, ContactPointInput } from "../../components/party/index.js";
-import { archivePartyGmailMessage, createGmailDraft, createPartyTimelineEntry, createTask, deletePartyTimelineEntry, fetchGmailMailboxes, fetchPartyActivitySummaries, fetchPartyGmailMessages, fetchPartyTasks, fetchPartyTimelineEntries, sendGmailDraft, trashPartyGmailMessage, updatePartyTimelineEntry, updateTask, updateTaskStatus } from "../../api.js";
-import type { EntityParticipant, GmailAuthStatus, GmailMailboxWithStatus, GmailMessage, Initiative, Organization, Party, PartyActivitySummary, PartyRelationshipWithParties, PartyTimelineEntry, PartyTimelineEntryChannel, PartyTimelineEntryKind, Person, PersonDetail, RelationshipType, Task } from "../../types.js";
-import { entityTypeLabel, formatDateTimeForUi, formatTaskDueDate, participantRoleSummary, partyRelationshipLabel, personName, salutationLabel, taskPriorityLabel } from "./detailUtils.js";
+import { archivePartyGmailMessage, createGmailDraft, createPartyTimelineEntry, createTask, deletePartyTimelineEntry, fetchGmailMailboxes, fetchPartyGmailMessages, fetchPartyTasks, fetchPartyTimelineEntries, sendGmailDraft, trashPartyGmailMessage, updatePartyTimelineEntry, updateTask, updateTaskStatus } from "../../api.js";
+import type { GmailAuthStatus, GmailMailboxWithStatus, GmailMessage, Lead, Initiative, Organization, Party, PartyRelationshipWithParties, PartyTimelineEntry, PartyTimelineEntryChannel, PartyTimelineEntryKind, Person, PersonDetail, RelationshipType, Task } from "../../types.js";
+import { formatDateTimeForUi, formatTaskDueDate, partyRelationshipLabel, personName, salutationLabel } from "./detailUtils.js";
 
 export type EmailComposeDraft = {
   to: string;
@@ -58,25 +58,6 @@ export function PersonDetailView(props: {
   const person = props.detail?.person;
   const [composeDraft, setComposeDraft] = useState<EmailComposeDraft | null>(null);
   const [partyTaskVersion, setPartyTaskVersion] = useState(0);
-  const [activitySummary, setActivitySummary] = useState<PartyActivitySummary | null>(null);
-
-  useEffect(() => {
-    if (!person?.id) {
-      setActivitySummary(null);
-      return;
-    }
-    let cancelled = false;
-    fetchPartyActivitySummaries([person.id])
-      .then((response) => {
-        if (!cancelled) setActivitySummary(response.summaries[0] ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setActivitySummary(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [person?.id, partyTaskVersion]);
 
   if (props.loadError) {
     return (
@@ -130,7 +111,6 @@ export function PersonDetailView(props: {
           />
         </main>
         <aside className="party-detail-sidebar">
-          <PartyActivitySummaryCard summary={activitySummary} title="Aktivität" onOpenTask={props.onOpenTask} />
           <ContactPointList
             partyId={person.id}
             contactPoints={props.detail.contactPoints}
@@ -161,7 +141,7 @@ export function PersonDetailView(props: {
             onDelete={props.onDeleteAddress}
           />
           <PersonParticipationsSection
-            participants={props.detail.participants}
+            leads={props.detail.leads ?? []}
             initiatives={props.initiatives}
             tasks={props.tasks}
             onOpenInitiative={props.onOpenInitiative}
@@ -989,7 +969,6 @@ function partyTaskHistoryDate(task: Task): string {
 function partyTaskHistoryPreview(task: Task): string {
   return [
     "Erledigt",
-    taskPriorityLabel(task.priority),
     task.dueAt ? `fällig ${formatPartyTaskDueAt(task.dueAt)}` : null,
     task.notes
   ].filter(Boolean).join(" · ");
@@ -1671,7 +1650,7 @@ function PersonCoreModal(props: {
 }
 
 function PersonParticipationsSection(props: {
-  participants: EntityParticipant[];
+  leads: Lead[];
   initiatives: Initiative[];
   tasks: Task[];
   onOpenInitiative: (initiativeId: number) => void;
@@ -1682,23 +1661,23 @@ function PersonParticipationsSection(props: {
 
   return (
     <SectionBlock title="DMAX-Kontexte">
-      <RelationList emptyTitle="Keine DMAX-Kontexte" emptyDescription="Diese Person ist noch keiner Initiative oder Maßnahme zugeordnet.">
-        {props.participants.map((participant) => {
+      <RelationList emptyTitle="Keine DMAX-Kontexte" emptyDescription="Diese Person ist noch keinem Lead-Kontext zugeordnet.">
+        {props.leads.map((lead) => {
           const title =
-            participant.entityType === "initiative"
-              ? initiativeById.get(participant.entityId)?.name
-              : participant.entityType === "task"
-                ? taskById.get(participant.entityId)?.title
+            lead.initiativeId
+              ? initiativeById.get(lead.initiativeId)?.name
+              : lead.taskId
+                ? taskById.get(lead.taskId)?.title
                 : null;
           return (
             <RelationItem
-              key={participant.id}
-              icon={participant.entityType === "task" ? <ClipboardList size={16} /> : <Blocks size={16} />}
-              title={title ?? `${entityTypeLabel(participant.entityType)} #${participant.entityId}`}
-              meta={`${entityTypeLabel(participant.entityType)} · ${participantRoleSummary(participant)}`}
+              key={lead.id}
+              icon={lead.taskId ? <ClipboardList size={16} /> : <Blocks size={16} />}
+              title={title ?? (lead.taskId ? `Maßnahme #${lead.taskId}` : `Initiative #${lead.initiativeId}`)}
+              meta={`${lead.taskId ? "Maßnahme" : "Initiative"} · ${lead.status.label}${lead.roleLabel ? ` · ${lead.roleLabel}` : ""}`}
               onOpen={() => {
-                if (participant.entityType === "initiative") props.onOpenInitiative(participant.entityId);
-                if (participant.entityType === "task") props.onOpenTask(participant.entityId);
+                if (lead.initiativeId) props.onOpenInitiative(lead.initiativeId);
+                if (lead.taskId) props.onOpenTask(lead.taskId);
               }}
             />
           );

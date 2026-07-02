@@ -31,6 +31,9 @@ const CONTEXT_RELEVANT_TABLES = [
   "party_relationships",
   "participant_role_types",
   "entity_participants",
+  "lead_status_groups",
+  "lead_statuses",
+  "leads",
   "party_contact_points",
   "party_addresses",
   "calendar_entries",
@@ -39,7 +42,7 @@ const CONTEXT_RELEVANT_TABLES = [
   "calendar_event_visibility"
 ];
 
-const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "8c8fd8e0450189aef34ec790a8dbd19af5cc14e73e5a77a0dc5bb049457a73ea";
+const EXPECTED_CONTEXT_SCHEMA_SIGNATURE = "8e1e03828d600d092446e03e34cedd3e011b784858746cd0133e7a3dbbf2bdd7";
 
 describe("context resolver schema synchronization", () => {
   let db: Database.Database;

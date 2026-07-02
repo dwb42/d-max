@@ -280,6 +280,43 @@ export type EntityParticipant = {
   relationships?: PartyRelationshipWithParties[];
 };
 
+export type LeadStatusGroup = {
+  id: number;
+  key: string;
+  label: string;
+  isSystem: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type LeadStatus = {
+  id: number;
+  groupId: number;
+  key: string;
+  label: string;
+  sortOrder: number;
+  isTerminal: boolean;
+  isSuccess: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Lead = {
+  id: number;
+  partyId: number;
+  initiativeId: number | null;
+  taskId: number | null;
+  statusId: number;
+  roleLabel: string | null;
+  createdAt: string;
+  updatedAt: string;
+  party: Party;
+  status: LeadStatus;
+  contactPoints?: PartyContactPoint[];
+  relationships?: PartyRelationshipWithParties[];
+};
+
 export type PartyRelationship = {
   id: number;
   fromPartyId: number;
@@ -346,6 +383,7 @@ export type PersonDetail = {
   person: Person;
   relationships: PartyRelationshipWithParties[];
   participants: EntityParticipant[];
+  leads?: Lead[];
   contactPoints: PartyContactPoint[];
   addresses: PartyAddress[];
 };
@@ -354,6 +392,7 @@ export type OrganizationDetail = {
   organization: Organization;
   relationships: PartyRelationshipWithParties[];
   participants: EntityParticipant[];
+  leads?: Lead[];
   contactPoints: PartyContactPoint[];
   addresses: PartyAddress[];
 };
@@ -692,6 +731,7 @@ export type InitiativeDetail = {
   successors?: InitiativeRelationWithInitiatives[];
   tasks: Task[];
   participants?: EntityParticipant[];
+  leads?: Lead[];
   mediaAttachments?: MediaAttachment[];
   projectCalendarBinding?: (CalendarEventBindingView & {
     calendarSource: CalendarSource | null;
@@ -704,6 +744,7 @@ export type TaskDetail = {
   initiative: Initiative | null;
   category: Category | null;
   participants?: EntityParticipant[];
+  leads?: Lead[];
   mediaAttachments?: MediaAttachment[];
 };
 

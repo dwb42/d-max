@@ -16,21 +16,17 @@ describe("party tools", () => {
     db.close();
   });
 
-  it("creates people, organizations, relationships, participants, and contact points", async () => {
+  it("creates people, organizations, relationships, leads, and contact points", async () => {
     const runner = createToolRunner();
     const category = new CategoryRepository(db).create({ name: "Business" });
     const initiative = new InitiativeRepository(db).create({ categoryId: category.id, name: "Outreach" });
     const person = await runner.run("createPerson", { firstName: "Anna", lastName: "Muster", salutation: "mrs", description: "Kontakt fuer Outreach." }, { db });
     const organization = await runner.run("createOrganization", { name: "Acme GmbH" }, { db });
     const relationshipTypes = await runner.run("listRelationshipTypes", {}, { db });
-    const participantRoles = await runner.run("listParticipantRoleTypes", { appliesToEntityType: "initiative" }, { db });
     const personId = person.ok ? (person.data as { id: number }).id : 0;
     const organizationId = organization.ok ? (organization.data as { id: number }).id : 0;
     const worksForId = relationshipTypes.ok
       ? ((relationshipTypes.data as Array<{ id: number; key: string }>).find((entry) => entry.key === "works_for")?.id ?? 0)
-      : 0;
-    const stakeholderId = participantRoles.ok
-      ? ((participantRoles.data as Array<{ id: number; key: string }>).find((entry) => entry.key === "stakeholder")?.id ?? 0)
       : 0;
 
     const relationship = await runner.run(
@@ -38,9 +34,9 @@ describe("party tools", () => {
       { fromPartyId: personId, toPartyId: organizationId, relationshipTypeId: worksForId, roleLabel: "CEO" },
       { db }
     );
-    const participant = await runner.run(
-      "createEntityParticipant",
-      { partyId: personId, entityType: "initiative", entityId: initiative.id, roleTypeId: stakeholderId, isPrimary: true },
+    const lead = await runner.run(
+      "createLead",
+      { partyId: personId, initiativeId: initiative.id },
       { db }
     );
     const contactPoint = await runner.run(
@@ -52,9 +48,9 @@ describe("party tools", () => {
     expect(person).toMatchObject({ ok: true, data: expect.objectContaining({ firstName: "Anna", lastName: "Muster", salutation: "mrs", description: "Kontakt fuer Outreach." }) });
     expect(organization).toMatchObject({ ok: true, data: expect.objectContaining({ displayName: "Acme GmbH" }) });
     expect(relationship).toMatchObject({ ok: true, data: expect.objectContaining({ fromPartyId: personId, toPartyId: organizationId }) });
-    expect(participant).toMatchObject({
+    expect(lead).toMatchObject({
       ok: true,
-      data: expect.objectContaining({ entityType: "initiative", entityId: initiative.id, partyId: personId, isPrimary: true })
+      data: expect.objectContaining({ initiativeId: initiative.id, partyId: personId, status: expect.objectContaining({ key: "fresh" }) })
     });
     expect(contactPoint).toMatchObject({ ok: true, data: expect.objectContaining({ normalizedValue: "anna@example.com" }) });
   });
@@ -71,6 +67,11 @@ describe("party tools", () => {
       ok: false,
       requiresConfirmation: true,
       confirmationKind: "deleteEntityParticipant"
+    });
+    expect(await runner.run("deleteLead", { id: 1, confirmed: true }, { db })).toMatchObject({
+      ok: false,
+      requiresConfirmation: true,
+      confirmationKind: "deleteLead"
     });
   });
 });

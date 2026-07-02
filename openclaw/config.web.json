@@ -78,6 +78,10 @@
             "d-max__listEntityParticipants",
             "d-max__createEntityParticipant",
             "d-max__deleteEntityParticipant",
+            "d-max__listLeads",
+            "d-max__createLead",
+            "d-max__updateLeadStatus",
+            "d-max__deleteLead",
             "d-max__listPartyContactPoints",
             "d-max__createPartyContactPoint",
             "d-max__updatePartyContactPoint",
@@ -91,7 +95,10 @@
           ]
         },
         "subagents": {
-          "allowAgents": ["dmax-research", "dmax-google-workspace"],
+          "allowAgents": [
+            "dmax-research",
+            "dmax-google-workspace"
+          ],
           "requireAgentId": true
         }
       },
@@ -167,7 +174,10 @@
             "name": "GPT-5.5",
             "api": "openai-codex-responses",
             "reasoning": true,
-            "input": ["text", "image"],
+            "input": [
+              "text",
+              "image"
+            ],
             "cost": {
               "input": 0,
               "output": 0,
@@ -185,7 +195,10 @@
     "servers": {
       "d-max": {
         "command": "npm",
-        "args": ["run", "mcp"]
+        "args": [
+          "run",
+          "mcp"
+        ]
       }
     }
   },
@@ -197,7 +210,9 @@
       }
     },
     "order": {
-      "openai-codex": ["openai-codex:default"]
+      "openai-codex": [
+        "openai-codex:default"
+      ]
     }
   },
   "channels": {

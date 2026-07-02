@@ -12,14 +12,16 @@ import type { Initiative } from "../repositories/initiatives.js";
 import { MediaLinkRepository } from "../repositories/media-links.js";
 import type { MediaAttachment } from "../repositories/media-links.js";
 import {
-  EntityParticipantRepository,
   OrganizationRepository,
   PartyAddressRepository,
   PartyContactPointRepository,
   PartyRelationshipRepository,
   PersonRepository
 } from "../repositories/parties.js";
-import type { EntityParticipantWithParty, Organization, PartyAddress, PartyContactPoint, PartyRelationshipWithParties, Person } from "../repositories/parties.js";
+import { EntityParticipantRepository } from "../repositories/parties.js";
+import type { Organization, PartyAddress, PartyContactPoint, PartyRelationshipWithParties, Person } from "../repositories/parties.js";
+import { LeadRepository } from "../repositories/leads.js";
+import type { LeadWithParty } from "../repositories/leads.js";
 import { PartyActivitySummaryRepository } from "../repositories/party-activity-summary.js";
 import type { OrganizationPersonActivity, PartyActivitySummary } from "../repositories/party-activity-summary.js";
 import { TaskChecklistItemRepository } from "../repositories/task-checklist-items.js";
@@ -91,7 +93,7 @@ export type ConversationContextDebugPayload = {
 };
 
 type ContextEntityRole = "current" | "parent" | "child" | "sibling" | "neighbor" | "related";
-type ContextEntityType = "category" | "initiative" | "task" | "relation" | "media" | "participant" | "party" | "communication" | "unknown";
+type ContextEntityType = "category" | "initiative" | "task" | "relation" | "media" | "lead" | "participant" | "party" | "communication" | "unknown";
 type ContextOmissionReason = "budget" | "cap" | "duplicate" | "not_relevant" | "missing_data";
 type ContextBlockKind =
   | "instructions"
@@ -440,7 +442,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   const mediaLinks = new MediaLinkRepository(db);
   const people = new PersonRepository(db);
   const organizations = new OrganizationRepository(db);
-  const entityParticipants = new EntityParticipantRepository(db);
+  const leads = new LeadRepository(db);
   const partyContactPoints = new PartyContactPointRepository(db);
   const tasks = new TaskRepository(db);
   const taskChecklistItems = new TaskChecklistItemRepository(db);
@@ -1078,7 +1080,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     const childInitiatives = allInitiatives.filter((candidate) => candidate.parentId === initiative.id);
     const initiativeTasks = tasks.list({ initiativeId: initiative.id });
     const initiativeMedia = mediaLinks.listForEntity("initiative", initiative.id);
-    const initiativeParticipants = entityParticipants.list({ entityType: "initiative", entityId: initiative.id });
+    const initiativeLeads = leads.list({ initiativeId: initiative.id });
     const predecessors = initiativeRelations.getInitiativePredecessors(initiative.id);
     const successors = initiativeRelations.getInitiativeSuccessors(initiative.id);
     const blocks: ContextDebugBlock[] = [];
@@ -1136,8 +1138,8 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     initiativeTasks.slice(detailContextLimits.tasks).forEach((task) => omittedEntities.push(omittedEntity({ role: "child", entityType: "task", id: String(task.id), title: task.title, reason: "cap" })));
     initiativeMedia.slice(0, detailContextLimits.media).forEach((attachment) => loadedEntities.push(debugEntity({ role: "child", entityType: "media", id: String(attachment.asset.id), title: attachment.asset.originalName, kind: attachment.asset.kind })));
     initiativeMedia.slice(detailContextLimits.media).forEach((attachment) => omittedEntities.push(omittedEntity({ role: "child", entityType: "media", id: String(attachment.asset.id), title: attachment.asset.originalName, reason: "cap" })));
-    initiativeParticipants.slice(0, detailContextLimits.participants).forEach((participant) => loadedEntities.push(debugEntity({ role: "child", entityType: "participant", id: String(participant.id), title: participant.party.displayName, kind: participant.party.type })));
-    initiativeParticipants.slice(detailContextLimits.participants).forEach((participant) => omittedEntities.push(omittedEntity({ role: "child", entityType: "participant", id: String(participant.id), title: participant.party.displayName, reason: "cap" })));
+    initiativeLeads.slice(0, detailContextLimits.participants).forEach((lead) => loadedEntities.push(debugEntity({ role: "child", entityType: "lead", id: String(lead.id), title: lead.party.displayName, kind: lead.status.key })));
+    initiativeLeads.slice(detailContextLimits.participants).forEach((lead) => omittedEntities.push(omittedEntity({ role: "child", entityType: "lead", id: String(lead.id), title: lead.party.displayName, reason: "cap" })));
     predecessors.forEach((relation) => loadedEntities.push(debugEntity({ role: "neighbor", entityType: "relation", id: String(relation.id), title: `${relation.predecessor.name} -> ${relation.successor.name}`, kind: "predecessor" })));
     successors.forEach((relation) => loadedEntities.push(debugEntity({ role: "neighbor", entityType: "relation", id: String(relation.id), title: `${relation.predecessor.name} -> ${relation.successor.name}`, kind: "successor" })));
     const lines = [
@@ -1163,8 +1165,8 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       }),
       `Media attachments (${initiativeMedia.length}):`,
       ...initiativeMedia.slice(0, detailContextLimits.media).map(formatMediaAttachment),
-      `People and organizations (${initiativeParticipants.length}):`,
-      ...initiativeParticipants.slice(0, detailContextLimits.participants).map(formatEntityParticipant),
+      `Leads (${initiativeLeads.length}):`,
+      ...initiativeLeads.slice(0, detailContextLimits.participants).map(formatLead),
       `Tasks (${initiativeTasks.length}, open/high-signal first):`,
       ...rankTasks(initiativeTasks).slice(0, detailContextLimits.tasks).map(formatTask)
     ];
@@ -1177,13 +1179,13 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
       description: detailDescriptionForContext(context.type, initiative.type),
       lines,
       payload: {
-        dataSources: ["initiatives", "categories", "initiative_relations", "graph_layout_nodes", "graph_node_annotations", "mindmap_change_drafts", "media_links", "entity_participants", "tasks"],
+        dataSources: ["initiatives", "categories", "initiative_relations", "graph_layout_nodes", "graph_node_annotations", "mindmap_change_drafts", "media_links", "leads", "lead_statuses", "tasks"],
         current: [`initiative #${initiative.id} ${initiative.name} (${initiative.type})`],
         parents: [
           category ? `category #${category.id} ${category.name}` : "category not found",
           parentInitiative ? `parent initiative #${parentInitiative.id} ${parentInitiative.name}` : "no parent initiative"
         ],
-        children: [`${childInitiatives.length} child initiatives`, `${initiativeTasks.length} tasks`, `${initiativeMedia.length} media attachments`, `${initiativeParticipants.length} participants`, "mindmap summary counts"],
+        children: [`${childInitiatives.length} child initiatives`, `${initiativeTasks.length} tasks`, `${initiativeMedia.length} media attachments`, `${initiativeLeads.length} leads`, "mindmap summary counts"],
         siblings: [`${sameCategoryInitiatives.length} other initiatives in the same category`],
         neighbors: [`${predecessors.length} predecessors`, `${successors.length} successors`],
         limits: [
@@ -1192,7 +1194,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
           `Child initiatives capped at ${detailContextLimits.childInitiatives}.`,
           `Same-category initiatives capped at ${detailContextLimits.sameCategoryPerType} per type.`,
           `Tasks capped at ${detailContextLimits.tasks}.`,
-          `Media and participants capped at ${detailContextLimits.media}/${detailContextLimits.participants}.`
+          `Media and leads capped at ${detailContextLimits.media}/${detailContextLimits.participants}.`
         ],
         loadedEntities,
         omittedEntities,
@@ -1221,7 +1223,7 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     siblingTasks.slice(0, taskContextLimits.siblingChecklistTasks).map((siblingTask) => [siblingTask.id, taskChecklistItems.listByTask(siblingTask.id).slice(0, taskContextLimits.siblingChecklistItems)])
   );
   const taskMedia = mediaLinks.listForEntity("task", task.id);
-  const taskParticipants = entityParticipants.list({ entityType: "task", entityId: task.id });
+  const taskLeads = leads.list({ taskId: task.id });
   const blocks: ContextDebugBlock[] = [];
   const loadedEntities: ContextDebugEntity[] = [
     debugEntity({
@@ -1272,8 +1274,8 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
   checklistItems.forEach((item) => loadedEntities.push(debugEntity({ role: "child", entityType: "unknown", id: String(item.id), title: item.name, kind: "checklist_item" })));
   taskMedia.slice(0, taskContextLimits.media).forEach((attachment) => loadedEntities.push(debugEntity({ role: "child", entityType: "media", id: String(attachment.asset.id), title: attachment.asset.originalName, kind: attachment.asset.kind })));
   taskMedia.slice(taskContextLimits.media).forEach((attachment) => omittedEntities.push(omittedEntity({ role: "child", entityType: "media", id: String(attachment.asset.id), title: attachment.asset.originalName, reason: "cap" })));
-  taskParticipants.slice(0, taskContextLimits.participants).forEach((participant) => loadedEntities.push(debugEntity({ role: "child", entityType: "participant", id: String(participant.id), title: participant.party.displayName, kind: participant.party.type })));
-  taskParticipants.slice(taskContextLimits.participants).forEach((participant) => omittedEntities.push(omittedEntity({ role: "child", entityType: "participant", id: String(participant.id), title: participant.party.displayName, reason: "cap" })));
+  taskLeads.slice(0, taskContextLimits.participants).forEach((lead) => loadedEntities.push(debugEntity({ role: "child", entityType: "lead", id: String(lead.id), title: lead.party.displayName, kind: lead.status.key })));
+  taskLeads.slice(taskContextLimits.participants).forEach((lead) => omittedEntities.push(omittedEntity({ role: "child", entityType: "lead", id: String(lead.id), title: lead.party.displayName, reason: "cap" })));
   childInitiatives.slice(0, taskContextLimits.childInitiatives).forEach((child) => loadedEntities.push(debugEntity({ role: "sibling", entityType: "initiative", id: String(child.id), title: child.name, kind: child.type })));
   childInitiatives.slice(taskContextLimits.childInitiatives).forEach((child) => omittedEntities.push(omittedEntity({ role: "sibling", entityType: "initiative", id: String(child.id), title: child.name, reason: "cap" })));
   rankTasks(siblingTasks).slice(0, taskContextLimits.siblingTasks).forEach((siblingTask) => loadedEntities.push(debugEntity({ role: "sibling", entityType: "task", id: String(siblingTask.id), title: siblingTask.title, kind: siblingTask.status })));
@@ -1288,8 +1290,8 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     `Notes: ${task.notes ?? "none"}`,
     `Media attachments (${taskMedia.length}):`,
     ...taskMedia.slice(0, taskContextLimits.media).map(formatMediaAttachment),
-    `People and organizations (${taskParticipants.length}):`,
-    ...taskParticipants.slice(0, taskContextLimits.participants).map(formatEntityParticipant),
+    `Leads (${taskLeads.length}):`,
+    ...taskLeads.slice(0, taskContextLimits.participants).map(formatLead),
     initiative ? formatInitiativeHeader(initiative) : task.initiativeId ? `Initiative: #${task.initiativeId} not found` : "Initiative: none",
     category ? `Category: #${category.id} ${category.name} (${category.color})` : "Category: none",
     categoryBackground ? `Category background:\n${categoryBackground.text}` : "",
@@ -1321,14 +1323,14 @@ export function resolveConversationContext(db: Database.Database, input?: Conver
     description: "Task-Agent = operativer Umsetzer + Taskstruktur-Pruefer.",
     lines,
     payload: {
-      dataSources: ["tasks", "task_checklist_items", "initiatives", "categories", "initiative_relations", "media_links", "entity_participants"],
+      dataSources: ["tasks", "task_checklist_items", "initiatives", "categories", "initiative_relations", "media_links", "leads", "lead_statuses"],
       current: [`task #${task.id} ${task.title}`],
       parents: [
         initiative ? `initiative #${initiative.id} ${initiative.name}` : task.initiativeId ? `initiative #${task.initiativeId} not found` : "no initiative",
         category ? `category #${category.id} ${category.name}` : "no category",
         parentInitiative ? `parent initiative #${parentInitiative.id} ${parentInitiative.name}` : "no parent initiative"
       ],
-      children: [`${checklistItems.length} checklist items`, `${taskMedia.length} media attachments`, `${taskParticipants.length} participants`],
+      children: [`${checklistItems.length} checklist items`, `${taskMedia.length} media attachments`, `${taskLeads.length} leads`],
       siblings: [`${siblingTasks.length} sibling tasks`, `${childInitiatives.length} child initiatives of parent initiative`, `${sameCategoryInitiatives.length} other initiatives in same category`],
       neighbors: [`${predecessors.length} initiative predecessors`, `${successors.length} initiative successors`],
       limits: [
@@ -1363,6 +1365,7 @@ function buildPartyAgentResolvedContext(
   const organizations = new OrganizationRepository(db);
   const partyRelationships = new PartyRelationshipRepository(db);
   const entityParticipants = new EntityParticipantRepository(db);
+  const leads = new LeadRepository(db);
   const partyContactPoints = new PartyContactPointRepository(db);
   const partyAddresses = new PartyAddressRepository(db);
   const tasks = new TaskRepository(db);
@@ -1385,7 +1388,8 @@ function buildPartyAgentResolvedContext(
     ? listActiveOrganizationPeopleForAgent(relationships, organization.id, people)
     : [];
   const criticalPartyIds = uniqueNumbers([focusParty.id, ...organizationPeople.map((entry) => entry.person.id)]);
-  const participants = uniqueById(criticalPartyIds.flatMap((partyId) => entityParticipants.list({ partyId })));
+  const partyLeads = uniqueById(criticalPartyIds.flatMap((partyId) => leads.list({ partyId })));
+  const calendarParticipants = uniqueById(criticalPartyIds.flatMap((partyId) => entityParticipants.list({ partyId, entityType: "calendar_entry" })));
   const contacts = partyContactPoints.list({ partyId: focusParty.id });
   const addresses = partyAddresses.list({ partyId: focusParty.id });
   const activityResponse = partyActivitySummaries.listSummaries([focusParty.id], { includeOrganizationPeople: context.type === "organization" });
@@ -1393,8 +1397,8 @@ function buildPartyAgentResolvedContext(
   const organizationPeopleActivity = organization ? activityResponse.organizationPeople?.[organization.id] ?? [] : [];
 
   const primaryTasks = uniqueById(criticalPartyIds.flatMap((partyId) => tasks.list({ primaryPartyId: partyId })));
-  const participantTasks = uniqueById(participants.flatMap((participant) => participant.entityType === "task" ? [tasks.findById(participant.entityId)].filter(isPresent) : []));
-  const allRelevantTasks = sortPartyAgentTasks(uniqueById([...primaryTasks, ...participantTasks]));
+  const leadTasks = uniqueById(partyLeads.flatMap((lead) => lead.taskId ? [tasks.findById(lead.taskId)].filter(isPresent) : []));
+  const allRelevantTasks = sortPartyAgentTasks(uniqueById([...primaryTasks, ...leadTasks]));
   const openTasks = allRelevantTasks.filter((task) => task.status !== "done");
   const doneTasks = allRelevantTasks.filter((task) => task.status === "done");
 
@@ -1411,14 +1415,14 @@ function buildPartyAgentResolvedContext(
     }))
   ].sort((left, right) => compareIsoDesc(left.occurredAt, right.occurredAt));
 
-  const relatedCalendarEntries = uniqueById(participants.flatMap((participant) => participant.entityType === "calendar_entry" ? [calendarEntries.findById(participant.entityId)].filter(isPresent) : []));
+  const relatedCalendarEntries = uniqueById(calendarParticipants.flatMap((participant) => [calendarEntries.findById(participant.entityId)].filter(isPresent)));
   const relatedTaskIds = new Set<number>([
     ...allRelevantTasks.map((task) => task.id),
     ...relatedCalendarEntries.flatMap((entry) => entry.taskId ? [entry.taskId] : [])
   ]);
   const relatedTasks = uniqueById([...allRelevantTasks, ...[...relatedTaskIds].map((taskId) => tasks.findById(taskId)).filter(isPresent)]);
   const relatedInitiativeIds = new Set<number>([
-    ...participants.flatMap((participant) => participant.entityType === "initiative" ? [participant.entityId] : []),
+    ...partyLeads.flatMap((lead) => lead.initiativeId ? [lead.initiativeId] : []),
     ...relatedTasks.flatMap((task) => task.initiativeId ? [task.initiativeId] : []),
     ...relatedCalendarEntries.flatMap((entry) => entry.initiativeId ? [entry.initiativeId] : [])
   ]);
@@ -1452,6 +1456,7 @@ function buildPartyAgentResolvedContext(
     ...allRelevantTasks.map((task) => debugEntity({ role: "child" as const, entityType: "task" as const, id: String(task.id), title: task.title, kind: task.status })),
     ...gmailMessages.map((message) => debugEntity({ role: "child" as const, entityType: "communication" as const, id: `gmail:${message.id}`, title: message.subject ?? "(no subject)", kind: message.direction })),
     ...manualEntries.map((entry) => debugEntity({ role: "child" as const, entityType: "communication" as const, id: `manual:${entry.id}`, title: entry.title, kind: entry.kind })),
+    ...partyLeads.map((lead) => debugEntity({ role: "related" as const, entityType: "lead" as const, id: String(lead.id), title: lead.party.displayName, kind: lead.status.key })),
     ...relatedInitiatives.map((initiative) => debugEntity({ role: "related" as const, entityType: "initiative" as const, id: String(initiative.id), title: initiative.name, kind: initiative.type })),
     ...relatedCalendarEntries.map((entry) => debugEntity({ role: "related" as const, entityType: "unknown" as const, id: String(entry.id), title: entry.title, kind: "calendar_entry" }))
   ];
@@ -1491,7 +1496,7 @@ function buildPartyAgentResolvedContext(
       "Critical DMAX initiative/task/calendar context",
       relatedContextText.length,
       relatedContextText.length,
-      { entityType: "party", entityId: String(focusParty.id), source: "entity_participants + tasks + initiatives + calendar_entries" }
+      { entityType: "party", entityId: String(focusParty.id), source: "leads + tasks + initiatives + calendar_entries" }
     )
   ];
 
@@ -1523,8 +1528,8 @@ function buildPartyAgentResolvedContext(
     ...(shownOtherRelationships.length ? shownOtherRelationships.map((relationship) => formatPartyRelationship(relationship, focusParty.id)) : ["none"]),
     `Relevant tasks/measures (${allRelevantTasks.length}, complete; open ${openTasks.length}, done ${doneTasks.length}):`,
     ...(allRelevantTasks.length ? allRelevantTasks.map((task) => formatPartyAgentTask(task, focusParty.id, initiatives, categories)) : ["none"]),
-    `DMAX participations (${participants.length}):`,
-    ...(participants.length ? participants.map(formatEntityParticipant) : ["none"]),
+    `DMAX leads (${partyLeads.length}):`,
+    ...(partyLeads.length ? partyLeads.map(formatLead) : ["none"]),
     `DMAX project/task/calendar context (${relatedInitiatives.length} initiatives/projects, ${relatedCalendarEntries.length} calendar entries; complete for related entities):`,
     ...(relatedContextText ? relatedContextText.split("\n") : ["none"]),
     `Complete local communication history (${communicationItems.length}, newest first; Gmail ${gmailMessages.length}, manual ${manualEntries.length}):`,
@@ -1543,7 +1548,8 @@ function buildPartyAgentResolvedContext(
         "people",
         "organizations",
         "party_relationships",
-        "entity_participants",
+        "leads",
+        "lead_statuses",
         "party_contact_points",
         "party_addresses",
         "tasks",
@@ -1560,7 +1566,7 @@ function buildPartyAgentResolvedContext(
         `${allRelevantTasks.length} complete relevant tasks`,
         `${gmailMessages.length} complete local Gmail messages`,
         `${manualEntries.length} complete manual communication entries`,
-        `${participants.length} DMAX participations`
+        `${partyLeads.length} DMAX leads`
       ],
       related: [`${relatedInitiatives.length} related initiatives/projects`, `${relatedCalendarEntries.length} related calendar entries`],
       neighbors: [`${relationships.length} party relationships`],
@@ -2079,8 +2085,9 @@ function formatPartyRelationshipTitle(relationship: PartyRelationshipWithParties
   return `${direction} #${otherParty.id} ${otherParty.displayName}`;
 }
 
-function formatEntityParticipant(participant: EntityParticipantWithParty): string {
-  return `- #${participant.id} ${participant.party.type} #${participant.partyId} ${participant.party.displayName}; entity: ${participant.entityType} #${participant.entityId}; role: ${participant.roleType?.label ?? participant.roleLabel ?? "none"}; primary: ${participant.isPrimary ? "yes" : "no"}`;
+function formatLead(lead: LeadWithParty): string {
+  const target = lead.initiativeId ? `initiative #${lead.initiativeId}` : `task #${lead.taskId}`;
+  return `- #${lead.id} ${lead.party.type} #${lead.partyId} ${lead.party.displayName}; target: ${target}; status: ${lead.status.label} (${lead.status.key}); role label: ${lead.roleLabel ?? "none"}`;
 }
 
 function formatPartyTask(task: Task): string {

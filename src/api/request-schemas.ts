@@ -250,6 +250,21 @@ export const updateEntityParticipantBody = z.object({
   isPrimary: z.boolean().optional()
 });
 
+export const createLeadBody = z
+  .object({
+    partyId: z.number().int().positive(),
+    initiativeId: z.number().int().positive().nullable().optional(),
+    taskId: z.number().int().positive().nullable().optional(),
+    statusId: z.number().int().positive().nullable().optional()
+  })
+  .refine((body) => Boolean(body.initiativeId) !== Boolean(body.taskId), {
+    message: "Exactly one of initiativeId or taskId is required"
+  });
+
+export const updateLeadStatusBody = z.object({
+  statusId: z.number().int().positive()
+});
+
 export const createPartyContactPointBody = z.object({
   partyId: z.number().int().positive(),
   type: contactPointTypeBody,

@@ -38,6 +38,9 @@ const STATE_MUTATING_TOOLS = new Set<ToolName>([
   "deletePartyRelationship",
   "createEntityParticipant",
   "deleteEntityParticipant",
+  "createLead",
+  "updateLeadStatus",
+  "deleteLead",
   "createPartyContactPoint",
   "updatePartyContactPoint"
 ]);
@@ -177,6 +180,17 @@ export function stateEventFromToolResult(name: ToolName, input: unknown, result:
       entityId: participantId,
       initiativeId: entityType === "initiative" ? entityId : undefined,
       taskId: entityType === "task" ? entityId : undefined
+    };
+  }
+
+  if (name === "createLead" || name === "updateLeadStatus" || name === "deleteLead") {
+    const leadId = numberValue(dataRecord?.id) ?? numberValue(inputRecord?.id);
+    return {
+      ...base,
+      entityType: "lead",
+      entityId: leadId,
+      initiativeId: numberValue(dataRecord?.initiativeId) ?? numberValue(inputRecord?.initiativeId),
+      taskId: numberValue(dataRecord?.taskId) ?? numberValue(inputRecord?.taskId)
     };
   }
 

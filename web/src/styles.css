@@ -2456,6 +2456,156 @@ textarea {
   font-weight: 700;
 }
 
+.lead-status-board {
+  display: grid;
+  gap: 12px;
+}
+
+.lead-status-column {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid #e1e7e2;
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 10px;
+}
+
+.lead-status-column.drag-over {
+  border-color: #94b7a3;
+  background: #f4f8f5;
+}
+
+.lead-status-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #2d3b34;
+}
+
+.lead-status-header strong,
+.lead-status-header span {
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.lead-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid #e4ebe6;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.lead-card.dragging {
+  opacity: 0.58;
+}
+
+.lead-card-context {
+  background: #fbfcfb;
+}
+
+.lead-card .relation-item {
+  border: 0;
+  padding: 0;
+}
+
+.lead-inline-status-options,
+.lead-status-options div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lead-inline-status-options button,
+.lead-status-options button {
+  min-height: 28px;
+  border: 1px solid #d5ddd7;
+  border-radius: 999px;
+  padding: 0 9px;
+  background: #ffffff;
+  color: #44524a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.lead-inline-status-options button.active,
+.lead-status-options button.active {
+  border-color: #27806f;
+  background: #e8f2ed;
+  color: #1f5f4e;
+}
+
+.lead-inline-status-options button:hover:not(:disabled),
+.lead-inline-status-options button:focus-visible:not(:disabled),
+.lead-status-options button:hover:not(:disabled),
+.lead-status-options button:focus-visible:not(:disabled) {
+  border-color: #94b7a3;
+  outline: 0;
+}
+
+.lead-card-activity,
+.lead-card-related-people {
+  border-top: 1px solid #edf1eb;
+  padding-top: 8px;
+}
+
+.lead-card-related-people {
+  display: grid;
+  gap: 8px;
+}
+
+.lead-nested-person {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.lead-nested-person.dragging {
+  opacity: 0.58;
+}
+
+.lead-nested-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.lead-nested-person .lead-inline-status-options,
+.lead-nested-person .lead-card-activity {
+  grid-column: 1 / -1;
+}
+
+.lead-related-person {
+  display: grid;
+  min-width: 0;
+}
+
+.lead-modal-fields {
+  display: grid;
+  gap: 14px;
+}
+
+.lead-status-options {
+  display: grid;
+  gap: 8px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.lead-status-options legend {
+  padding: 0;
+  color: #4d5b53;
+  font-size: 12px;
+  font-weight: 850;
+}
+
 .party-activity-summary {
   display: grid;
   gap: 8px;
@@ -2532,8 +2682,19 @@ textarea {
   text-align: left;
 }
 
+.next-action-widget.task-participant-next-action {
+  gap: 7px;
+  border-color: #dfe4dc;
+  background: #ffffff;
+  padding: 10px;
+}
+
 .next-action-widget.compact {
   padding: 7px 8px;
+}
+
+.next-action-widget.compact.task-participant-next-action {
+  padding: 10px;
 }
 
 .next-action-widget.openable {
@@ -2564,11 +2725,48 @@ textarea {
   font-weight: 800;
 }
 
+.next-action-date-pill {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.next-action-date-pill.future {
+  border-color: #9ddd9c;
+  background: #e0f9df;
+  color: #176f25;
+}
+
+.next-action-date-pill.today,
+.next-action-date-pill.unscheduled {
+  border-color: #ead17a;
+  background: #fff3c2;
+  color: #725400;
+}
+
+.next-action-date-pill.past {
+  border-color: #efb5ac;
+  background: #fde8e4;
+  color: #9f2d21;
+}
+
 .next-action-title {
   min-width: 0;
   overflow-wrap: anywhere;
   font-size: 13px;
   font-weight: 850;
+}
+
+.task-participant-next-action .next-action-title {
+  color: #17211c;
 }
 
 .organization-people-activity-list {
@@ -3054,22 +3252,6 @@ textarea {
 .task-header-control,
 .task-header-control * {
   text-transform: none;
-}
-
-.detail-pill-select.priority.low {
-  background: #eef2ec;
-  color: #49534d;
-}
-
-.detail-pill-select.priority.normal {
-  background: #e8f4ef;
-  color: #176b5e;
-}
-
-.detail-pill-select.priority.high,
-.detail-pill-select.priority.urgent {
-  background: #ffe4d5;
-  color: #8f3611;
 }
 
 .initiative-markdown-panel {
@@ -5794,21 +5976,6 @@ button.initiative-markdown-panel:hover {
   color: #17211c;
 }
 
-.priority {
-  border-radius: 999px;
-  padding: 5px 9px;
-  background: #eef2ec;
-  color: #49534d;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.priority.high,
-.priority.urgent {
-  background: #ffe4d5;
-  color: #8f3611;
-}
-
 .icon-button.subtle-danger {
   border-color: transparent;
   background: transparent;
@@ -6211,6 +6378,23 @@ button.initiative-markdown-panel:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.context-link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.context-link-button svg {
+  flex: 0 0 auto;
+}
+
+.context-link-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .panel-heading-row {
@@ -7978,7 +8162,6 @@ button.task-notes-panel:hover {
     grid-template-columns: auto 1fr;
   }
 
-  .task-row .priority,
   .task-row .task-delete-button,
   .initiative-row .row-meta,
   .chat-composer {

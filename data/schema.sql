@@ -411,6 +411,44 @@ create table if not exists entity_participants (
   unique(party_id, entity_type, entity_id, role_type_id, role_label)
 );
 
+create table if not exists lead_status_groups (
+  id integer primary key,
+  key text not null unique,
+  label text not null,
+  is_system integer not null default 0 check (is_system in (0, 1)),
+  sort_order integer not null default 0,
+  created_at text not null,
+  updated_at text not null
+);
+
+create table if not exists lead_statuses (
+  id integer primary key,
+  group_id integer not null references lead_status_groups(id) on delete cascade,
+  key text not null,
+  label text not null,
+  sort_order integer not null default 0,
+  is_terminal integer not null default 0 check (is_terminal in (0, 1)),
+  is_success integer not null default 0 check (is_success in (0, 1)),
+  created_at text not null,
+  updated_at text not null,
+  unique(group_id, key)
+);
+
+create table if not exists leads (
+  id integer primary key,
+  party_id integer not null references parties(id) on delete cascade,
+  initiative_id integer references initiatives(id) on delete cascade,
+  task_id integer references tasks(id) on delete cascade,
+  status_id integer not null references lead_statuses(id),
+  role_label text,
+  created_at text not null,
+  updated_at text not null,
+  check (
+    (initiative_id is not null and task_id is null)
+    or (initiative_id is null and task_id is not null)
+  )
+);
+
 create table if not exists party_contact_points (
   id integer primary key,
   party_id integer not null references parties(id) on delete cascade,
@@ -519,7 +557,7 @@ create table if not exists app_state_events (
   id integer primary key,
   source text not null check (source in ('api', 'tool')),
   operation text not null,
-  entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'communication_event', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'party_contact_point', 'party_address')),
+  entity_type text not null check (entity_type in ('overview', 'category', 'initiative', 'initiative_relation', 'planning_canvas_node', 'task', 'communication_event', 'calendar_entry', 'calendar_event_visibility', 'calendar_source', 'media_asset', 'media_link', 'party', 'person', 'organization', 'relationship_type', 'party_relationship', 'participant_role_type', 'entity_participant', 'lead', 'party_contact_point', 'party_address')),
   entity_id integer,
   category_id integer,
   initiative_id integer,
@@ -604,6 +642,13 @@ create index if not exists idx_party_relationships_type_status on party_relation
 create index if not exists idx_participant_role_types_sort on participant_role_types(sort_order, lower(label), id);
 create index if not exists idx_entity_participants_entity on entity_participants(entity_type, entity_id, is_primary desc, id);
 create index if not exists idx_entity_participants_party on entity_participants(party_id, entity_type, entity_id);
+create index if not exists idx_lead_status_groups_sort on lead_status_groups(sort_order, lower(label), id);
+create index if not exists idx_lead_statuses_group_sort on lead_statuses(group_id, sort_order, lower(label), id);
+create unique index if not exists idx_leads_unique_initiative_party on leads(party_id, initiative_id) where initiative_id is not null;
+create unique index if not exists idx_leads_unique_task_party on leads(party_id, task_id) where task_id is not null;
+create index if not exists idx_leads_initiative_status on leads(initiative_id, status_id, id);
+create index if not exists idx_leads_task_status on leads(task_id, status_id, id);
+create index if not exists idx_leads_party on leads(party_id, id);
 create index if not exists idx_party_contact_points_party_type on party_contact_points(party_id, type, is_preferred desc, is_primary desc, id);
 create index if not exists idx_party_addresses_party on party_addresses(party_id, is_primary desc, id);
 create index if not exists idx_app_chat_messages_created_at on app_chat_messages(created_at, id);

@@ -57,6 +57,10 @@ export type ToolName =
   | "listEntityParticipants"
   | "createEntityParticipant"
   | "deleteEntityParticipant"
+  | "listLeads"
+  | "createLead"
+  | "updateLeadStatus"
+  | "deleteLead"
   | "listPartyContactPoints"
   | "createPartyContactPoint"
   | "updatePartyContactPoint";

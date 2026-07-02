@@ -481,7 +481,8 @@ const OPENCLAW_TOOL_CONTEXT = [
   "- Tasks: listTasks, createTask, updateTask, completeTask, deleteTask. Task status is only open or done. Use primaryPartyId for person/organization-owned measures; use initiativeId for initiative-owned measures; a task can have both.",
   "- Task checklists: listTaskChecklistItems, createTaskChecklistItem, updateTaskChecklistItem, deleteTaskChecklistItem, reorderTaskChecklistItems",
   "- Manual party communication history: listPartyTimelineEntries, createPartyTimelineEntry, updatePartyTimelineEntry, deletePartyTimelineEntry. Use these for past conversations, letters, visits, and notes; use tasks for planned future actions.",
-  "- Media: listMediaAttachments, attachMediaToEntity, updateMediaAttachment, deleteMediaAttachment, reorderMediaAttachments"
+  "- Media: listMediaAttachments, attachMediaToEntity, updateMediaAttachment, deleteMediaAttachment, reorderMediaAttachments",
+  "- Who/CRM: listPeople, getPerson, createPerson, updatePerson, listOrganizations, getOrganization, createOrganization, updateOrganization, listRelationshipTypes, listPartyRelationships, createPartyRelationship, deletePartyRelationship, listLeads, createLead, updateLeadStatus, deleteLead. Use leads for person/organization links to initiatives and tasks; entity participants are calendar-entry attendance only."
 ].join("\n");
 
 function formatMemoryHistory(messages: AppChatMessage[]): string {

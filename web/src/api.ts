@@ -29,6 +29,9 @@ import type {
   Organization,
   OrganizationDetail,
   ParticipantRoleType,
+  Lead,
+  LeadStatus,
+  LeadStatusGroup,
   PartyRelationship,
   RelationshipType,
   Person,
@@ -155,6 +158,17 @@ export async function fetchParticipantRoleTypes(appliesToEntityType?: "initiativ
   return response.participantRoleTypes;
 }
 
+export async function fetchLeadStatusGroups(): Promise<LeadStatusGroup[]> {
+  const response = await request<{ leadStatusGroups: LeadStatusGroup[] }>("/api/config/lead-status-groups");
+  return response.leadStatusGroups;
+}
+
+export async function fetchLeadStatuses(groupId?: number): Promise<LeadStatus[]> {
+  const query = groupId ? `?groupId=${encodeURIComponent(String(groupId))}` : "";
+  const response = await request<{ leadStatuses: LeadStatus[] }>(`/api/config/lead-statuses${query}`);
+  return response.leadStatuses;
+}
+
 export async function fetchRelationshipTypes(): Promise<RelationshipType[]> {
   const response = await request<{ relationshipTypes: RelationshipType[] }>("/api/config/relationship-types");
   return response.relationshipTypes;
@@ -199,6 +213,33 @@ export async function createEntityParticipant(input: {
 
 export async function deleteEntityParticipant(id: number): Promise<void> {
   await request(`/api/entity-participants/${id}`, { method: "DELETE" });
+}
+
+export async function createLead(input: {
+  partyId: number;
+  initiativeId?: number | null;
+  taskId?: number | null;
+  statusId?: number | null;
+}): Promise<Lead> {
+  const response = await request<{ lead: Lead }>("/api/leads", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return response.lead;
+}
+
+export async function updateLeadStatus(id: number, statusId: number): Promise<Lead> {
+  const response = await request<{ lead: Lead }>(`/api/leads/${id}/status`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ statusId })
+  });
+  return response.lead;
+}
+
+export async function deleteLead(id: number): Promise<void> {
+  await request(`/api/leads/${id}`, { method: "DELETE" });
 }
 
 export async function createPartyContactPoint(input: {

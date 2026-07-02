@@ -89,7 +89,8 @@ gmail_mailboxes, gmail_messages, gmail_message_participants,
 gmail_message_party_links, gmail_message_party_visibility, gmail_message_attachments,
 media_assets, media_links,
 parties, people, organizations, relationship_types, party_relationships,
-participant_role_types, entity_participants, party_contact_points, party_addresses,
+participant_role_types, entity_participants, lead_status_groups, lead_statuses,
+leads, party_contact_points, party_addresses,
 app_chat_messages, app_conversations, app_prompt_logs, app_state_events
 ```
 
@@ -116,10 +117,11 @@ stores configured directed or symmetric relationship kinds such as `works_for`,
 `party_relationships` connects people and organizations with optional role
 label, start/end dates, and active/inactive status; symmetric relationships are
 canonicalized by the repository so A-B and B-A do not create duplicate edges.
-`participant_role_types` stores configured roles, and `entity_participants`
-assigns a party to an `initiative`, `task`, or `calendar_entry`; categories are
-not participant targets. Because `entity_participants.entity_id` is polymorphic,
-the repository validates target existence instead of relying on one database FK.
+`lead_status_groups`, `lead_statuses`, and `leads` connect parties to initiatives
+or tasks with a lightweight outreach pipeline status. `entity_participants`
+remains for `calendar_entry` attendance; categories are not participant targets.
+Because `entity_participants.entity_id` is polymorphic, the repository validates
+target existence instead of relying on one database FK.
 `party_contact_points` stores email, phone, WhatsApp, Signal, Telegram,
 LinkedIn, website, and other contact routes with primary/preferred and future
 send/receive flags. These flags are already modeled because contact points are
@@ -142,7 +144,7 @@ relationships in one place.
 Tasks can now be initiative-owned, party-owned, or both: `tasks.initiative_id`
 is nullable and `tasks.primary_party_id` can point at a person or organization
 when the contact/relationship is the primary context of the measure. Additional
-participants still use `entity_participants`. `party_timeline_entries` plus
+initiative/task party links use `leads`. `party_timeline_entries` plus
 `party_timeline_entry_parties` store manually documented communication history
 such as conversations, received/sent letters, visits, and notes; these entries
 are journal/history facts, not a second planning model. Manual entries also
@@ -163,9 +165,8 @@ for people and organizations, including Gmail inbound/outbound counts, manual
 channel counts, party-owned measure totals, contact date bounds, and the next
 open party-owned measure. When requested, organization summaries roll up direct
 organization activity plus active related people and return a compact per-person
-CRM activity list. Task detail `Beteiligte`, person detail, and organization
-detail use this same summary source; full histories remain on party detail
-pages.
+CRM activity list. Task detail `Leads`, person detail, and organization detail
+use this same summary source; full histories remain on party detail pages.
 The organization detail page edits core fields in a header-triggered modal and
 keeps inline editing for name and organization type.
 Contact point rows are executable where possible: email rows open the Gmail
@@ -198,13 +199,14 @@ the Gmail `INBOX` label through `messages.modify`; delete moves the message to
 Gmail trash through `messages.trash`. Local attachment import, global inbox,
 full-text mail search, Gmail push notifications, and durable voice commits are
 not implemented.
-Initiative and task detail pages include a `Beteiligte` panel to add/remove
-people or organizations with configured participant roles plus optional
-free-text role labels. Participant rows can also show the party's primary or
-preferred email contact and active organization relationship context such as a
-person's `works_for` link. Relationship-type editing and calendar-entry
-participant editing are available through API/tools or schema but are not
-first-class browser workflows yet.
+Initiative and task detail pages include a `Leads` panel to add/remove people or
+organizations, show migrated role labels, group by lead status, and change lead
+status inline, in a modal, or by dragging across status groups. Organization
+leads show active related people below the organization; person leads with an
+active organization relationship are grouped under that organization context
+when useful, preserving the former `Beteiligte` relationship view. Calendar-entry
+participant editing is available through API/tools or schema but is not a
+first-class browser workflow yet.
 
 `initiatives.markdown` is required initiative memory. `initiatives.type` segments
 the current technical Initiative object into `idea`, `project`, and `habit`;
@@ -505,8 +507,8 @@ sent, instead of crashing the HTTP response.
   current code and runtime behavior.
 - Tools cover categories, initiatives, initiative relations, initiative
   freestyle mindmaps, tasks, task checklist items, manual party timeline
-  entries, media attachments, people, organizations, party relationships,
-  entity participants, party contact points, and party addresses.
+  entries, media attachments, people, organizations, party relationships, leads,
+  calendar-entry participants, party contact points, and party addresses.
   Initiative tools expose the `type` field for `idea`, `project`, and `habit`,
   `parentId`, `projectPhase` for `type=project`, plus `startDate`/`endDate` for
   time-bounded `type=project` initiatives. Parent/children hierarchy uses
@@ -539,14 +541,14 @@ sent, instead of crashing the HTTP response.
 - Context data is mode-specific and budgeted. Detail contexts include current
   entity memory, category Markdown background, relevant parent/child
   initiative hierarchy, sibling or same-category neighbors, tasks, media, and
-  participants when available. List and overview contexts include compact
+  leads when available. List and overview contexts include compact
   cross-type initiative summaries, category excerpts, task summaries, relation
   summaries, and for `habits` a compact list of life areas without habits.
 - Person and organization detail contexts intentionally do not use a fixed
   total context-data cap for critical relationship work. They emit complete
   local SQLite context for identity/description, active organization people,
   full stored Gmail history, full manual party communication history, all
-  relevant party-owned or participant tasks, and related initiative/task/calendar
+  relevant party-owned or lead-linked tasks, and related initiative/task/calendar
   context. For organizations this includes communication for active related
   people so employee-matched messages are available on the organization page.
   Lower-priority orientation data such as contact points, postal addresses, and
@@ -857,8 +859,8 @@ Implemented behavior:
   parent-project subtitle; header facts are ordered status, priority, due date.
   Due-date editing uses the native date input/picker path as directly as the
   browser allows. Notes/description appear before checklist. Empty checklist and
-  participant states are lightweight. Participant add/link opens in an
-  `EditModal`. Media attachments support upload, clipboard paste,
+  lead states are lightweight. Lead add/link opens in an `EditModal` with a
+  party picker and visible status options. Media attachments support upload, clipboard paste,
   preview/caption/remove controls, and the shared media modal. Checklist items
   can be created, renamed, checked off, deleted, and reordered in the task
   detail view only.
@@ -945,6 +947,8 @@ PATCH /api/organizations/:id
 DELETE /api/organizations/:id
 GET  /api/config/relationship-types
 GET  /api/config/participant-role-types
+GET  /api/config/lead-status-groups
+GET  /api/config/lead-statuses
 GET  /api/party-relationships
 POST /api/party-relationships
 DELETE /api/party-relationships/:id
@@ -952,6 +956,10 @@ GET  /api/entity-participants
 POST /api/entity-participants
 PATCH /api/entity-participants/:id
 DELETE /api/entity-participants/:id
+GET  /api/leads
+POST /api/leads
+PATCH /api/leads/:id/status
+DELETE /api/leads/:id
 GET  /api/party-contact-points
 POST /api/party-contact-points
 PATCH /api/party-contact-points/:id
@@ -1023,6 +1031,11 @@ GET  /api/debug/prompt-templates
 GET  /api/state/events
 POST /api/voice/session
 ```
+
+`POST /api/entity-participants` accepts only `calendar_entry` participants for
+new writes. Initiative and task party links use `/api/leads`; legacy
+initiative/task `entity_participants` rows may remain for rollback/reference but
+the browser and tools no longer create them.
 
 Compatibility: `/api/projects`, `/api/projects/:id`, and
 `/api/projects/order` are still accepted as transitional HTTP aliases for old

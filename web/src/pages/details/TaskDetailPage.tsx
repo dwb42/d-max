@@ -3,9 +3,9 @@ import type { FormEvent, ReactNode } from "react";
 import { CalendarDays, CheckCircle2, Circle, Pencil, Plus, Trash2, X } from "lucide-react";
 import { DescriptionBlock, EditModal, EmptyState, EntityDetailPage, EntityHeader, ErrorState, InlineEditableText, MetadataGrid, SectionBlock } from "../../components/ui/index.js";
 import { fetchPartyActivitySummaries } from "../../api.js";
-import type { Category, Initiative, Organization, OrganizationPersonActivity, ParticipantRoleType, PartyActivitySummary, Person, Task, TaskChecklistItem, TaskDetail } from "../../types.js";
-import { MediaAttachmentsPanel, ParticipantsPanel } from "./SharedDetailPanels.js";
-import { type UpdateTaskInput, datePart, displayInitiativeName, dropAfter, formatDateTimeForUi, formatTaskDueDate, initiativeTypeLabel, moveIdToDropPosition, personName, taskPriorityOptions, taskStatusLabel } from "./detailUtils.js";
+import type { Category, Initiative, Lead, LeadStatus, Organization, OrganizationPersonActivity, PartyActivitySummary, PartyRelationshipWithParties, Person, Task, TaskChecklistItem, TaskDetail } from "../../types.js";
+import { LeadsPanel, MediaAttachmentsPanel } from "./SharedDetailPanels.js";
+import { type UpdateTaskInput, datePart, displayInitiativeName, dropAfter, formatDateTimeForUi, formatTaskDueDate, initiativeTypeLabel, moveIdToDropPosition, taskStatusLabel } from "./detailUtils.js";
 
 export function TaskHeaderTitle(props: {
   task: Task | null;
@@ -26,19 +26,17 @@ export function TaskHeaderTitle(props: {
 export function taskHeaderFacts(
   task: Task,
   onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void>
-): Array<{ label: string; value: ReactNode }> {
+): Array<{ label: string; value: ReactNode; hideLabel?: boolean }> {
   return [
     {
       label: "Status",
-      value: <TaskStatusToggle task={task} onUpdateTask={onUpdateTask} />
-    },
-    {
-      label: "Priorität",
-      value: <TaskPrioritySelect task={task} onUpdateTask={onUpdateTask} />
+      value: <TaskStatusToggle task={task} onUpdateTask={onUpdateTask} />,
+      hideLabel: true
     },
     {
       label: "Fällig",
-      value: <TaskDueDateEditor task={task} onUpdateTask={onUpdateTask} />
+      value: <TaskDueDateEditor task={task} onUpdateTask={onUpdateTask} />,
+      hideLabel: true
     }
   ];
 }
@@ -72,37 +70,26 @@ function TaskStatusToggle(props: {
   );
 }
 
-function TaskPrioritySelect(props: {
-  task: Task;
-  onUpdateTask: (taskId: number, input: UpdateTaskInput) => Promise<void>;
-}) {
-  const [busy, setBusy] = useState(false);
-  async function updatePriority(priority: Task["priority"]) {
-    if (busy || priority === props.task.priority) return;
-    setBusy(true);
-    try {
-      await props.onUpdateTask(props.task.id, { priority });
-    } finally {
-      setBusy(false);
+function taskActivityPartyIds(primaryPartyId: number | null, leads: Lead[]): number[] {
+  const partyIds = new Set<number>();
+  if (primaryPartyId) partyIds.add(primaryPartyId);
+  for (const lead of leads) {
+    partyIds.add(lead.partyId);
+    if (lead.party.type !== "person") continue;
+    for (const relationship of lead.relationships ?? []) {
+      const organizationId = relatedOrganizationPartyId(relationship, lead.partyId);
+      if (organizationId) partyIds.add(organizationId);
     }
   }
+  return [...partyIds];
+}
 
-  return (
-    <label className={`detail-pill-select task-header-control priority ${props.task.priority}`} title="Priorität ändern">
-      <select
-        value={props.task.priority}
-        disabled={busy}
-        aria-label="Priorität"
-        onChange={(event) => void updatePriority(event.target.value as Task["priority"])}
-      >
-        {taskPriorityOptions.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
+function relatedOrganizationPartyId(relationship: PartyRelationshipWithParties, personId: number): number | null {
+  if (relationship.status !== "active") return null;
+  if (!["works_for", "member_of", "founder_of"].includes(relationship.relationshipType.key)) return null;
+  if (relationship.fromPartyId === personId && relationship.toParty.type === "organization") return relationship.toPartyId;
+  if (relationship.toPartyId === personId && relationship.fromParty.type === "organization") return relationship.fromPartyId;
+  return null;
 }
 
 export function TaskDetailView(props: {
@@ -112,16 +99,15 @@ export function TaskDetailView(props: {
   categories: Category[];
   people: Person[];
   organizations: Organization[];
-  participantRoleTypes: ParticipantRoleType[];
-  onCreateParticipant: (input: {
+  leadStatuses: LeadStatus[];
+  onCreateLead: (input: {
     partyId: number;
-    entityType: "initiative" | "task";
-    entityId: number;
-    roleTypeId?: number | null;
-    roleLabel?: string | null;
-    isPrimary?: boolean;
+    initiativeId?: number | null;
+    taskId?: number | null;
+    statusId?: number | null;
   }) => Promise<void>;
-  onDeleteParticipant: (participantId: number) => Promise<void>;
+  onUpdateLeadStatus: (leadId: number, statusId: number) => Promise<void>;
+  onDeleteLead: (leadId: number) => Promise<void>;
   onOpenPerson: (partyId: number) => void;
   onOpenOrganization: (partyId: number) => void;
   onOpenTask?: (taskId: number) => void;
@@ -139,28 +125,20 @@ export function TaskDetailView(props: {
   const [moveProjectModalOpen, setMoveProjectModalOpen] = useState(false);
   const [activitySummaries, setActivitySummaries] = useState<Record<number, PartyActivitySummary>>({});
   const [organizationPeopleActivity, setOrganizationPeopleActivity] = useState<Record<number, OrganizationPersonActivity[]>>({});
+  const activityPartyIds = props.detail
+    ? taskActivityPartyIds(props.detail.task.primaryPartyId, props.detail.leads ?? [])
+    : [];
 
-  const summaryPartyKey = props.detail
-    ? [
-        props.detail.task.primaryPartyId,
-        ...(props.detail.participants ?? []).map((participant) => participant.partyId)
-      ].filter(Boolean).join(":")
-    : "";
+  const summaryPartyKey = activityPartyIds.join(":");
 
   useEffect(() => {
-    const partyIds = props.detail
-      ? [
-          props.detail.task.primaryPartyId,
-          ...(props.detail.participants ?? []).map((participant) => participant.partyId)
-        ].filter((partyId): partyId is number => Boolean(partyId))
-      : [];
-    if (partyIds.length === 0) {
+    if (activityPartyIds.length === 0) {
       setActivitySummaries({});
       setOrganizationPeopleActivity({});
       return;
     }
     let cancelled = false;
-    fetchPartyActivitySummaries(partyIds, { includeOrganizationPeople: true })
+    fetchPartyActivitySummaries(activityPartyIds, { includeOrganizationPeople: true })
       .then((response) => {
         if (cancelled) return;
         setActivitySummaries(Object.fromEntries(response.summaries.map((summary) => [summary.partyId, summary])));
@@ -197,24 +175,8 @@ export function TaskDetailView(props: {
 
   const { task, initiative, category } = props.detail;
   const checklistItems = props.detail.checklistItems ?? [];
-  const participants = props.detail.participants ?? [];
+  const leads = props.detail.leads ?? [];
   const mediaAttachments = props.detail.mediaAttachments ?? [];
-  const primaryPerson = task.primaryPartyId ? props.people.find((person) => person.id === task.primaryPartyId) ?? null : null;
-  const primaryOrganization = !primaryPerson && task.primaryPartyId ? props.organizations.find((organization) => organization.id === task.primaryPartyId) ?? null : null;
-  const primaryContext = primaryPerson ? {
-    partyId: primaryPerson.id,
-    partyType: "person" as const,
-    displayName: personName(primaryPerson),
-    meta: "Primär · Personenmaßnahme",
-    detail: "Diese Maßnahme hängt direkt an dieser Person."
-  } : primaryOrganization ? {
-    partyId: primaryOrganization.id,
-    partyType: "organization" as const,
-    displayName: primaryOrganization.displayName,
-    meta: "Primär · Organisationsmaßnahme",
-    detail: "Diese Maßnahme hängt direkt an dieser Organisation."
-  } : null;
-
   const currentCategoryId = category?.id ?? null;
   const moveProjectCandidates = props.projects
     .filter((project) => project.type === "project" && project.id !== task.initiativeId && project.status !== "archived")
@@ -264,20 +226,18 @@ export function TaskDetailView(props: {
     <>
       <EntityDetailPage className="task-detail" aside={aside}>
         <TaskNotesPanel task={task} onUpdateTask={props.onUpdateTask} />
-        <ParticipantsPanel
+        <LeadsPanel
           entityType="task"
           entityId={task.id}
-          participants={participants}
+          leads={leads}
+          leadStatuses={props.leadStatuses}
           people={props.people}
           organizations={props.organizations}
-          roleTypes={props.participantRoleTypes}
-          primaryContext={primaryContext}
           activitySummaries={activitySummaries}
           organizationPeopleActivity={organizationPeopleActivity}
-          surface="section"
-          createMode="modal"
-          onCreateParticipant={props.onCreateParticipant}
-          onDeleteParticipant={props.onDeleteParticipant}
+          onCreateLead={props.onCreateLead}
+          onUpdateLeadStatus={props.onUpdateLeadStatus}
+          onDeleteLead={props.onDeleteLead}
           onOpenPerson={props.onOpenPerson}
           onOpenOrganization={props.onOpenOrganization}
           onOpenTask={props.onOpenTask}
